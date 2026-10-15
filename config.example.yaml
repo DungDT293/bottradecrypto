@@ -1,0 +1,76 @@
+# ==============================================================================
+# CAU HINH HE THONG TELEGRAM BINANCE SIGNAL EXECUTOR
+# ==============================================================================
+
+# Che do van hanh: READ_ONLY (mac dinh), PAPER, TESTNET, LIVE
+mode: READ_ONLY
+
+# Khoa an toan Live (bat buoc true moi cho phep dat lenh tren Live)
+live_trading_enabled: false
+
+# Thu muc du lieu va DB
+data_dir: "./data"
+database_file: "./data/trading_state.db"
+
+# Telegram MTProto User Settings
+telegram:
+  session_name: "./data/telegram_user"
+  # Danh sach chat_id duoc phep nhan tin hieu (dung lenh `list-chats` de lay id)
+  allowed_chat_ids: []
+  # Bo qua tin nhan cu hon N giay khi ket noi lai
+  reconnect_max_backlog_seconds: 300
+  # Bo qua tin co noi dung chua command / code / link doc hai
+  sanitize_input: true
+
+# Binance Futures (USD-M USDT-Margined Perpetual) Settings
+binance:
+  testnet_base_url: "https://testnet.binancefuture.com"
+  live_base_url: "https://fapi.binance.com"
+  recv_window: 5000
+  request_timeout_seconds: 10
+  max_retries: 3
+  # Endpoint dac thu cho Conditional / Algo orders (STOP_MARKET, TAKE_PROFIT_MARKET)
+  algo_order_endpoint: "/fapi/v1/algoOrder"
+  standard_order_endpoint: "/fapi/v1/order"
+
+# Chinh sach quan ly rui ro (Preset khoi dau - can nguoi dung duyet truoc khi chay live)
+risk:
+  risk_per_signal_pct: 0.5        # Phan tram equity chap nhan mat den SL cho 1 tin hieu
+  max_total_open_risk_pct: 2.0    # Tong phan tram equity chap nhan rui ro cua tat ca lenh dang mo
+  max_daily_loss_pct: 3.0         # Gioi han lo toi da trong ngay (Asia/Ho_Chi_Minh)
+  max_active_signals: 2           # So tin hieu hoat dong toi da cung luc
+  default_leverage: 3             # Don bay mac dinh neu tin khong ghi hoac vuot policy
+  max_leverage: 5                 # Don bay toi da he thong cho phep
+  margin_mode: "ISOLATED"         # Bat buoc ISOLATED
+  signal_max_age_seconds: 300     # Bo qua tin neu thoi diem nhan cach luc phat > 300s
+  entry_order_ttl_seconds: 900    # Tu dong huy Limit entry sau 15 phut neu chua khop
+  breakeven_after_tp1_default: false  # Mac dinh khong bat buoc BE sau TP1 tru khi co policy
+  fee_buffer_pct: 0.1             # Du phong phi giao dich (0.05% maker/taker * 2)
+  slippage_buffer_pct: 0.1        # Du phong truot gia khi SL kich hoat
+
+# Chinh sach thuc thi mac dinh (Execution Policies)
+execution:
+  # Chinh sach cho nhieu entry khi tin hieu khong ghi trong so:
+  # EQUAL_QUANTITY, EQUAL_NOTIONAL, EQUAL_RISK, HOAC NEEDS_POLICY (chan de hoi)
+  multi_entry_default_weight_mode: "NEEDS_POLICY"
+  
+  # Chinh sach cho vung entry (range, vd: 3.20 - 3.25):
+  # MID_POINT, BEST_PRICE, SPLIT_2_LIMITS, HOAC NEEDS_POLICY
+  entry_range_policy: "NEEDS_POLICY"
+  
+  # Chinh sach cho nhieu TP khi tin hieu khong ghi ty le:
+  # EQUAL_SPLIT, FRONT_LOADED_50_30_20, HOAC NEEDS_POLICY
+  multi_tp_default_weight_mode: "NEEDS_POLICY"
+
+  # Chinh sach khi SL cach entry qua gan hoac qua xa:
+  min_sl_distance_pct: 0.2
+  max_sl_distance_pct: 30.0
+
+  # Fail-safe emergency close timeout khi entry fill ma SL bi tu choi (seconds)
+  sl_failure_emergency_close_timeout_seconds: 5
+
+# Thong bao (Tach biet khoi execution core)
+notifications:
+  console_logging: true
+  log_level: "INFO"
+  telegram_notification_enabled: false
