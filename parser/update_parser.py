@@ -27,7 +27,17 @@ class ChannelUpdateParser:
             return UpdateType.MOVE_SL_TO_BREAKEVEN, None, "Yeu cau doi SL ve hoa von"
 
         # 2. Cancel pending entry
-        if re.search(r"\b(?:cancel\s+(?:entry|limit|pending|order)|hủy\s*(?:lệnh|entry|pending)|huy\s*(?:lenh|entry|pending))\b", cleaned, re.IGNORECASE):
+        if re.search(
+            r"\b(?:cancel\s*(?:entry|limit|pending|order|trade|kèo|keo|lệnh|lenh|all|hết|het)?|"
+            r"hủy\s*(?:lệnh|entry|pending|kèo|keo|hết|het|nhé|nhe|bỏ)?|"
+            r"huy\s*(?:lenh|entry|pending|keo|het|nhe|bo)?|"
+            r"bỏ\s*(?:kèo|keo|lệnh|lenh|nhé|nhe)?|"
+            r"bo\s*(?:keo|lenh|nhe)?|"
+            r"xóa\s*(?:lệnh|lenh)?|"
+            r"xoa\s*(?:lenh)?)\b",
+            cleaned,
+            re.IGNORECASE,
+        ):
             return UpdateType.CANCEL_PENDING_ENTRY, None, "Yeu cau huy pending entry"
 
         # 3. Close All
@@ -41,17 +51,51 @@ class ChannelUpdateParser:
             return UpdateType.CLOSE_PARTIAL, pct, f"Yeu cau dong mot phan {pct}%"
 
         # 5. Result reports (Admin boasting or reporting)
-        if re.search(r"\b(?:tp\d*\s*hit|target\s*\d*\s*(?:hit|achieved|done)|take\s+profit\s*hit)\b", cleaned, re.IGNORECASE):
-            return UpdateType.RESULT_TP_REPORTED, None, "Admin bao TP da cham (KHONG coi day la fill thuc te tai khoan)"
+        if re.search(
+            r"\b(?:tp\d*\s*hit|target\s*\d*\s*(?:hit|achieved|done)|take\s+profit\s*(?:hit|achieved|done)|vip\s*winner|massive\s*gain|trade\s*result|target\s*achieved)\b",
+            cleaned,
+            re.IGNORECASE,
+        ):
+            return UpdateType.RESULT_TP_REPORTED, None, "Admin bao TP da cham / khoe lai VIP (KHONG coi day la fill thuc te tai khoan)"
 
         if re.search(r"\b(?:sl\s*hit|stop\s*loss\s*hit|dính\s*sl|dinh\s*sl)\b", cleaned, re.IGNORECASE):
             return UpdateType.RESULT_SL_REPORTED, None, "Admin bao SL da cham"
 
-        # 6. Signal corrections
-        if re.search(r"\b(?:wrong\s*signal|correction|đính\s*chính|dinh\s*chinh|sorry\s*mistyped|nhầm\s*hướng|nham\s*huong)\b", cleaned, re.IGNORECASE):
+        # 6. VIP promotional lures / bait messages
+        if re.search(
+            r"\b(?:join\s*our\s*premium|join\s*vip|vip\s*membership|dm\s*for\s*vip|lifetime\s*vip|vip\s*access|only\s*first\s*\d+\s*can\s*join|pay\s*first\s*and\s*hope|contact\s*admin\s*for\s*vip|vip\s*winner|dm\s*to\s*join)\b",
+            cleaned,
+            re.IGNORECASE,
+        ):
+            return UpdateType.COMMENTARY, None, "Tin nhan cau keo / quang cao nhom VIP (Bo qua hoan toan)"
+
+        # 7. Signal corrections (Admin mistakes / wrong signals)
+        if re.search(
+            r"\b(?:wrong\s*signal|correction|đính\s*chính|dinh\s*chinh|sorry\s*mistyped|sorry|"
+            r"gửi\s*nhầm|gui\s*nham|nhầm\s*(?:hướng|huong|lệnh|lenh|kèo|keo|giá|gia|coin|nhé|nhe|rồi|roi)?|"
+            r"nham\s*(?:huong|lenh|keo|gia|coin|nhe|roi)?|"
+            r"lộn\s*(?:kèo|keo|hướng|huong|lệnh|lenh)?|"
+            r"lon\s*(?:keo|huong|lenh)?)\b",
+            cleaned,
+            re.IGNORECASE,
+        ):
             return UpdateType.CORRECT_SIGNAL, None, "Admin bao tin nhan bi nham (KHONG coi day la dao chieu vi the)"
 
-        # 7. SL change with new price
+        # 8. Entry change with new price (Must be an update: new entry, doi entry, sua entry, update entry)
+        if not re.search(r"\b(?:sl|stop\s*loss|tp\d*|target\s*\d*)\b", cleaned, re.IGNORECASE):
+            m_entry = re.search(
+                r"(?:new\s*entry|entry\s*(?:updated\s*to|to|\-\>)|đổi\s*entry\s*(?:về|thành|\:)?|doi\s*entry\s*(?:ve|thanh|\:)?|sửa\s*entry\s*(?:thành|\:)?|sua\s*entry\s*(?:thanh|\:)?|update\s*entry)\s*[:\-\>\s]*\$?([\d\.]+)",
+                cleaned,
+                re.IGNORECASE,
+            )
+            if m_entry:
+                try:
+                    new_entry = Decimal(m_entry.group(1))
+                    return UpdateType.ENTRY_CHANGE, new_entry, f"Doi Entry sang muc moi: {new_entry}"
+                except InvalidOperation:
+                    pass
+
+        # 9. SL change with new price
         m_sl = re.search(r"(?:new\s*sl|sl\s*(?:to|updated\s*to|\=|\:)|dời\s*sl\s*về|doi\s*sl\s*ve)\s*[:\-\>\s]*\$?([\d\.]+)", cleaned, re.IGNORECASE)
         if m_sl:
             try:

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "telegram-binance-signal-executor",
+  "version": "1.1.7",
+  "identifier": "com.bottradecrypto.executor",
+
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Telegram Binance Signal Executor - Dashboard Quản Lý",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": true,
+        "focus": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "config.yaml",
+      ".env"
+    ],
+    "externalBin": [
+      "binaries/backend"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

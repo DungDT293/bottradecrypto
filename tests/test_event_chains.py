@@ -235,3 +235,53 @@ def test_scenario_12_old_signal_sl_edit_differentiated_ttl():
     # For an edit event, age check uses edit_date:
     edit_age = (now_utc - edit_date).total_seconds()
     assert edit_age <= 300  # Within 300s window -> Allowed!
+
+
+# Scenario 13: Admin huy keo bang cac tu khoa tieng Viet va quoc te
+def test_scenario_13_cancellation_keywords():
+    parser = ChannelUpdateParser()
+    samples = [
+        "Hủy kèo",
+        "huy keo anh em oi",
+        "Bỏ kèo này nhé",
+        "Cancel kèo",
+        "cancel order",
+        "Hủy lệnh vừa rồi",
+        "Hủy nhé",
+        "cancel pending",
+        "Cancel all",
+    ]
+    for s in samples:
+        up_type, _, _ = parser.parse_update(s)
+        assert up_type == UpdateType.CANCEL_PENDING_ENTRY, f"Failed for '{s}'"
+
+
+# Scenario 14: Admin gui nham, dinh chinh, lon keo
+def test_scenario_14_wrong_signal_and_correction():
+    parser = ChannelUpdateParser()
+    samples = [
+        "Sorry mọi người, gửi nhầm nhé",
+        "Nhầm hướng rồi ae",
+        "Đính chính kèo vừa rồi",
+        "Wrong signal! Please ignore",
+        "Lộn kèo rồi anh em",
+        "nhầm lệnh",
+    ]
+    for s in samples:
+        up_type, _, _ = parser.parse_update(s)
+        assert up_type == UpdateType.CORRECT_SIGNAL, f"Failed for '{s}'"
+
+
+# Scenario 15: Admin sua doi gia vao (Entry update)
+def test_scenario_15_entry_change_update():
+    parser = ChannelUpdateParser()
+    samples = [
+        ("New entry: 0.1260", Decimal("0.1260")),
+        ("Đổi entry về: 0.0485", Decimal("0.0485")),
+        ("Sửa entry thành 2550", Decimal("2550")),
+        ("update entry: 1.680", Decimal("1.680")),
+    ]
+    for text, expected_val in samples:
+        up_type, val, _ = parser.parse_update(text)
+        assert up_type == UpdateType.ENTRY_CHANGE, f"Failed for '{text}'"
+        assert val == expected_val, f"Expected {expected_val}, got {val}"

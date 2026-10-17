@@ -23,6 +23,27 @@ Hệ thống tự động tiếp nhận tín hiệu giao dịch từ các nhóm/
 
 ```
 telegram_binance_signal_executor/
+├── desktop/                   # Desktop App Shell (Tauri v2 + React + TypeScript)
+│   ├── src/                   # React Frontend Source
+│   │   ├── components/        # Sidebar, Header, ConfirmModal, Toast
+│   │   ├── context/           # AppContext (real-time state & telemetry)
+│   │   ├── pages/             # 10 Trang quản lý chuyên biệt (Overview, Connections, ...)
+│   │   ├── services/          # HTTP API client, WebSocket stream client, BackendBridge
+│   │   └── types/             # TypeScript definitions cho models & responses
+│   └── src-tauri/             # Rust Process Supervisor (Tauri 2.12)
+│       ├── src/lib.rs         # Khởi động child process, handshake file, kill on exit
+│       └── tauri.conf.json    # Cấu hình cửa sổ 1280x820, quyền hạn & bảo mật
+├── backend/                   # Python FastAPI Backend Layer
+│   ├── api/                   # Router endpoints & Middleware xác thực Session Token
+│   ├── events/                # EventBus & WebSocket pub/sub
+│   ├── runtime/               # Handshake manager, port discovery, Uvicorn server
+│   └── launcher.py            # CLI entrypoint khởi chạy backend độc lập hoặc qua Tauri
+├── services/                  # Application Services Layer (Clean Architecture)
+│   ├── telegram_service.py    # Quản lý MTProto connection, dialogs, history collection
+│   ├── binance_service.py     # Đồng bộ số dư ký quỹ, vị thế, kiểm tra One-Way
+│   ├── trading_service.py     # Trạng thái engine, signals, protection status
+│   ├── stats_service.py       # PnL (00:00 Asia/Ho_Chi_Minh), win rate, telemetry
+│   └── alert_service.py       # Hệ thống cảnh báo INFO/WARNING/CRITICAL chống spam
 ├── config/
 │   ├── config.py              # Pydantic Settings & YAML loader
 │   ├── policy_defaults.py     # Schema và giá trị mặc định cho Risk & Execution
@@ -34,6 +55,7 @@ telegram_binance_signal_executor/
 ├── parser/
 │   ├── normalizer.py          # Xử lý Unicode NFKC, emoji keycaps, triệt tiêu mã độc/link
 │   ├── signal_parser.py       # Parser tất định, bám sát nguồn dữ liệu (FieldSource)
+│   ├── update_parser.py       # Phân tích 13 loại bản tin hành chính Telegram
 │   └── validator.py           # Kiểm tra logic ngữ nghĩa (SL/TP vs Entry, khoảng cách SL)
 ├── risk/
 │   ├── risk_engine.py         # Phân bổ khối lượng theo equity, dự phòng phí & trượt giá, chặn lỗ ngày
@@ -54,8 +76,8 @@ telegram_binance_signal_executor/
 │   ├── client.py              # Telethon client bọc an toàn read-only
 │   └── listener.py            # Lắng nghe tin nhắn mới & chỉnh sửa, chống trùng lặp
 ├── cli/
-│   └── main.py                # Điểm vào dòng lệnh (telegram-login, list-chats, listen...)
-├── tests/                     # 30 bài kiểm thử đơn vị và tích hợp (100% PASS)
+│   └── main.py                # Điểm vào dòng lệnh (gui, telegram-login, list-chats...)
+├── tests/                     # 55 bài kiểm thử đơn vị, dịch vụ và UI (100% PASS)
 ├── DOCUMENTATION_BINANCE_API.md
 ├── POLICY_SPECIFICATION.md
 ├── requirements.txt
@@ -141,13 +163,16 @@ telegram_binance_signal_executor/
 
 | Lệnh | Ý nghĩa |
 | :--- | :--- |
+| `python app_gui.py` hoặc `python -m cli.main gui` | **Khởi chạy giao diện Desktop App PySide6** |
 | `python -m cli.main telegram-login` | Đăng nhập tài khoản Telegram MTProto tại local |
 | `python -m cli.main list-chats` | Hiển thị danh sách nhóm/kênh và Chat ID để cấu hình allowlist |
 | `python -m cli.main parse-samples` | Phân tích 9 mẫu tín hiệu thực tế và hiển thị báo cáo |
 | `python -m cli.main doctor` | Chẩn đoán toàn diện hệ thống (Python, DB, Config, API keys) |
 | `python -m cli.main status` | Xem trạng thái hệ thống, số tin nhắn, các lệnh/vị thế đang mở |
 | `python -m cli.main listen` | Khởi động trình lắng nghe tín hiệu Telegram |
+| `python -m cli.main collect-history` | Thu thập lịch sử đọc tin nhắn từ kênh Telegram (giới hạn 7 ngày, max 1000 tin) |
 | `python -m cli.main export-history` | Xuất lịch sử tín hiệu và cập nhật ra file JSON |
+| `python -m cli.main export-report` | Xuất báo cáo audit timeline và các bất thường ra Markdown |
 | `python -m cli.main offline-replay` | Giả lập phát lại offline chuỗi sự kiện tin nhắn & cập nhật |
 | `python -m cli.main shadow-mode` | Chạy ngầm quan sát tín hiệu thị trường thực tế không đặt lệnh |
 | `python -m cli.main testnet-check` | Kiểm tra kết nối và quyền hạn API trên Binance Testnet |
@@ -228,11 +253,13 @@ Hệ thống hỗ trợ 4 chế độ qua tham số `mode` trong `config.yaml`:
 ## 9. BÁO CÁO KẾT QUẢ KIỂM THỬ THỰC TẾ
 
 Toàn bộ kiểm thử được chạy bằng `pytest`:
-- **Tổng số test:** 49/49 PASSED (100%).
-- **Thời gian chạy:** ~4.58s.
+- **Tổng số test:** 55/55 PASSED (100%).
+- **Thời gian chạy:** ~4.63s.
 
 ### Phân loại phạm vi kiểm thử:
-- **Offline / Mock Testing (Đã kiểm thử toàn diện 49/49 PASS):**
+- **Offline / Mock & Service Testing (Đã kiểm thử toàn diện 55/55 PASS):**
+  - Application Services (`StatsService` múi giờ Asia/Ho_Chi_Minh mốc 00:00, `AlertService` chống spam, `TradingService` kiểm tra bảo vệ SL, `BinanceService` đọc an toàn, `TelegramService` che thông tin nhạy cảm).
+  - PySide6 UI Pages (khởi tạo 10 màn hình, layout và signal wiring off-screen không lỗi).
   - Parser logic (9/9 mẫu tin nhắn, Unicode NFKC, injection sanitization, edge cases).
   - Risk engine (tính size theo rủi ro equity, phí, trượt giá, chặn lỗ ngày).
   - State machine (chuyển đổi 12 trạng thái hợp lệ & chặn chuyển đổi phi logic).
@@ -241,7 +268,7 @@ Toàn bộ kiểm thử được chạy bằng `pytest`:
   - Complex Event Chains (Happy path, Admin TP1 notification vs actual fill, pending entry cancel, partial fill cancel, reversal prevention, SL widening rejection, duplicate coin review, recursive reply linking, orphaned state reconciliation, idempotent algo order IDs, deleted message safety).
 - **Live Network Testing (CHƯA CHẠY THẬT / BẢO VỆ MẶC ĐỊNH):**
   - Môi trường live chưa gửi bất kỳ lệnh thật nào (`live_trading_enabled: false`, `mode: READ_ONLY`).
-  - Giao tiếp sàn thật chỉ được kích hoạt khi người dùng cung cấp API Key hợp lệ và chạy lệnh chẩn đoán `python -m cli.main testnet-check` hoặc chuyển mode có chủ đích.
+  - Giao tiếp sàn thật chỉ được kích hoạt khi người dùng cung cấp API Key hợp lệ và chạy lệnh chẩn đoán `testnet-check` hoặc chuyển mode có chủ đích.
 
 ```
 tests/test_binance_adapter_mock.py::test_error_4120_when_stop_market_sent_to_standard_endpoint PASSED
@@ -291,7 +318,73 @@ tests/test_risk_engine.py::test_calculate_position_size_multi_entry_worst_case P
 tests/test_risk_engine.py::test_reject_when_exceeds_max_total_open_risk PASSED
 tests/test_risk_engine.py::test_reject_when_notional_below_min_notional PASSED
 tests/test_risk_engine.py::test_daily_loss_limit PASSED
+tests/test_backend_api.py::test_health_check_no_auth_required PASSED
+tests/test_backend_api.py::test_auth_rejection_missing_or_invalid_token PASSED
+tests/test_backend_api.py::test_snapshot_with_valid_token PASSED
+tests/test_backend_api.py::test_read_only_strictly_blocks_write_operations PASSED
+tests/test_backend_api.py::test_settings_get_and_update PASSED
+tests/test_backend_api.py::test_websocket_auth PASSED
 tests/test_state_machine.py::test_valid_state_transitions PASSED
 tests/test_state_machine.py::test_invalid_state_transition_is_rejected PASSED
+============================= 61 passed in 6.81s =============================
 ```
+
+---
+
+## 10. HƯỚNG DẪN KHỞI CHẠY DESKTOP APP (TAURI + REACT)
+
+### A. Yêu cầu môi trường
+- **Python:** 3.11+
+- **Node.js:** v18+ (Đã xác minh v24.13.0, npm 11.6.2)
+- **Rust & Cargo:** 1.80+ (Đã xác minh v1.94.0 x86_64-pc-windows-msvc)
+- **Tauri CLI:** v2 (Đã xác minh v2.12.3)
+
+### B. Chạy Desktop App trong môi trường phát triển (Dev Mode)
+```powershell
+# Chạy toàn bộ ứng dụng Tauri (tự động khởi động Vite dev server và Rust supervisor)
+cd desktop
+npm.cmd run tauri dev
+```
+
+### C. Chạy giao diện Web Frontend độc lập (Browser Dev)
+```powershell
+# Bước 1: Khởi động backend Python
+python -m backend.launcher --port 8000
+
+# Bước 2: Khởi động React Web Frontend
+cd desktop
+npm.cmd run dev
+```
+Truy cập: `http://localhost:5173`
+
+### D. Biên dịch ứng dụng Desktop độc lập (Production Build) & Tạo Installer NSIS
+```powershell
+# 1. Build bundle React frontend
+cd desktop
+npm run build
+
+# 2. Đóng gói Backend nhị phân độc lập
+cd ..
+pyinstaller --clean -y backend-x86_64-pc-windows-msvc.spec
+copy dist\backend-x86_64-pc-windows-msvc.exe desktop\src-tauri\binaries\
+
+# 3. Đóng gói bộ cài đặt Windows NSIS Setup (.exe)
+cd desktop\src-tauri
+cargo tauri build --bundles nsis
+```
+- **Tệp cài đặt đầu ra:** `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.1.7_x64-setup.exe`
+- **Tệp thực thi độc lập:** `desktop/src-tauri/target/release/app.exe`
+
+---
+
+## 11. NHẬT KÝ PHIÊN BẢN (CHANGELOG v1.1.7)
+
+- **Single-entry Target Parser:** Khắc phục lỗi bóc tách khi tín hiệu chỉ có 1 mức entry dạng `Entry Targets: 1) 0.1160`.
+- **Dynamic Auto-Entry:** Tự động bắt lệnh đón ngay khi giá thị trường tốt hơn hoặc bằng giá entry admin đưa ra.
+- **Phân bổ Multi-TP (60% / 26% / 14%):** Tự động chia tỷ trọng khối lượng 3 bậc chốt lời, dời Stop Loss về Breakeven (Hòa vốn) ngay khi khớp TP1.
+- **Tối ưu Rate Limiter Binance (2000 weight/phút):** Tách luồng ưu tiên cao nhất cho endpoint đặt lệnh `/order` và `/algoOrder`.
+- **Self-Healing Reconciliation:** Tự động phát hiện vị thế mở và đối chiếu lệnh sàn, ngăn chặn tình trạng đặt lặp lệnh Stop Loss khi khởi động lại.
+- **Bộ cài đặt NSIS v1.1.7:** Đóng gói file cài đặt tự động `telegram-binance-signal-executor_1.1.7_x64-setup.exe` và phím tắt Desktop tiện lợi.
+
+
 

@@ -107,7 +107,18 @@ class RiskEngine:
             slippage = qty * signal.stop_loss * (self.config.risk.slippage_buffer_pct / Decimal("100"))
             actual_risk_total += loss_to_sl + fees + slippage
 
-        if actual_risk_total > signal_risk_budget * Decimal("1.05"):  # 5% tolerance max from rounding
+        # If slightly over budget tolerance due to notional fees, step down qty until compliant
+        max_allowed_risk = signal_risk_budget * Decimal("1.05")
+        while actual_risk_total > max_allowed_risk and any(q > min_qty for p, q in entry_results):
+            entry_results = [(p, max(min_qty, q - step_size)) for p, q in entry_results]
+            actual_risk_total = sum(
+                q * abs(p - signal.stop_loss) +
+                q * p * (self.config.risk.fee_buffer_pct / Decimal("100")) +
+                q * signal.stop_loss * (self.config.risk.slippage_buffer_pct / Decimal("100"))
+                for p, q in entry_results
+            )
+
+        if actual_risk_total > max_allowed_risk:
             raise RiskCheckError(
                 f"Rui ro sau lam tron ({actual_risk_total:.2f} USDT) vuot ngan sach ({signal_risk_budget:.2f} USDT)"
             )

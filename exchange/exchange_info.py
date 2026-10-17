@@ -40,8 +40,9 @@ def parse_symbol_info(symbol_data: Dict[str, Any]) -> SymbolFilterInfo:
             step_size = Decimal(f.get("stepSize", "0.001"))
             min_qty = Decimal(f.get("minQty", "0.001"))
             max_qty = Decimal(f.get("maxQty", "1000000"))
-        elif f_type == "MIN_NOTIONAL":
-            min_notional = Decimal(f.get("notional", "5.0"))
+        elif f_type in ["MIN_NOTIONAL", "NOTIONAL"]:
+            val = f.get("notional") or f.get("minNotional") or "20.0"
+            min_notional = Decimal(str(val))
 
     return SymbolFilterInfo(
         symbol=symbol,

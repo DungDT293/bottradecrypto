@@ -31,8 +31,14 @@ def normalize_text(text: str) -> str:
     # Standardize various hyphens/dashes to standard '-'
     text = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u2043]", "-", text)
 
+    # Standardize various unicode arrows to '->'
+    text = re.sub(r"[\u2190-\u21ff\u2790-\u27bf\u25b6\u25b7]", "->", text)
+
     # Neutralize markdown links: [Link text](http://...) -> Link text
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+
+    # Strip telegram markdown bold/underline formatting tokens (**, __)
+    text = re.sub(r"(\*\*+|__+)", " ", text)
 
     # Strip plain raw urls (http://... or https://...)
     text = re.sub(r"https?://\S+", "", text)

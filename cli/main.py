@@ -246,10 +246,218 @@ def cmd_offline_replay(args):
 
 def cmd_shadow_mode(args):
     """CLI: shadow-mode - Listens and logs simulated execution without touching exchange"""
+    print("\n" + "=" * 60)
+    print("KHOI DONG SHADOW MODE (CHE DO BONG QUAN SAT)")
+    print("Cam ket an toan: Khong ket noi write den Binance, khong gui lenh san.")
+    print("Moi tin hieu va cap nhat chi duoc danh gia va de xuat co dieu kien.")
+    print("=" * 60 + "\n")
+    cmd_listen(args, is_shadow=True)
+
+
+def cmd_collect_history(args):
+    """CLI: collect-history - Collects up to N messages from last M days from a single channel"""
+    import json
+    from parser.normalizer import normalize_text
+    from parser.update_parser import ChannelUpdateParser
+    from core.enums import UpdateType
+
     config = load_config(args.config)
-    config.mode = ExecutionMode.READ_ONLY
-    print("\n[KHOI DONG SHADOW MODE] Chay listener che do bong (danh gia tin hieu ma khong cham vao san)...")
-    cmd_listen(args)
+    chat_id = args.chat_id
+    limit = args.limit
+    days = args.days
+    output = args.output or f"./data/telegram_history_{chat_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    checkpoint_file = args.checkpoint or f"./data/checkpoint_{chat_id}.json"
+
+    print("=" * 60)
+    print(f"THU THAP LICH SU TELEGRAM READ-ONLY (GIOI HAN)")
+    print(f"- Chat ID: {chat_id}")
+    print(f"- Gioi han: {limit} tin gan nhat trong vong {days} ngay")
+    print(f"- Checkpoint file: {checkpoint_file}")
+    print(f"- Output file: {output}")
+    print("=" * 60)
+
+    min_id = 0
+    if os.path.exists(checkpoint_file):
+        try:
+            with open(checkpoint_file, "r", encoding="utf-8") as f:
+                cp_data = json.load(f)
+                min_id = cp_data.get("last_msg_id", 0)
+                print(f"[CHECKPOINT] Tim thay checkpoint: tiep tuc tu Msg ID > {min_id}")
+        except Exception:
+            pass
+
+    def save_checkpoint(last_id: int, count: int):
+        os.makedirs(os.path.dirname(os.path.abspath(checkpoint_file)), exist_ok=True)
+        try:
+            with open(checkpoint_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "chat_id": chat_id,
+                    "last_msg_id": last_id,
+                    "count": count,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }, f, indent=2)
+        except Exception:
+            pass
+
+    client_wrapper = TelegramUserClient(config)
+    parser = SignalParser()
+    update_parser = ChannelUpdateParser()
+    validator = SignalValidator(config)
+
+    async def _collect():
+        messages = await client_wrapper.collect_channel_history(
+            chat_id=chat_id,
+            limit=limit,
+            max_days=days,
+            min_id=min_id,
+            checkpoint_callback=save_checkpoint,
+        )
+
+        print(f"\n[DA THU THAP] Tong so tin nhan tai ve: {len(messages)}")
+
+        collected_signals = []
+        collected_updates = []
+        unrecognized = []
+
+        for m in messages:
+            raw = m["raw_text"]
+            if not raw.strip():
+                continue
+
+            normalized = normalize_text(raw)
+            meta = SourceMetadata(
+                chat_id=chat_id,
+                message_id=m["message_id"],
+                sender_id=m["sender_id"],
+                telegram_timestamp=datetime.fromisoformat(m["date"]) if m["date"] else datetime.utcnow(),
+                received_at=datetime.utcnow(),
+                is_edit=bool(m["edit_date"]),
+                edit_timestamp=datetime.fromisoformat(m["edit_date"]) if m["edit_date"] else None,
+            )
+
+            # Check update
+            up_type, up_val, detail = update_parser.parse_update(normalized)
+            if up_type != UpdateType.UNKNOWN:
+                collected_updates.append({
+                    "message_id": m["message_id"],
+                    "date": m["date"],
+                    "type": up_type.value,
+                    "detail": detail,
+                    "reply_to": m["reply_to_msg_id"],
+                })
+                continue
+
+            # Parse signal
+            parsed = parser.parse(raw, meta)
+            if parsed.symbol_candidate or parsed.entries:
+                parsed, validated = validator.validate_and_resolve(parsed)
+                collected_signals.append({
+                    "message_id": m["message_id"],
+                    "date": m["date"],
+                    "symbol": parsed.symbol_candidate or parsed.symbol_raw,
+                    "side": parsed.side.value if parsed.side else None,
+                    "entries": [str(e) for e in parsed.entries],
+                    "stop_loss": str(parsed.stop_loss) if parsed.stop_loss else None,
+                    "tp_count": len(parsed.take_profits),
+                    "status": parsed.validation_status.value,
+                    "blocking_reason": parsed.blocking_reason,
+                })
+            else:
+                unrecognized.append({
+                    "message_id": m["message_id"],
+                    "date": m["date"],
+                    "text_preview": raw[:80].replace("\n", " "),
+                })
+
+        export_payload = {
+            "metadata": {
+                "chat_id": chat_id,
+                "collected_at": datetime.utcnow().isoformat(),
+                "total_messages": len(messages),
+                "signals_count": len(collected_signals),
+                "updates_count": len(collected_updates),
+                "unrecognized_count": len(unrecognized),
+                "note": "Trang thai tin nhan tai thoi diem thu thap lich su (Telegram MTProto khong cung cap toan bo lich su sua tin cuoi cung)",
+            },
+            "signals": collected_signals,
+            "updates": collected_updates,
+            "unrecognized": unrecognized,
+            "raw_messages": messages,
+        }
+
+        os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(export_payload, f, indent=2, ensure_ascii=False)
+
+        print(f"[XUAT THANH CONG] File lich su da luu tai: {output}")
+        print(f"- Tin hieu nhan dien duoc: {len(collected_signals)}")
+        print(f"- Cap nhat admin: {len(collected_updates)}")
+        print(f"- Tin khong thuoc danh muc tin hieu: {len(unrecognized)}")
+        print("=" * 60)
+
+    asyncio.run(_collect())
+
+
+def cmd_export_report(args):
+    """CLI: export-report - Generates sanitized report of timelines, updates, and anomalies"""
+    import json
+    config = load_config(args.config)
+    db = DatabaseManager(config.database_file)
+    out_file = args.output or f"./data/audit_report_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.md"
+
+    with db.get_connection() as conn:
+        signals = [dict(r) for r in conn.execute("SELECT * FROM signals ORDER BY created_at DESC").fetchall()]
+        timeline = [dict(r) for r in conn.execute("SELECT * FROM signal_timeline ORDER BY id ASC").fetchall()]
+        versions = [dict(r) for r in conn.execute("SELECT * FROM message_versions ORDER BY received_at DESC").fetchall()]
+
+    lines = [
+        "# BAO CAO AUDIT DU LIEU TIN HIEU VA CAP NHAT TELEGRAM",
+        f"- Thoi diem tao: {datetime.utcnow().isoformat()} UTC",
+        f"- Che do he thong: {config.mode.value} (live_trading_enabled={config.live_trading_enabled})",
+        "",
+        "## 1. TIMELINE CAC TIN HIEU (SIGNALS)",
+    ]
+
+    if not signals:
+        lines.append("*Chua co tin hieu nao duoc ghi nhan trong SQLite.*")
+    else:
+        for s in signals:
+            sig_id = s["signal_id"]
+            sym = s["symbol"] or "UNKNOWN"
+            side = s["side"] or "UNKNOWN"
+            state = s["state"]
+            lines.append(f"### Kèo: `{sym}` ({side}) | ID: `{sig_id}` | Trang thai: **{state}**")
+            lines.append(f"- Ly do chan / Canh bao: {s['blocking_reason'] or 'Khong co'}")
+            lines.append(f"- SL: `{s['stop_loss']}` | Entries: `{s['entries_json']}`")
+            lines.append("- **Cac moc su kien (Timeline):**")
+
+            events = [e for e in timeline if e["signal_id"] == sig_id]
+            if events:
+                for ev in events:
+                    lines.append(f"  - `{ev['timestamp']}` | **{ev['event_type']}**: {ev['description']}")
+            else:
+                lines.append("  - *Chua co su kien timeline bo sung.*")
+            lines.append("")
+
+    lines.extend([
+        "## 2. BANG TONG HOP CAC CAP NHAT ADMIN VA TIN SU'A",
+        f"- Tong so phien ban tin nhan quan sat duoc: {len(versions)}",
+        "",
+        "## 3. QUY TAC NGUON DE XUAT (DE XUAT CHUA KICH HOAT)",
+        "- Don bay truyen thong qua kenh thuong cao (20x-200x) -> Bat buoc duy tri gioi han an toan tai `config.yaml` (mac dinh 3x-5x).",
+        "- Vung Entry dang Range can lua chon chinh sach (`MID_POINT`, `BEST_PRICE`, `SPLIT_2_LIMITS`).",
+        "- Chot loi nhieu nac khong ghi ty le -> De xuat ty le mac dinh `FRONT_LOADED_50_30_20` hoac `EQUAL_SPLIT`.",
+        "",
+        "## 4. CAC TRUONG HOP CAN NGUOI DUNG XAC NHAN",
+        "- Cac tin cap nhat khong kem reply_to den tin goc.",
+        "- Cac tin sua Stop Loss co xu huong noi rong khoang cach.",
+    ])
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_file)), exist_ok=True)
+    with open(out_file, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    print(f"\n[DA TAO BAO CAO] Bao cao audit da luu tai: {out_file}\n")
 
 
 def cmd_testnet_check(args):
@@ -294,9 +502,13 @@ def cmd_testnet_check(args):
     print("=" * 60)
 
 
-def cmd_listen(args):
+def cmd_listen(args, is_shadow: bool = False):
     """CLI: listen"""
     config = load_config(args.config)
+    if is_shadow:
+        config.mode = ExecutionMode.READ_ONLY
+        config.live_trading_enabled = False
+
     if not config.telegram.api_id or not config.telegram.api_hash:
         print("\n[BLOCKED] Thieu TELEGRAM_API_ID hoac TELEGRAM_API_HASH trong file .env")
         print("Vui long lay tai https://my.telegram.org va dien vao file .env truoc khi chay listener.\n")
@@ -314,7 +526,7 @@ def cmd_listen(args):
     client = client_wrapper.get_client()
     db = DatabaseManager(config.database_file)
 
-    listener = TelegramSignalListener(config, client, db)
+    listener = TelegramSignalListener(config, client, db, is_shadow=is_shadow)
 
     async def _start():
         await client.connect()
@@ -326,6 +538,12 @@ def cmd_listen(args):
     asyncio.run(_start())
 
 
+def cmd_gui(args):
+    """CLI: gui - Launches PySide6 Desktop GUI"""
+    from app_gui import main as gui_main
+    gui_main()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Telegram Binance Signal Executor CLI")
     parser.add_argument("--config", "-c", default=None, help="Path to config.yaml")
@@ -333,6 +551,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Subcommands
+    subparsers.add_parser("gui", help="Khoi dong giao dien Desktop App PySide6")
     subparsers.add_parser("telegram-login", help="Dang nhap interactive vao tai khoan Telegram MTProto")
     subparsers.add_parser("list-chats", help="Liet ke cac nhom va kenh de lay Chat ID cho allowlist")
     subparsers.add_parser("parse-samples", help="Phan tich 9 mau tin hieu thuc te va bao cao")
@@ -340,9 +559,19 @@ def main():
     subparsers.add_parser("status", help="Hien thi trang thai he thong va tin hieu dang mo")
     subparsers.add_parser("listen", help="Lang nghe tin hieu tu cac kenh da allowlist")
 
-    # New audit commands
-    p_export = subparsers.add_parser("export-history", help="Xuat toan bo lich su messages, versions, signals, orders, timeline ra JSON")
+    # History & audit commands
+    p_export = subparsers.add_parser("export-history", help="Xuat toan bo du lieu SQLite (messages, versions, signals, orders, timeline) ra file JSON")
     p_export.add_argument("--output", "-o", default=None, help="Duong dan file JSON output")
+
+    p_collect = subparsers.add_parser("collect-history", help="Thu thap lich su doc tin nhan tu 1 kenh Telegram (gioi han 7 ngay, max 1000 tin)")
+    p_collect.add_argument("--chat-id", type=int, required=True, help="Chat ID cua kenh can thu thap lich su")
+    p_collect.add_argument("--days", type=int, default=7, help="So ngay toi da quay ve qua khu (mac dinh 7 ngay)")
+    p_collect.add_argument("--limit", type=int, default=1000, help="So tin nhan toi da thu thap (mac dinh 1000)")
+    p_collect.add_argument("--checkpoint", default=None, help="Duong dan file checkpoint de resume")
+    p_collect.add_argument("--output", "-o", default=None, help="Duong dan file JSON output")
+
+    p_report = subparsers.add_parser("export-report", help="Xuat bao cao audit timeline va cac bat thuong ra Markdown")
+    p_report.add_argument("--output", "-o", default=None, help="Duong dan file Markdown output")
 
     subparsers.add_parser("offline-replay", help="Replay offline cac tin nhan lich su ma khong goi bat ky write API nao")
     subparsers.add_parser("shadow-mode", help="Chay listener che do bong (shadow), chi danh gia khong dat lenh san")
@@ -351,6 +580,7 @@ def main():
     args = parser.parse_args()
 
     cmd_map = {
+        "gui": cmd_gui,
         "telegram-login": cmd_telegram_login,
         "list-chats": cmd_list_chats,
         "parse-samples": cmd_parse_samples,
@@ -358,6 +588,8 @@ def main():
         "status": cmd_status,
         "listen": cmd_listen,
         "export-history": cmd_export_history,
+        "collect-history": cmd_collect_history,
+        "export-report": cmd_export_report,
         "offline-replay": cmd_offline_replay,
         "shadow-mode": cmd_shadow_mode,
         "testnet-check": cmd_testnet_check,
@@ -368,6 +600,8 @@ def main():
         func(args)
 
 
+
 if __name__ == "__main__":
     main()
+
 

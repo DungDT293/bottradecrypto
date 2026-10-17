@@ -50,10 +50,38 @@ logs/
 .coverage
 htmlcov/
 
-# IDE / OS
+# IDE / OS / Temp
 .idea/
 .vscode/
 *.swp
 *.swo
 Thumbs.db
 Desktop.ini
+*.zip
+*.lnk
+*.lock
+
+# Desktop (Node & Tauri)
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/
+# Executables & Local configs
+*.exe
+config.yaml
+resp.json
+
+# Scratch & live credential test scripts
+fix_keys.py
+test_live*.py
+test_reconcile*.py
+test_algo*.py
+test_all_channels*.py
+test_step*.py
+analyze_today*.py
+check_*.py
+count_*.py
+inspect_signal*.py
+search_db*.py
+simulate_*.py
+

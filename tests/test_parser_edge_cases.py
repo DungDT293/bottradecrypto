@@ -138,3 +138,31 @@ def test_sl_distance_limits(parser, validator):
     assert val2 is None
     assert "SL qua xa" in parsed2.blocking_reason
 
+
+def test_vip_promotional_bait_is_rejected(parser):
+    bait_text = """
+    🚀 #BTCUSDT LONG SIGNAL 🚀
+    Entry: 65000
+    Targets: 70000
+    Stop Loss: SL in VIP
+    DM for VIP access and 100% guaranteed profit!
+    """
+    parsed = parser.parse(bait_text, make_meta())
+    assert parsed.validation_status == SignalState.REJECTED
+    assert "cau keo VIP" in parsed.blocking_reason
+
+
+def test_vip_result_boasting_classified_as_update():
+    from parser.update_parser import ChannelUpdateParser
+    from core.enums import UpdateType
+
+    u_parser = ChannelUpdateParser()
+    boast_text = "👑VIP Group Update👑 🏹 #BATUSDT — Take-profit target 03! ✅ 🛡+612.98% Massive Gain🚀 🛫DM for VIP Access"
+    u_type, val, desc = u_parser.parse_update(boast_text)
+    assert u_type == UpdateType.RESULT_TP_REPORTED
+
+    invite_text = "✨That’s your chance to join our premium channel for free... ONLY FIRST 100 CAN JOIN ⚡️"
+    u_type2, _, desc2 = u_parser.parse_update(invite_text)
+    assert u_type2 == UpdateType.COMMENTARY
+
+

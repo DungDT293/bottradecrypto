@@ -20,25 +20,70 @@ class BinanceFuturesClient:
     - Conditional / Algo Orders (STOP_MARKET, TAKE_PROFIT_MARKET) via /fapi/v1/algoOrder
     - Account preflight checks (One-Way mode, Isolated margin, Balance query)
     - Reconciles state without leaking secrets
+    - Intelligent Circuit Breaker for IP bans and Rate Limits
     """
+
+    _banned_until_ms: int = 0
+    _banned_reason: str = ""
+    _cached_one_way_mode: Optional[bool] = None
+    _symbol_filter_cache: Dict[str, SymbolFilterInfo] = {}
+    _weight_history: List[Any] = []
+    _MAX_WEIGHT_PER_60S: int = 2000
 
     def __init__(self, config: AppConfig, session: Optional[aiohttp.ClientSession] = None):
         self.config = config
         self._session = session
         self._own_session = False
 
-        if config.mode == ExecutionMode.LIVE:
-            self.base_url = config.binance.live_base_url
-            self.api_key = config.binance.live_api_key
-            self.api_secret = config.binance.live_api_secret
-        else:
-            self.base_url = config.binance.testnet_base_url
-            self.api_key = config.binance.testnet_api_key
-            self.api_secret = config.binance.testnet_api_secret
+    @classmethod
+    def is_rate_limited(cls) -> bool:
+        return int(time.time() * 1000) < cls._banned_until_ms
+
+    @classmethod
+    def remaining_ban_seconds(cls) -> int:
+        rem_ms = cls._banned_until_ms - int(time.time() * 1000)
+        return max(0, int(rem_ms / 1000))
+
+    @classmethod
+    def _estimate_weight(cls, endpoint: str, params: Optional[Dict[str, Any]] = None) -> int:
+        ep = endpoint.lower()
+        if "exchangeinfo" in ep:
+            return 40
+        if "positionside/dual" in ep:
+            return 30
+        if "openorders" in ep:
+            return 1 if (params and params.get("symbol")) else 40
+        if "account" in ep or "positionrisk" in ep:
+            return 5
+        return 1
+
+    @property
+    def base_url(self) -> str:
+        if self.config.mode == ExecutionMode.LIVE:
+            return self.config.binance.live_base_url
+        return self.config.binance.testnet_base_url
+
+    @property
+    def api_key(self) -> str:
+        if self.config.mode == ExecutionMode.LIVE:
+            return self.config.binance.live_api_key
+        return self.config.binance.testnet_api_key
+
+    @property
+    def api_secret(self) -> str:
+        if self.config.mode == ExecutionMode.LIVE:
+            return self.config.binance.live_api_secret
+        return self.config.binance.testnet_api_secret
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            connector = aiohttp.TCPConnector(
+                limit=100,
+                keepalive_timeout=60.0,
+                enable_cleanup_closed=True,
+                ttl_dns_cache=300,
+            )
+            self._session = aiohttp.ClientSession(connector=connector)
             self._own_session = True
         return self._session
 
@@ -66,6 +111,35 @@ class BinanceFuturesClient:
         params: Optional[Dict[str, Any]] = None,
         signed: bool = False,
     ) -> Dict[str, Any]:
+        # Circuit Breaker: Do NOT send requests if currently banned by Binance
+        now_ms = int(time.time() * 1000)
+        if now_ms < BinanceFuturesClient._banned_until_ms:
+            rem_sec = int((BinanceFuturesClient._banned_until_ms - now_ms) / 1000)
+            raise ExchangeAdapterError(
+                f"Binance IP dang bi tam khoa de bao ve tai khoan (con {rem_sec}s). {BinanceFuturesClient._banned_reason}"
+            )
+
+        # Token Bucket / Sliding window rate limiter
+        req_weight = self._estimate_weight(endpoint, params)
+        now_mono = time.monotonic()
+        BinanceFuturesClient._weight_history = [
+            (t, w) for t, w in BinanceFuturesClient._weight_history if now_mono - t < 60.0
+        ]
+        curr_weight = sum(w for _, w in BinanceFuturesClient._weight_history)
+
+        # High priority exemption for order placement/algo endpoints (never stall orders)
+        is_order_endpoint = any(kw in endpoint.lower() for kw in ["order", "algoorder"])
+        effective_limit = 2300 if is_order_endpoint else BinanceFuturesClient._MAX_WEIGHT_PER_60S
+
+        if curr_weight + req_weight > effective_limit and BinanceFuturesClient._weight_history:
+            oldest_t = BinanceFuturesClient._weight_history[0][0]
+            wait_sec = max(0.1, min(5.0, 60.0 - (now_mono - oldest_t) + 0.1))
+            print(f"[BINANCE RATE LIMITER] Luu luong ({curr_weight}+{req_weight} > {effective_limit}). Cho {wait_sec:.1f}s...")
+            import asyncio
+            await asyncio.sleep(wait_sec)
+            now_mono = time.monotonic()
+        BinanceFuturesClient._weight_history.append((now_mono, req_weight))
+
         session = await self._get_session()
         headers = {}
         if self.api_key:
@@ -99,26 +173,60 @@ class BinanceFuturesClient:
                 if resp.status >= 400:
                     code = data.get("code")
                     msg = data.get("msg", "")
+
+                    # Detect IP Ban / Rate limit
+                    if code == -1003 or resp.status in (429, 418):
+                        import re
+                        m = re.search(r"banned until (\d+)", msg)
+                        if m:
+                            BinanceFuturesClient._banned_until_ms = int(m.group(1))
+                        else:
+                            BinanceFuturesClient._banned_until_ms = int(time.time() * 1000) + 60000
+                        BinanceFuturesClient._banned_reason = msg
+                        rem_sec = int((BinanceFuturesClient._banned_until_ms - int(time.time() * 1000)) / 1000)
+                        raise ExchangeAdapterError(
+                            f"Binance API Error {code}: {msg} (Tự động kích hoạt Circuit Breaker trong {rem_sec}s)"
+                        )
+
                     if code == -4120 or "STOP_ORDER_SWITCH_ALGO" in msg:
                         raise ExchangeAdapterError(
                             f"Loi Binance -4120: Lenh conditional bat buoc phai gui qua endpoint /fapi/v1/algoOrder: {msg}"
                         )
                     raise ExchangeAdapterError(f"Binance API Error {code}: {msg}")
                 return data
+        except (asyncio.TimeoutError, TimeoutError):
+            raise ExchangeAdapterError(f"Hết thời gian chờ phản hồi từ Binance ({self.config.binance.request_timeout_seconds}s Timeout)")
         except aiohttp.ClientError as e:
             raise ExchangeAdapterError(f"Loi ket noi mang den Binance: {str(e)}")
+        except Exception as e:
+            if isinstance(e, ExchangeAdapterError):
+                raise
+            err_text = str(e) or type(e).__name__
+            raise ExchangeAdapterError(f"Loi ket noi Binance ({type(e).__name__}): {err_text}")
 
     # 1. Exchange Info & Filters
     async def get_symbol_filter(self, symbol: str) -> SymbolFilterInfo:
+        if symbol in BinanceFuturesClient._symbol_filter_cache:
+            return BinanceFuturesClient._symbol_filter_cache[symbol]
+
         data = await self._request("GET", "/fapi/v1/exchangeInfo")
         for sym_data in data.get("symbols", []):
-            if sym_data.get("symbol") == symbol:
-                return parse_symbol_info(sym_data)
+            s_name = sym_data.get("symbol")
+            if s_name:
+                try:
+                    BinanceFuturesClient._symbol_filter_cache[s_name] = parse_symbol_info(sym_data)
+                except Exception:
+                    pass
+
+        if symbol in BinanceFuturesClient._symbol_filter_cache:
+            return BinanceFuturesClient._symbol_filter_cache[symbol]
         raise ExchangeAdapterError(f"Symbol '{symbol}' khong ton tai tren Binance USD-M Futures")
 
     # 2. Position Mode Check (One-Way vs Dual/Hedge)
     async def check_position_mode_one_way(self) -> bool:
-        """Verifies account is in One-Way Position Mode."""
+        """Verifies account is in One-Way Position Mode (cached after first check)."""
+        if BinanceFuturesClient._cached_one_way_mode is True:
+            return True
         data = await self._request("GET", "/fapi/v1/positionSide/dual", signed=True)
         # {"dualSidePosition": false} means One-Way mode
         is_dual = data.get("dualSidePosition", False)
@@ -127,6 +235,7 @@ class BinanceFuturesClient:
                 "BLOCKED: Tai khoan dang o che do Hedge Mode (Dual-Side). He thong chi ho tro One-Way Mode. "
                 "Khong tu dong thay doi vi tranh rui ro cho cac vi the san co."
             )
+        BinanceFuturesClient._cached_one_way_mode = True
         return True
 
     # 3. Margin Type Setup & Check
@@ -141,7 +250,8 @@ class BinanceFuturesClient:
             )
         except ExchangeAdapterError as e:
             # Code -4046 means "No need to change margin type" (already isolated)
-            if "-4046" not in str(e):
+            # Code -4067 means "Position side cannot be changed if open orders exist"
+            if "-4046" not in str(e) and "-4067" not in str(e):
                 raise
 
     # 4. Set Leverage
@@ -170,6 +280,19 @@ class BinanceFuturesClient:
             if pos.get("symbol") == symbol:
                 return pos
         return None
+
+    async def get_open_positions(self) -> List[Dict[str, Any]]:
+        """Returns all active positions with non-zero positionAmt."""
+        positions = await self._request("GET", "/fapi/v2/positionRisk", signed=True)
+        active = []
+        for pos in (positions or []):
+            try:
+                amt = float(pos.get("positionAmt", 0))
+                if amt != 0:
+                    active.append(pos)
+            except Exception:
+                pass
+        return active
 
     # 7. Standard Orders (LIMIT Entry & TP)
     async def create_standard_order(
@@ -211,17 +334,19 @@ class BinanceFuturesClient:
         working_type: str = "MARK_PRICE",
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
+            "algoType": "CONDITIONAL",
             "symbol": symbol,
             "side": side.value,
             "type": order_type.value,
             "triggerPrice": str(trigger_price),
             "workingType": working_type,
-            "reduceOnly": "true",
         }
         if close_position:
             params["closePosition"] = "true"
-        elif quantity:
-            params["quantity"] = str(quantity)
+        else:
+            params["reduceOnly"] = "true"
+            if quantity:
+                params["quantity"] = str(quantity)
 
         if client_algo_id:
             params["clientAlgoId"] = client_algo_id
@@ -271,4 +396,29 @@ class BinanceFuturesClient:
         elif algo_id:
             params["algoId"] = algo_id
         return await self._request("DELETE", self.config.binance.algo_order_endpoint, params=params, signed=True)
+
+    async def cancel_all_orders(self, symbol: str) -> Dict[str, Any]:
+        """Cancels all open standard limit/market orders on the symbol."""
+        try:
+            return await self._request("DELETE", "/fapi/v1/allOpenOrders", params={"symbol": symbol}, signed=True)
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def cancel_all_symbol_orders(self, symbol: str) -> Dict[str, Any]:
+        """Cancels both standard limit orders and conditional algo orders (SL/TP) for the symbol."""
+        std_res = await self.cancel_all_orders(symbol)
+        algo_count = 0
+        try:
+            open_algos = await self.get_open_algo_orders(symbol)
+            for algo in (open_algos or []):
+                aid = algo.get("algoId")
+                caid = algo.get("clientAlgoId")
+                try:
+                    await self.cancel_algo_order(symbol, algo_id=str(aid) if aid else None, client_algo_id=caid)
+                    algo_count += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return {"standard": std_res, "algos_cancelled": algo_count}
 

@@ -108,7 +108,8 @@ def test_sample_4_truth_ambiguous_entry(parser, default_config):
     assert parsed.validation_status == SignalState.NEEDS_REVIEW
     assert "Short BELOW" in parsed.blocking_reason
 
-    # Validator must NOT validate this signal
+    # Validator must NOT validate this signal when policy is disabled
+    default_config.execution.allow_below_pattern_as_valid = False
     validator = SignalValidator(default_config)
     _, validated = validator.validate_and_resolve(parsed)
     assert validated is None
@@ -207,4 +208,20 @@ def test_sample_9_atom_direction_contradiction(parser, default_config):
     validator = SignalValidator(default_config)
     _, validated = validator.validate_and_resolve(parsed)
     assert validated is None
+
+
+def test_sample_4_truth_resolved_when_policy_enabled(parser, default_config):
+    default_config.execution.allow_below_pattern_as_valid = True
+    validator = SignalValidator(default_config)
+    meta = create_metadata(1004, 4)
+    parsed = parser.parse(SAMPLE_SIGNALS["TRUTH"], meta)
+    
+    assert parsed.validation_status == SignalState.NEEDS_REVIEW
+    _, validated = validator.validate_and_resolve(parsed)
+    assert validated is not None
+    assert validated.symbol == "TRUTHUSDT"
+    assert validated.side == PositionSide.SHORT
+    # Range entry policy BEST_PRICE picks max for SHORT
+    assert validated.entries == [(Decimal("0.02325"), Decimal("1.0"))]
+    assert len(validated.take_profits) == 3
 

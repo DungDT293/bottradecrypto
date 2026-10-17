@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
@@ -8,28 +9,41 @@ from pydantic import BaseModel, Field
 from config.policy_defaults import ExecutionPolicyConfig, RiskPolicy, SourcePolicyOverride
 from core.enums import ExecutionMode
 
+DEFAULT_8_CHANNELS = [
+    -1001370457350,  # Crypto Neon
+    -1001895315984,  # Crypto spider 🕷️ scalper
+    -1002007658025,  # THE WOLF (CRYPTO)®
+    -1002052872813,  # CRYPTO LEOPARD'S
+    -1001590450482,  # THE CRYPTO TRADER
+    -1002266035358,  # THE MASTER (CRYPTO)
+    -1001161683441,  # Global Crypto Research
+    -1001652601224,  # Crypto World Updates
+]
+DEFAULT_22_CHANNELS = DEFAULT_8_CHANNELS
+
+
 # Load local .env if present
 load_dotenv()
 
 
 class TelegramConfig(BaseModel):
-    api_id: Optional[int] = None
-    api_hash: Optional[str] = None
+    api_id: Optional[int] = 28680296
+    api_hash: Optional[str] = "927e2da6e7d0ec3d97a79d11cc794e46"
     phone: Optional[str] = None
     session_name: str = "./data/telegram_user"
-    allowed_chat_ids: List[int] = Field(default_factory=list)
+    allowed_chat_ids: List[int] = Field(default_factory=lambda: list(DEFAULT_22_CHANNELS))
     reconnect_max_backlog_seconds: int = 300
     sanitize_input: bool = True
 
 
 class BinanceConfig(BaseModel):
-    testnet_base_url: str = "https://testnet.binancefuture.com"
+    testnet_base_url: str = "https://demo-fapi.binance.com"
     live_base_url: str = "https://fapi.binance.com"
     recv_window: int = 5000
     request_timeout_seconds: int = 10
     max_retries: int = 3
-    testnet_api_key: Optional[str] = None
-    testnet_api_secret: Optional[str] = None
+    testnet_api_key: Optional[str] = "74OJJEcThtPKbWegQ8qNf4O4Ojav0oSExUnpvlo1Ud2z0LML9mUpQfLfHGKZlftb"
+    testnet_api_secret: Optional[str] = "9C4cEFHbBgH6RtLPW37QkRJmKw6IjnJagYTmmkLB2AxRepl7opleMfxZmoPstbUF"
     live_api_key: Optional[str] = None
     live_api_secret: Optional[str] = None
     algo_order_endpoint: str = "/fapi/v1/algoOrder"
@@ -45,7 +59,7 @@ class NotificationsConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    mode: ExecutionMode = ExecutionMode.READ_ONLY
+    mode: ExecutionMode = ExecutionMode.TESTNET
     live_trading_enabled: bool = False
     data_dir: str = "./data"
     database_file: str = "./data/trading_state.db"
@@ -60,12 +74,39 @@ class AppConfig(BaseModel):
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     data: Dict[str, Any] = {}
 
-    # Find configuration file
-    potential_paths = [
-        config_path,
-        "config.yaml",
-        "config.example.yaml",
+    # Load potential .env files
+    env_candidates = [
+        os.path.join(os.environ.get("APPDATA", ""), "telegram_binance_signal_executor", ".env"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "telegram-binance-signal-executor", ".env"),
+        os.path.join(os.path.dirname(sys.executable), ".env"),
+        os.path.join(os.path.dirname(sys.executable), "resources", ".env"),
+        ".env",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
+        r"e:\TOOL DUNG CODE\bottradecrypto\.env",
     ]
+    for env_p in env_candidates:
+        if env_p and os.path.exists(env_p):
+            load_dotenv(env_p, override=False)
+
+    # Find configuration file
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        potential_paths = [
+            config_path,
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.example.yaml"),
+            "config.example.yaml",
+        ]
+    else:
+        potential_paths = [
+            config_path,
+            os.path.join(os.environ.get("APPDATA", ""), "telegram_binance_signal_executor", "config.yaml"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "telegram-binance-signal-executor", "config.yaml"),
+            os.path.join(os.path.dirname(sys.executable), "config.yaml"),
+            os.path.join(os.path.dirname(sys.executable), "resources", "config.yaml"),
+            "config.yaml",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.yaml"),
+            r"e:\TOOL DUNG CODE\bottradecrypto\config.yaml",
+            "config.example.yaml",
+        ]
     actual_path = None
     for p in potential_paths:
         if p and Path(p).exists():
@@ -77,8 +118,12 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             yaml_data = yaml.safe_load(f) or {}
             data.update(yaml_data)
 
-    # Inject env secrets
+    # If allowed_chat_ids is empty in loaded yaml, keep default 22 channels
     tg_data = data.setdefault("telegram", {})
+    if not tg_data.get("allowed_chat_ids"):
+        tg_data["allowed_chat_ids"] = list(DEFAULT_22_CHANNELS)
+
+    # Inject env secrets
     if os.getenv("TELEGRAM_API_ID"):
         try:
             tg_data["api_id"] = int(os.environ["TELEGRAM_API_ID"].strip())
@@ -90,6 +135,8 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         tg_data["phone"] = os.environ["TELEGRAM_PHONE"].strip()
 
     bn_data = data.setdefault("binance", {})
+    if os.getenv("BINANCE_TESTNET_BASE_URL"):
+        bn_data["testnet_base_url"] = os.environ["BINANCE_TESTNET_BASE_URL"].strip()
     if os.getenv("BINANCE_TESTNET_API_KEY"):
         bn_data["testnet_api_key"] = os.environ["BINANCE_TESTNET_API_KEY"].strip()
     if os.getenv("BINANCE_TESTNET_API_SECRET"):
@@ -109,4 +156,39 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             pass
 
     return AppConfig.model_validate(data)
+
+
+def save_config(config: AppConfig, config_path: Optional[str] = None) -> bool:
+    """
+    Persists configuration to config.yaml across AppData and project root.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST") and not config_path:
+        return True
+
+    target_paths = []
+    if config_path:
+        target_paths.append(config_path)
+
+    appdata_p = os.path.join(os.environ.get("APPDATA", ""), "telegram_binance_signal_executor", "config.yaml")
+    localappdata_p = os.path.join(os.environ.get("LOCALAPPDATA", ""), "telegram-binance-signal-executor", "config.yaml")
+    root_p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.yaml")
+
+    for cand in [appdata_p, localappdata_p, root_p]:
+        if cand not in target_paths:
+            target_paths.append(cand)
+
+    cfg_dict = config.model_dump(mode="json")
+
+    saved = False
+    for p in target_paths:
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                yaml.dump(cfg_dict, f, default_flow_style=False, allow_unicode=True)
+            saved = True
+        except Exception:
+            pass
+    return saved
+
+
 

@@ -2,7 +2,7 @@ from decimal import Decimal
 from typing import List, Optional, Tuple
 
 from config.config import AppConfig
-from config.policy_defaults import SourcePolicyOverride
+from config.policy_defaults import SourcePolicyOverride, calculate_tp_weights
 from core.enums import (
     EntryMode,
     EntryRangePolicy,
@@ -35,8 +35,18 @@ class SignalValidator:
         signal: ParsedSignal,
         source_override: Optional[SourcePolicyOverride] = None,
     ) -> Tuple[ParsedSignal, Optional[ValidatedSignal]]:
-        # If already marked NEEDS_REVIEW or REJECTED during parsing, return immediately
-        if signal.validation_status in [SignalState.NEEDS_REVIEW, SignalState.REJECTED]:
+        # If already marked NEEDS_REVIEW or REJECTED during parsing:
+        # Check if signal was marked NEEDS_REVIEW due to 'Short BELOW' and policy allows it
+        if signal.validation_status == SignalState.NEEDS_REVIEW:
+            allow_below = getattr(self.config.execution, "allow_below_pattern_as_valid", False) or \
+                          (source_override and getattr(source_override, "allow_below_pattern", False))
+            if allow_below and "BELOW" in (signal.blocking_reason or ""):
+                signal.validation_status = SignalState.PARSED
+                signal.blocking_reason = None
+                signal.entry_mode = EntryMode.RANGE
+            else:
+                return signal, None
+        elif signal.validation_status == SignalState.REJECTED:
             return signal, None
 
         # 1. Check Symbol & Basic Fields
@@ -80,7 +90,21 @@ class SignalValidator:
                     signal.blocking_reason = f"Logic loi: SHORT nhung TP ({tp}) >= Entry thap nhat ({min_entry})"
                     return signal, None
 
-        # 3. SL Distance Safety Checks
+        # 3. SL Distance Safety Checks & Anti-Wick Hunt Buffer
+        raw_sl = signal.stop_loss
+        sl_buffer_pct = getattr(self.config.risk, "sl_buffer_pct", Decimal("1.0"))
+        buffered_sl = raw_sl
+        if sl_buffer_pct and sl_buffer_pct > Decimal("0") and raw_sl:
+            buffer_mult = sl_buffer_pct / Decimal("100")
+            if signal.side == PositionSide.LONG:
+                buffered_sl = raw_sl * (Decimal("1.0") - buffer_mult)
+            else:
+                buffered_sl = raw_sl * (Decimal("1.0") + buffer_mult)
+            signal.warnings.append(
+                f"Kich hoat dem chong quet rau Binance ({sl_buffer_pct}%): Noi SL tu {raw_sl} -> {buffered_sl:.6f} de tranh bi quet boi rau nen san khac."
+            )
+            signal.stop_loss = buffered_sl
+
         avg_entry = sum(signal.entries) / len(signal.entries)
         sl_dist_pct = (abs(avg_entry - signal.stop_loss) / avg_entry) * Decimal("100")
         if sl_dist_pct < self.config.execution.min_sl_distance_pct:
@@ -149,24 +173,36 @@ class SignalValidator:
             if source_override and source_override.allow_tp_equal_split:
                 tp_policy = MultiTPWeightMode.EQUAL_SPLIT
 
-            if tp_policy == MultiTPWeightMode.NEEDS_POLICY:
+            policy_str = str(tp_policy.value if hasattr(tp_policy, "value") else tp_policy).upper()
+
+            if tp_policy == MultiTPWeightMode.NEEDS_POLICY or policy_str == "NEEDS_POLICY":
                 signal.validation_status = SignalState.NEEDS_POLICY
                 signal.blocking_reason = "Tin co nhieu TP nhung thieu ty le chot loi va chua co policy duyet"
                 return signal, None
-            elif tp_policy == MultiTPWeightMode.EQUAL_SPLIT:
+            elif tp_policy == MultiTPWeightMode.EQUAL_SPLIT or policy_str in ["EQUAL_SPLIT", "EQUAL"]:
                 count = len(signal.take_profits)
                 equal_w = Decimal("1.0") / Decimal(str(count))
                 resolved_tps = [(p, equal_w) for p in signal.take_profits]
                 signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY
-            elif tp_policy == MultiTPWeightMode.FRONT_LOADED_50_30_20:
-                if len(signal.take_profits) == 3:
-                    weights = [Decimal("0.5"), Decimal("0.3"), Decimal("0.2")]
-                    resolved_tps = list(zip(signal.take_profits, weights))
-                    signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY
-                else:
-                    signal.validation_status = SignalState.NEEDS_POLICY
-                    signal.blocking_reason = "Chinh sach FRONT_LOADED_50_30_20 chi ap dung cho 3 TP"
-                    return signal, None
+            elif tp_policy == MultiTPWeightMode.FRONT_LOADED_50_30_20 and len(signal.take_profits) == 3:
+                weights = [Decimal("0.5"), Decimal("0.3"), Decimal("0.2")]
+                resolved_tps = list(zip(signal.take_profits, weights))
+                signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY
+            elif tp_policy == MultiTPWeightMode.CUSTOM_TP1_RATIO or policy_str in [
+                "CUSTOM_TP1_RATIO",
+                "CUSTOM",
+                "FRONT_LOADED",
+                "FRONT_LOADED_50_30_20",
+            ]:
+                tp1_target = getattr(self.config.execution, "tp1_target_weight_pct", Decimal("60.0"))
+                weights = calculate_tp_weights(len(signal.take_profits), tp1_target)
+                resolved_tps = list(zip(signal.take_profits, weights))
+                signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY
+            else:
+                count = len(signal.take_profits)
+                equal_w = Decimal("1.0") / Decimal(str(count))
+                resolved_tps = [(p, equal_w) for p in signal.take_profits]
+                signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY
 
         # 7. Clamp Leverage
         max_allowed_lev = self.config.risk.max_leverage
@@ -179,12 +215,30 @@ class SignalValidator:
         elif signal.leverage_requested:
             chosen_lev = signal.leverage_requested
         else:
-            chosen_lev = self.config.risk.default_leverage
+            if source_override and getattr(source_override, "default_leverage_override", None):
+                chosen_lev = source_override.default_leverage_override
+            else:
+                chosen_lev = self.config.risk.default_leverage
 
         # Clamp to max policy (e.g. 200X clamped to 5X)
         final_leverage = min(chosen_lev, max_allowed_lev)
         if final_leverage != signal.leverage_requested:
             signal.warnings.append(f"Don bay yeu cau ({signal.leverage_requested}x) duoc ap tran an toan thanh {final_leverage}x")
+
+        # Smart Safety Clamp: Leverage must never cause liquidation price to be tighter than Stop Loss!
+        # In isolated margin: liquidation occurs at ~ (1 / leverage) * maintenance_buffer (~0.75).
+        # Safe leverage <= 0.75 / sl_distance_pct.
+        if signal.stop_loss and resolved_entries:
+            ref_entry = resolved_entries[0][0]
+            sl_dist_pct = abs(ref_entry - signal.stop_loss) / ref_entry
+            if sl_dist_pct > Decimal("0"):
+                max_safe_lev = int(Decimal("0.75") / sl_dist_pct)
+                if max_safe_lev < final_leverage:
+                    orig_lev = final_leverage
+                    final_leverage = max(1, max_safe_lev)
+                    signal.warnings.append(
+                        f"Don bay {orig_lev}x qua cao so voi khoang cach SL ({sl_dist_pct*100:.1f}%). Tu dong ha xuong {final_leverage}x de dam bao khong bi thanh ly truoc khi cham SL."
+                    )
 
         # 8. Force ISOLATED margin mode per requirement
         final_margin_mode = MarginMode.ISOLATED

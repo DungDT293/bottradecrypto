@@ -65,15 +65,27 @@ class OrderManager:
             )
             self.order_repo.save_order(order)
 
-            # Send order to exchange
-            resp = await self.client.create_standard_order(
-                symbol=signal.symbol,
-                side=entry_side,
-                order_type=OrderType.LIMIT,
-                quantity=qty,
-                price=price,
-                client_order_id=cid,
-            )
+            # Send order to exchange with up to 3 automatic fast retries
+            resp = None
+            last_err = None
+            for attempt in range(1, 4):
+                try:
+                    resp = await self.client.create_standard_order(
+                        symbol=signal.symbol,
+                        side=entry_side,
+                        order_type=OrderType.LIMIT,
+                        quantity=qty,
+                        price=price,
+                        client_order_id=cid,
+                    )
+                    break
+                except Exception as e_order:
+                    last_err = e_order
+                    await asyncio.sleep(attempt * 0.4)
+
+            if not resp:
+                raise last_err or ExchangeAdapterError(f"Khong the dat lenh {signal.symbol} sau 3 lan thu")
+
             order.exchange_order_id = str(resp.get("orderId"))
             self.order_repo.save_order(order)
             created_orders.append(order)
@@ -95,13 +107,22 @@ class OrderManager:
         sl_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
         sl_cid = f"sl_{signal.signal_id[:10]}_{uuid.uuid4().hex[:4]}"
 
+        sl_price = signal.stop_loss
+        if hasattr(self.client, "get_symbol_filter"):
+            try:
+                f = await self.client.get_symbol_filter(signal.symbol)
+                sl_price = (sl_price // f.tick_size) * f.tick_size
+                filled_qty = (filled_qty // f.step_size) * f.step_size
+            except Exception:
+                pass
+
         sl_order = Order(
             client_order_id=sl_cid,
             signal_id=signal.signal_id,
             symbol=signal.symbol,
             side=sl_side,
             order_type=OrderType.STOP_MARKET,
-            trigger_price=signal.stop_loss,
+            trigger_price=sl_price,
             quantity=filled_qty,
             is_reduce_only=True,
             is_algo=True,
@@ -120,7 +141,7 @@ class OrderManager:
                     symbol=signal.symbol,
                     side=sl_side,
                     order_type=OrderType.STOP_MARKET,
-                    trigger_price=signal.stop_loss,
+                    trigger_price=sl_price,
                     quantity=filled_qty,
                     client_algo_id=sl_cid,
                     close_position=False,
@@ -145,6 +166,51 @@ class OrderManager:
                 signal_id=signal.signal_id,
             )
             raise EmergencyCloseError(f"Entry fill khong dat duoc SL ({last_error}). Da kich hoat fail-safe dong vi the.")
+
+        # Place Take Profit Limit Orders (Reduce-Only) on Binance
+        tp_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
+        for idx, (tp_price, tp_weight) in enumerate(signal.take_profits):
+            tp_qty = filled_qty * tp_weight
+            if hasattr(self.client, "get_symbol_filter"):
+                try:
+                    f = await self.client.get_symbol_filter(signal.symbol)
+                    tp_qty = (tp_qty // f.step_size) * f.step_size
+                    tp_price = (tp_price // f.tick_size) * f.tick_size
+                    if tp_qty < f.min_qty:
+                        continue
+                except Exception:
+                    pass
+            if tp_qty <= Decimal("0"):
+                continue
+
+            tp_cid = f"tp_{signal.signal_id[:8]}_{idx+1}_{uuid.uuid4().hex[:4]}"
+            tp_order = Order(
+                client_order_id=tp_cid,
+                signal_id=signal.signal_id,
+                symbol=signal.symbol,
+                side=tp_side,
+                order_type=OrderType.LIMIT,
+                price=tp_price,
+                quantity=tp_qty,
+                is_reduce_only=True,
+                is_algo=False,
+                status="NEW",
+            )
+            self.order_repo.save_order(tp_order)
+            try:
+                resp = await self.client.create_standard_order(
+                    symbol=signal.symbol,
+                    side=tp_side,
+                    order_type=OrderType.LIMIT,
+                    quantity=tp_qty,
+                    price=tp_price,
+                    client_order_id=tp_cid,
+                    reduce_only=True,
+                )
+                tp_order.exchange_order_id = str(resp.get("orderId"))
+                self.order_repo.save_order(tp_order)
+            except Exception as e:
+                print(f"[CANH BAO] Khong the gui lenh TP{idx+1} ({tp_price}) len san: {e}")
 
         self.signal_repo.update_signal_state(signal.signal_id, SignalState.OPEN_PROTECTED)
         return sl_order
@@ -184,6 +250,23 @@ class OrderManager:
 
         sl_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
         new_sl_cid = f"be_{signal.signal_id[:10]}_{uuid.uuid4().hex[:4]}"
+
+        if hasattr(self.client, "get_symbol_filter"):
+            try:
+                f = await self.client.get_symbol_filter(signal.symbol)
+                be_price = (be_price // f.tick_size) * f.tick_size
+                position_qty = (position_qty // f.step_size) * f.step_size
+
+                # Guard against Binance -2021: Order would immediately trigger
+                pos = await self.client.get_position(signal.symbol)
+                if pos and float(pos.get("markPrice", 0)) > 0:
+                    current_mark = Decimal(str(pos.get("markPrice")))
+                    if signal.side == PositionSide.LONG and be_price >= current_mark:
+                        be_price = ((current_mark - (f.tick_size * Decimal("2"))) // f.tick_size) * f.tick_size
+                    elif signal.side == PositionSide.SHORT and be_price <= current_mark:
+                        be_price = ((current_mark + (f.tick_size * Decimal("2"))) // f.tick_size) * f.tick_size
+            except Exception:
+                pass
 
         new_sl = Order(
             client_order_id=new_sl_cid,

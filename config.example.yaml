@@ -44,7 +44,7 @@ risk:
   margin_mode: "ISOLATED"         # Bat buoc ISOLATED
   signal_max_age_seconds: 300     # Bo qua tin neu thoi diem nhan cach luc phat > 300s
   entry_order_ttl_seconds: 900    # Tu dong huy Limit entry sau 15 phut neu chua khop
-  breakeven_after_tp1_default: false  # Mac dinh khong bat buoc BE sau TP1 tru khi co policy
+  breakeven_after_tp1_default: true  # Mac dinh bat buoc BE sau TP1 (Keo Bat Tu)
   fee_buffer_pct: 0.1             # Du phong phi giao dich (0.05% maker/taker * 2)
   slippage_buffer_pct: 0.1        # Du phong truot gia khi SL kich hoat
 
@@ -52,15 +52,18 @@ risk:
 execution:
   # Chinh sach cho nhieu entry khi tin hieu khong ghi trong so:
   # EQUAL_QUANTITY, EQUAL_NOTIONAL, EQUAL_RISK, HOAC NEEDS_POLICY (chan de hoi)
-  multi_entry_default_weight_mode: "NEEDS_POLICY"
+  multi_entry_default_weight_mode: "EQUAL_QUANTITY"
   
   # Chinh sach cho vung entry (range, vd: 3.20 - 3.25):
   # MID_POINT, BEST_PRICE, SPLIT_2_LIMITS, HOAC NEEDS_POLICY
-  entry_range_policy: "NEEDS_POLICY"
+  entry_range_policy: "BEST_PRICE"
   
   # Chinh sach cho nhieu TP khi tin hieu khong ghi ty le:
   # EQUAL_SPLIT, FRONT_LOADED_50_30_20, HOAC NEEDS_POLICY
-  multi_tp_default_weight_mode: "NEEDS_POLICY"
+  multi_tp_default_weight_mode: "EQUAL_SPLIT"
+
+  # Chap nhan mau tin Short BELOW (P1)(P2) (nhu kenh Crypto Leopard) la vung gia Range hop le
+  allow_below_pattern_as_valid: true
 
   # Chinh sach khi SL cach entry qua gan hoac qua xa:
   min_sl_distance_pct: 0.2

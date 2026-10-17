@@ -162,6 +162,52 @@ class MockBinanceFuturesClient:
             return order
         return {"status": "NOT_FOUND"}
 
+    async def get_open_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        orders = list(self.open_orders.values())
+        if symbol:
+            orders = [o for o in orders if o.get("symbol") == symbol]
+        return orders
+
+    async def get_open_algo_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        orders = list(self.open_algo_orders.values())
+        if symbol:
+            orders = [o for o in orders if o.get("symbol") == symbol]
+        return orders
+
+    async def cancel_all_symbol_orders(self, symbol: str) -> Dict[str, Any]:
+        stds = [k for k, o in self.open_orders.items() if o.get("symbol") == symbol]
+        for k in stds:
+            self.open_orders.pop(k, None)
+        algos = [k for k, o in self.open_algo_orders.items() if o.get("symbol") == symbol]
+        for k in algos:
+            self.open_algo_orders.pop(k, None)
+        return {"status": "SUCCESS", "standard_canceled": len(stds), "algo_canceled": len(algos)}
+
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        signed: bool = False,
+    ) -> Dict[str, Any]:
+        if endpoint == "/fapi/v1/ticker/price":
+            sym = params.get("symbol", "") if params else ""
+            pos = self.positions.get(sym)
+            p = pos.get("entryPrice", "2500") if pos else "2500"
+            return {"symbol": sym, "price": p}
+        return {}
+
+    def set_mark_price(self, symbol: str, mark_price: Decimal) -> None:
+        if symbol in self.positions:
+            self.positions[symbol]["markPrice"] = str(mark_price)
+            # Calculate unrealized pnl
+            amt = Decimal(str(self.positions[symbol].get("positionAmt", "0")))
+            entry_p = Decimal(str(self.positions[symbol].get("entryPrice", "0")))
+            if amt != Decimal("0") and entry_p != Decimal("0"):
+                diff = mark_price - entry_p
+                unpnl = diff * amt
+                self.positions[symbol]["unrealizedProfit"] = str(unpnl)
+
     # Helper method to simulate a fill in tests
     def simulate_entry_fill(self, client_order_id: str, fill_qty: Decimal, fill_price: Decimal) -> None:
         if client_order_id in self.open_orders:
@@ -180,3 +226,17 @@ class MockBinanceFuturesClient:
                 "marginType": self.margin_modes.get(sym, "isolated"),
                 "leverage": str(self.leverages.get(sym, 1)),
             }
+
+    def simulate_partial_close(self, symbol: str, close_qty: Decimal, exit_price: Decimal) -> None:
+        if symbol in self.positions:
+            pos = self.positions[symbol]
+            current_amt = Decimal(str(pos.get("positionAmt", "0")))
+            if current_amt > Decimal("0"):
+                new_amt = max(Decimal("0"), current_amt - close_qty)
+            else:
+                new_amt = min(Decimal("0"), current_amt + close_qty)
+            pos["positionAmt"] = str(new_amt)
+            if new_amt == Decimal("0"):
+                pos["entryPrice"] = "0"
+                pos["unrealizedProfit"] = "0"
+

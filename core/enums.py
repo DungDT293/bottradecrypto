@@ -40,6 +40,7 @@ class SignalState(str, Enum):
 
 class ExecutionMode(str, Enum):
     READ_ONLY = "READ_ONLY"
+    SHADOW = "SHADOW"
     PAPER = "PAPER"
     TESTNET = "TESTNET"
     LIVE = "LIVE"
@@ -76,6 +77,7 @@ class MultiTPWeightMode(str, Enum):
     EXPLICIT = "EXPLICIT"
     EQUAL_SPLIT = "EQUAL_SPLIT"
     FRONT_LOADED_50_30_20 = "FRONT_LOADED_50_30_20"
+    CUSTOM_TP1_RATIO = "CUSTOM_TP1_RATIO"
     NEEDS_POLICY = "NEEDS_POLICY"
 
 

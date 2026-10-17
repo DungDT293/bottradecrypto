@@ -23,6 +23,8 @@ class DatabaseManager:
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA busy_timeout = 10000;")
         conn.execute("PRAGMA foreign_keys = ON;")
         return conn
 
@@ -222,10 +224,39 @@ class SignalRepository:
                 (new_state.value, reason, now_str, signal_id),
             )
 
+    def _format_signal_row(self, row: Any) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        d = dict(row)
+        if d.get("entries_json"):
+            try:
+                d["entries"] = json.loads(d["entries_json"])
+            except Exception:
+                d["entries"] = []
+        elif "entries" not in d or d["entries"] is None:
+            d["entries"] = []
+
+        if d.get("take_profits_json"):
+            try:
+                d["take_profits"] = json.loads(d["take_profits_json"])
+            except Exception:
+                d["take_profits"] = []
+        elif "take_profits" not in d or d["take_profits"] is None:
+            d["take_profits"] = []
+        return d
+
     def get_signal(self, signal_id: str) -> Optional[Dict[str, Any]]:
         with self.db.get_connection() as conn:
             row = conn.execute("SELECT * FROM signals WHERE signal_id = ?", (signal_id,)).fetchone()
-            return dict(row) if row else None
+            return self._format_signal_row(row)
+
+    def get_signal_by_message(self, chat_id: int, message_id: int) -> Optional[Dict[str, Any]]:
+        with self.db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM signals WHERE chat_id = ? AND message_id = ?",
+                (chat_id, message_id),
+            ).fetchone()
+            return self._format_signal_row(row)
 
     def get_active_signal_for_symbol(self, symbol: str) -> Optional[Dict[str, Any]]:
         with self.db.get_connection() as conn:
@@ -236,7 +267,29 @@ class SignalRepository:
                 """,
                 (symbol,),
             ).fetchone()
-            return dict(row) if row else None
+            return self._format_signal_row(row)
+
+    def get_latest_pending_signal_id(self, chat_id: int, symbol: Optional[str] = None) -> Optional[str]:
+        with self.db.get_connection() as conn:
+            if symbol:
+                row = conn.execute(
+                    """
+                    SELECT signal_id FROM signals
+                    WHERE chat_id = ? AND symbol = ? AND state = 'ENTRY_PENDING'
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (chat_id, symbol),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT signal_id FROM signals
+                    WHERE chat_id = ? AND state = 'ENTRY_PENDING'
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (chat_id,),
+                ).fetchone()
+            return row["signal_id"] if row else None
 
     def save_message_version(
         self,
@@ -449,4 +502,28 @@ class OrderRepository:
                     )
                 )
             return orders
+
+    def cancel_open_orders_for_signal(self, signal_id: str) -> None:
+        now_str = datetime.utcnow().isoformat()
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE orders
+                SET status = 'CANCELED', updated_at = ?
+                WHERE signal_id = ? AND status IN ('NEW', 'PARTIALLY_FILLED')
+                """,
+                (now_str, signal_id),
+            )
+
+    def cancel_open_orders_for_symbol(self, symbol: str) -> None:
+        now_str = datetime.utcnow().isoformat()
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE orders
+                SET status = 'CANCELED', updated_at = ?
+                WHERE symbol = ? AND status IN ('NEW', 'PARTIALLY_FILLED')
+                """,
+                (now_str, symbol),
+            )
 

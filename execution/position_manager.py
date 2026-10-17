@@ -47,6 +47,17 @@ class PositionManager:
         close_side = OrderSide.SELL if side == PositionSide.LONG else OrderSide.BUY
 
         try:
+            if hasattr(self.client, "cancel_all_symbol_orders"):
+                try:
+                    await self.client.cancel_all_symbol_orders(symbol)
+                except Exception:
+                    pass
+            elif hasattr(self.client, "cancel_all_orders"):
+                try:
+                    await self.client.cancel_all_orders(symbol)
+                except Exception:
+                    pass
+
             # Place immediate market reduce-only order
             await self.client.create_standard_order(
                 symbol=symbol,
