@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 import pytz
 
 from config.config import AppConfig
-from core.enums import PositionSide
+from core.enums import MarginMode, PositionSide
 from core.exceptions import RiskCheckError
 from core.models import ValidatedSignal
 
@@ -61,18 +61,33 @@ class RiskEngine:
         total_buffer_factor = Decimal("1.0") + (self.config.risk.fee_buffer_pct + self.config.risk.slippage_buffer_pct) / Decimal("100")
         effective_risk_budget = signal_risk_budget / total_buffer_factor
 
+        # Check if margin cap should be enforced (CROSSED mode)
+        margin_mode = signal.margin_mode or getattr(self.config.risk, "margin_mode", None)
+        enforce_margin_cap = margin_mode in (MarginMode.CROSSED, MarginMode.CROSS, "CROSS", "CROSSED")
+        max_margin_pct = getattr(self.config.risk, "max_margin_per_trade_pct", Decimal("2.0"))
+        max_margin_amount = (max_margin_pct / Decimal("100")) * current_equity
+        lev = Decimal(str(signal.leverage or getattr(self.config.risk, "default_leverage", 25)))
+
         entry_results: List[Tuple[Decimal, Decimal]] = []
         total_notional = Decimal("0")
 
-        # Distribute risk budget according to entry weights
+        # Distribute risk and margin budget according to entry weights
         for price, weight in signal.entries:
             sub_budget = effective_risk_budget * weight
             price_distance = abs(price - signal.stop_loss)
             if price_distance <= Decimal("0"):
                 raise RiskCheckError(f"Khoang cach gia den SL bang 0 tai entry {price}")
 
-            # raw_qty = sub_budget / price_distance
-            raw_qty = sub_budget / price_distance
+            # 1. Qty bounded by risk budget (Dollar loss to SL <= sub_budget)
+            qty_by_risk = sub_budget / price_distance
+
+            # 2. Qty bounded by max margin cap if enforced
+            if enforce_margin_cap and lev > Decimal("0"):
+                sub_margin_budget = max_margin_amount * weight
+                qty_by_margin = (sub_margin_budget * lev) / price
+                raw_qty = min(qty_by_risk, qty_by_margin)
+            else:
+                raw_qty = qty_by_risk
 
             # Round quantity down to step_size
             qty = self.round_step_size(raw_qty, step_size)
@@ -93,8 +108,16 @@ class RiskEngine:
             entry_results.append((price, qty))
 
         # Check required margin vs leverage
-        required_margin = total_notional / Decimal(str(signal.leverage))
-        if required_margin > current_equity * Decimal("0.9"):  # safety cap
+        required_margin = total_notional / lev
+        if enforce_margin_cap:
+            max_allowed_margin = max_margin_amount * Decimal("1.25")
+            if required_margin > max_allowed_margin:
+                scale = max_allowed_margin / required_margin
+                entry_results = [(p, self.round_step_size(q * scale, step_size)) for p, q in entry_results]
+                total_notional = sum(p * q for p, q in entry_results)
+                required_margin = total_notional / lev
+
+        if required_margin > current_equity * Decimal("0.9"):  # absolute safety guard
             raise RiskCheckError(
                 f"Margin yeu cau ({required_margin:.2f} USDT) vuot qua 90% equity ({current_equity:.2f} USDT)"
             )

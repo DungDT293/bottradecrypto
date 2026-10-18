@@ -21,6 +21,7 @@ class OrderType(str, Enum):
 class MarginMode(str, Enum):
     ISOLATED = "ISOLATED"
     CROSSED = "CROSSED"
+    CROSS = "CROSSED"
 
 
 class SignalState(str, Enum):

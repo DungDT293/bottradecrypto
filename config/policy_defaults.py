@@ -49,18 +49,31 @@ def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("60.0")) -> List[
 
 class RiskPolicy(BaseModel):
     risk_per_signal_pct: Decimal = Decimal("1.5")
-    max_total_open_risk_pct: Decimal = Decimal("5.0")
-    max_daily_loss_pct: Decimal = Decimal("5.0")
-    max_active_signals: int = 2
-    default_leverage: int = 20
+    max_total_open_risk_pct: Decimal = Decimal("6.0")
+    max_daily_loss_pct: Decimal = Decimal("10.0")
+    max_active_signals: int = 4
+    default_leverage: int = 25
     max_leverage: int = 50
-    margin_mode: MarginMode = MarginMode.ISOLATED
+    margin_mode: MarginMode = MarginMode.CROSSED
+    target_margin_pct: Decimal = Decimal("1.5")
+    max_margin_per_trade_pct: Decimal = Decimal("2.0")
     signal_max_age_seconds: int = 300
     entry_order_ttl_seconds: int = 900
     breakeven_after_tp1_default: bool = True
     fee_buffer_pct: Decimal = Decimal("0.1")
     slippage_buffer_pct: Decimal = Decimal("0.1")
-    sl_buffer_pct: Decimal = Decimal("1.0")
+    sl_buffer_pct: Decimal = Decimal("0.3")
+
+    @field_validator("margin_mode", mode="before")
+    @classmethod
+    def normalize_margin_mode(cls, v):
+        if isinstance(v, str):
+            v_upper = v.upper().strip()
+            if v_upper in ("CROSS", "CROSSED"):
+                return MarginMode.CROSSED
+            if v_upper == "ISOLATED":
+                return MarginMode.ISOLATED
+        return v
 
 
 class ExecutionPolicyConfig(BaseModel):

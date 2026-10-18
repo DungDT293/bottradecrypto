@@ -372,12 +372,18 @@ copy dist\backend-x86_64-pc-windows-msvc.exe desktop\src-tauri\binaries\
 cd desktop\src-tauri
 cargo tauri build --bundles nsis
 ```
-- **Tệp cài đặt đầu ra:** `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.1.8_x64-setup.exe`
+- **Tệp cài đặt đầu ra:** `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.1.9_x64-setup.exe`
 - **Tệp thực thi độc lập:** `desktop/src-tauri/target/release/app.exe`
 
 ---
 
 ## 11. NHẬT KÝ PHIÊN BẢN (CHANGELOG)
+
+### Bản phát hành v1.1.9:
+- **Chuyển đổi hoàn toàn sang CROSSED Margin theo chuẩn Admin:** Tự động thiết lập chế độ ký quỹ `CROSSED` cho toàn bộ các cặp giao dịch theo đúng logic tín hiệu admin Telegram.
+- **Kiểm soát rủi ro kép (Dual-Constraint Position Sizing):** Áp dụng đồng thời 2 điều kiện: giới hạn lỗ đô la và giới hạn ký quỹ ví nghiêm ngặt 1.5% - 2.0% equity (`max_margin_per_trade_pct = 2.0%`). Khắc phục triệt để tình trạng tài khoản nhỏ bị chiếm dụng margin lớn (như 10% vốn) khi đòn bẩy sàn thấp hoặc SL xa.
+- **Nâng cấp cơ chế Breakeven (Kèo Bất Tử) tức thì:** Tự động dời SL về Entry + phí sàn ngay khi lệnh chốt lời TP1 được khớp trên sàn (nhận diện qua `tp1_reached`, trạng thái DB hoặc đối chiếu biến mất khỏi Binance open orders), triệt tiêu rủi ro giá quét chạm TP1 rồi giật ngược về cắn SL ban đầu.
+- **Bộ cài đặt NSIS v1.1.9:** Đóng gói file cài đặt tự động `telegram-binance-signal-executor_1.1.9_x64-setup.exe`.
 
 ### Bản phát hành v1.1.8:
 - **Triệt tiêu lỗi gửi lệnh Binance (UnboundLocalError `asyncio`):** Đưa `import asyncio` ra phạm vi module-level tại `binance_client.py` và `telegram/client.py`, giải quyết triệt để lỗi gián đoạn gửi lệnh khi rate-limiter không bị kích hoạt.

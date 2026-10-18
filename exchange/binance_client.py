@@ -239,20 +239,29 @@ class BinanceFuturesClient:
         return True
 
     # 3. Margin Type Setup & Check
-    async def set_margin_type_isolated(self, symbol: str) -> None:
-        """Sets margin mode to ISOLATED. Rejects if open position exists and cannot change."""
+    async def set_margin_type(self, symbol: str, margin_mode: str = "CROSSED") -> None:
+        """Sets margin mode to ISOLATED or CROSSED."""
+        mode_str = "CROSSED" if str(margin_mode).upper() in ("CROSS", "CROSSED") else "ISOLATED"
         try:
             await self._request(
                 "POST",
                 "/fapi/v1/marginType",
-                params={"symbol": symbol, "marginType": "ISOLATED"},
+                params={"symbol": symbol, "marginType": mode_str},
                 signed=True,
             )
         except ExchangeAdapterError as e:
-            # Code -4046 means "No need to change margin type" (already isolated)
+            # Code -4046 means "No need to change margin type" (already set)
             # Code -4067 means "Position side cannot be changed if open orders exist"
             if "-4046" not in str(e) and "-4067" not in str(e):
                 raise
+
+    async def set_margin_type_cross(self, symbol: str) -> None:
+        """Sets margin mode to CROSSED (CROSS)."""
+        await self.set_margin_type(symbol, "CROSSED")
+
+    async def set_margin_type_isolated(self, symbol: str) -> None:
+        """Sets margin mode to ISOLATED."""
+        await self.set_margin_type(symbol, "ISOLATED")
 
     # 4. Set Leverage
     async def set_leverage(self, symbol: str, leverage: int) -> int:

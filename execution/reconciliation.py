@@ -372,7 +372,20 @@ class ReconciliationEngine:
                                     tp1_price = Decimal(str(tps_raw[0]))
                                     is_long = amt > Decimal("0")
                                     tp1_reached = (mark_p >= tp1_price) if is_long else (mark_p <= tp1_price)
-                                    if tp1_reached:
+
+                                    # Check if TP1 order was FILLED in database or on Binance
+                                    tp1_orders = [o for o in db_orders if ("tp_" in o.client_order_id and ("_1_" in o.client_order_id or "_1" in o.client_order_id))]
+                                    tp1_filled_in_db = any(o.status == "FILLED" or (o.filled_quantity and Decimal(str(o.filled_quantity)) > Decimal("0")) for o in tp1_orders)
+
+                                    tp1_filled_on_exchange = False
+                                    if tp1_orders and all_open_orders is not None:
+                                        tp1_cids = {o.client_order_id for o in tp1_orders}
+                                        open_cids = {str(o.get("clientOrderId")) for o in all_open_orders if o.get("symbol") == symbol}
+                                        # If TP1 order existed but is no longer open on Binance, it has filled!
+                                        if any(cid not in open_cids for cid in tp1_cids):
+                                            tp1_filled_on_exchange = True
+
+                                    if tp1_reached or tp1_filled_in_db or tp1_filled_on_exchange:
                                         validated_sig = build_validated_signal_from_row(row, self.config)
                                         old_sl_id = None
                                         for o in db_orders:
@@ -387,12 +400,12 @@ class ReconciliationEngine:
                                         )
                                         report["breakeven_activated"] += 1
                                         report["discrepancies"].append(
-                                            f"KÈO BẤT TỬ: Giá Mark {symbol} ({mark_p}) đã vượt TP1 ({tp1_price}). Đã dời SL về hòa vốn!"
+                                            f"KÈO BẤT TỬ: TP1 ({tp1_price}) của {symbol} đã khớp/chạm! Đã tự động dời SL về hòa vốn Entry ({entry_p})!"
                                         )
                                         self.signal_repo.record_timeline_event(
                                             sig_id,
                                             "BREAKEVEN_SL_ACTIVATED",
-                                            f"Kèo Bất Tử: Giá ({mark_p}) đã chạm/vượt TP1 ({tp1_price}). Đã dời SL về Entry ({entry_p}) + phí!",
+                                            f"Kèo Bất Tử: TP1 ({tp1_price}) đã khớp. Đã dời SL về Entry ({entry_p}) + phí sàn!",
                                         )
                         except Exception as ex_be:
                             report["discrepancies"].append(f"Lỗi kiểm tra Breakeven cho {symbol}: {ex_be}")

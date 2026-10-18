@@ -347,6 +347,14 @@ Từ những quan sát trên hình ảnh thực tế của người dùng:
 ### Feature 14: Bộ Cài Đặt Tự Động NSIS v1.1.8
 - Đóng gói bản cài đặt Windows mới nhất `telegram-binance-signal-executor_1.1.8_x64-setup.exe` tích hợp trọn vẹn toàn bộ các bản vá trên.
 
+### Feature 15: Chuyển Đổi Ký Quỹ CROSSED, Giới Hạn Margin 1.5% - 2.0% & Breakeven Tức Thì (v1.1.9)
+- **Đồng bộ hóa Cross Margin:** Tự động gọi API `set_margin_type_cross()` để chuyển đổi margin mode sang `CROSSED` cho mọi symbol theo đúng khuyến nghị của các Admin Telegram.
+- **Dual-Constraint Position Sizing:** Tích hợp kiểm soát ký quỹ kép, vừa đảm bảo rủi ro đô la `budget_risk_amount` vừa khống chế biên ký quỹ tối đa `max_margin_per_trade_pct = 2.0%` của số dư ví. Ngăn chặn tuyệt đối tình trạng tài khoản nhỏ bị chiếm dụng margin lớn (như 10%) khi đòn bẩy sàn thấp hoặc SL sâu (-8% đến -10%).
+- **Nâng cấp Breakeven tức thì:** Hệ thống dời SL về Entry + phí sàn ngay khi TP1 khớp thành công trên Binance (qua cờ `tp1_reached`, trạng thái order DB hoặc kiểm tra lệnh TP1 không còn trong open orders), đảm bảo vị thế luôn được bảo vệ thành "Kèo Bất Tử" (Risk-Free).
+
+### Feature 16: Bộ Cài Đặt Tự Động NSIS v1.1.9
+- Đóng gói bản cài đặt Windows mới nhất `telegram-binance-signal-executor_1.1.9_x64-setup.exe` tích hợp trọn vẹn cơ chế Cross Margin và bảo vệ vốn tối ưu.
+
 
 ---
 

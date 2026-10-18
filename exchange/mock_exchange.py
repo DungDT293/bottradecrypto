@@ -44,11 +44,17 @@ class MockBinanceFuturesClient:
             raise AccountStateBlockedError("BLOCKED: Tai khoan dang o Hedge Mode")
         return True
 
-    async def set_margin_type_isolated(self, symbol: str) -> None:
+    async def set_margin_type(self, symbol: str, margin_mode: str = "CROSSED") -> None:
         pos = self.positions.get(symbol)
         if pos and Decimal(str(pos.get("positionAmt", "0"))) != Decimal("0"):
             raise ExchangeAdapterError("Khong the doi margin type khi dang co vi the mo")
-        self.margin_modes[symbol] = "ISOLATED"
+        self.margin_modes[symbol] = "CROSSED" if str(margin_mode).upper() in ("CROSS", "CROSSED") else "ISOLATED"
+
+    async def set_margin_type_cross(self, symbol: str) -> None:
+        await self.set_margin_type(symbol, "CROSSED")
+
+    async def set_margin_type_isolated(self, symbol: str) -> None:
+        await self.set_margin_type(symbol, "ISOLATED")
 
     async def set_leverage(self, symbol: str, leverage: int) -> int:
         self.leverages[symbol] = leverage
@@ -66,6 +72,9 @@ class MockBinanceFuturesClient:
             "marginType": self.margin_modes.get(symbol, "isolated"),
             "leverage": str(self.leverages.get(symbol, 1)),
         })
+
+    async def get_open_positions(self) -> List[Dict[str, Any]]:
+        return list(self.positions.values())
 
     async def create_standard_order(
         self,

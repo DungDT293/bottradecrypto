@@ -537,7 +537,11 @@ class TelegramSignalListener:
                             )
 
                     try:
-                        await client.set_margin_type_isolated(validated.symbol)
+                        target_margin_mode = getattr(self.config.risk, "margin_mode", MarginMode.CROSSED)
+                        if str(target_margin_mode).upper() in ("CROSS", "CROSSED"):
+                            await client.set_margin_type_cross(validated.symbol)
+                        else:
+                            await client.set_margin_type_isolated(validated.symbol)
                     except Exception:
                         pass
                     try:
