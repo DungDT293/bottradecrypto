@@ -160,8 +160,8 @@ export const LeaderboardPage: React.FC = () => {
               Winrate: {summary?.best_channel_winrate ?? 0}%
             </span>
             <span style={{ color: "var(--text-muted)" }}>•</span>
-            <span style={{ color: "#10b981", fontWeight: 700 }}>
-              PnL: +${summary?.best_channel_pnl?.toLocaleString() ?? "0"}
+            <span style={{ color: (summary?.best_channel_pnl ?? 0) >= 0 ? "#10b981" : "#ef4444", fontWeight: 700 }}>
+              PnL: {(summary?.best_channel_pnl ?? 0) >= 0 ? "+" : ""}${summary?.best_channel_pnl?.toLocaleString() ?? "0"}
             </span>
           </div>
         </div>

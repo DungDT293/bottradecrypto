@@ -37,14 +37,21 @@ if not exist "%APPDATA%\telegram_binance_signal_executor\data\telegram_user.sess
 )
 if exist "%LOCALAPPDATA%\telegram-binance-signal-executor" (
     copy /y "%~dp0config.yaml" "%LOCALAPPDATA%\telegram-binance-signal-executor\config.yaml" >nul 2>&1
+    if exist "%~dp0dist\backend-x86_64-pc-windows-msvc.exe" (
+        copy /y "%~dp0dist\backend-x86_64-pc-windows-msvc.exe" "%LOCALAPPDATA%\telegram-binance-signal-executor\backend-x86_64-pc-windows-msvc.exe" >nul 2>&1
+        copy /y "%~dp0dist\backend-x86_64-pc-windows-msvc.exe" "%LOCALAPPDATA%\telegram-binance-signal-executor\backend.exe" >nul 2>&1
+    )
+    if exist "%~dp0desktop\src-tauri\target\release\app.exe" (
+        copy /y "%~dp0desktop\src-tauri\target\release\app.exe" "%LOCALAPPDATA%\telegram-binance-signal-executor\app.exe" >nul 2>&1
+    )
 )
 
 
 echo [3/3] Khoi dong ban phat hanh Dashboard moi nhat...
-if exist "%~dp0desktop\src-tauri\target\release\app.exe" (
-    start "" "%~dp0desktop\src-tauri\target\release\app.exe"
-) else if exist "%LOCALAPPDATA%\telegram-binance-signal-executor\app.exe" (
+if exist "%LOCALAPPDATA%\telegram-binance-signal-executor\app.exe" (
     start "" "%LOCALAPPDATA%\telegram-binance-signal-executor\app.exe"
+) else if exist "%~dp0desktop\src-tauri\target\release\app.exe" (
+    start "" "%~dp0desktop\src-tauri\target\release\app.exe"
 ) else (
     echo Khong tim thay tap tin thuc thi Dashboard!
 )

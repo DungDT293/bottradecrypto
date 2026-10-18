@@ -34,7 +34,7 @@ export const Sidebar: React.FC = () => {
     }).catch(() => {});
   }, [snapshot]);
 
-  const unreadAlerts = snapshot?.alerts?.filter((a) => !a.read).length || 0;
+  const unreadAlerts = snapshot?.unread_alerts_count ?? (snapshot?.alerts?.filter((a) => !a.read).length || 0);
 
   const navItems: NavItemDef[] = [
     { key: "overview", label: "Tổng quan", icon: LayoutDashboard },
@@ -56,7 +56,7 @@ export const Sidebar: React.FC = () => {
         <ShieldCheck size={24} className="text-success" />
         <div>
           <h1>Signal Executor</h1>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v1.1.9 Desktop Shell</div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v1.2.0 Desktop Shell</div>
         </div>
 
       </div>

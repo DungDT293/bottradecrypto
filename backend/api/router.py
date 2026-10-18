@@ -47,7 +47,7 @@ def create_api_router(
     trading_svc = TradingService(db, config)
     stats_svc = StatsService(db, config)
     channel_analytics_svc = ChannelAnalyticsService(db.db_path)
-    alert_svc = AlertService.get_instance()
+    alert_svc = AlertService.get_instance(db=db)
     if not alert_svc._alerts:
         alert_svc.add_alert(
             AlertLevel.INFO,
@@ -212,6 +212,7 @@ def create_api_router(
             "positions": positions,
             "orders": orders,
             "alerts": recent_alerts,
+            "unread_alerts_count": alert_svc.get_unread_count(),
         }
 
     # -------------------------------------------------------------

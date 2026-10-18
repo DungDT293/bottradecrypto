@@ -26,7 +26,7 @@ export const LogsPage: React.FC = () => {
 
   useEffect(() => {
     fetchAlerts();
-  }, []);
+  }, [snapshot]);
 
   const handleExportDiagnostics = async () => {
     try {

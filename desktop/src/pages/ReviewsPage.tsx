@@ -70,8 +70,28 @@ export const ReviewsPage: React.FC = () => {
       </div>
 
       <div className="table-container">
-        <div className="table-header">
+        <div className="table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="table-title">Danh sách Chờ Xem Xét ({reviewSignals.length})</div>
+          {reviewSignals.length > 0 && (
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ color: "var(--color-danger)" }}
+              onClick={async () => {
+                if (!window.confirm("Bạn có chắc chắn muốn từ chối tất cả các tín hiệu đang chờ duyệt này?")) return;
+                for (const s of reviewSignals) {
+                  try {
+                    await api.resolveSignal(s.signal_id, "REJECTED", "Người dùng từ chối hàng loạt tín hiệu cũ.");
+                  } catch {}
+                }
+                addToast("Đã từ chối tất cả tín hiệu chờ duyệt.", "success");
+                await fetchReviewSignals();
+                await refreshSnapshot();
+              }}
+            >
+              <XCircle size={14} />
+              <span>Từ chối tất cả</span>
+            </button>
+          )}
         </div>
         <table>
           <thead>
@@ -104,7 +124,12 @@ export const ReviewsPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="mono" style={{ fontSize: "12px" }}>
-                    Entry: {Array.isArray(sig.entries) ? sig.entries.join(", ") : sig.entries} | SL: {sig.stop_loss || "—"}
+                    <div style={{ fontWeight: 600 }}>
+                      Entry: {Array.isArray(sig.entries) && sig.entries.length > 0 ? sig.entries.join(", ") : "Thị trường"}
+                    </div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "11px", marginTop: "2px" }}>
+                      SL: {sig.stop_loss || "—"} {sig.take_profits && sig.take_profits.length > 0 ? `| TP: ${sig.take_profits.join(", ")}` : ""}
+                    </div>
                   </td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--color-warning)" }}>

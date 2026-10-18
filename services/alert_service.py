@@ -1,3 +1,5 @@
+import os
+import sqlite3
 import threading
 from datetime import datetime, timezone
 from enum import Enum
@@ -24,10 +26,11 @@ class AlertItem(BaseModel):
 
 class AlertService:
     """
-    Centralized in-app alert and notification service.
+    Centralized in-app alert and notification service with SQLite persistence.
     Features:
     - Thread-safe alert logging.
-    - Anti-spam deduplication (collapses repeated identical errors within 30s).
+    - Persistent SQLite storage surviving restarts.
+    - Anti-spam deduplication (collapses repeated identical errors).
     - Unread tracking without destroying audit records.
     - Never throws exceptions that could crash the trading engine.
     """
@@ -35,18 +38,86 @@ class AlertService:
     _instance: Optional["AlertService"] = None
     _lock = threading.Lock()
 
-    def __init__(self, max_history: int = 500):
+    def __init__(self, max_history: int = 500, db: Optional[Any] = None):
         self.max_history = max_history
         self._alerts: List[AlertItem] = []
         self._counter = 0
         self._mutex = threading.Lock()
+        self.db = db
+        if self.db:
+            self._init_db_table()
+            self._load_from_db()
 
     @classmethod
-    def get_instance(cls) -> "AlertService":
+    def get_instance(cls, db: Optional[Any] = None) -> "AlertService":
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls()
+                cls._instance = cls(db=db)
+            elif db and not cls._instance.db:
+                cls._instance.set_db(db)
             return cls._instance
+
+    def set_db(self, db: Any) -> None:
+        with self._mutex:
+            self.db = db
+            self._init_db_table()
+            self._load_from_db()
+
+    def _init_db_table(self) -> None:
+        if not self.db:
+            return
+        try:
+            with self.db.get_connection() as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS app_alerts (
+                        id TEXT PRIMARY KEY,
+                        timestamp TEXT NOT NULL,
+                        level TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        is_read INTEGER NOT NULL DEFAULT 0,
+                        repeat_count INTEGER NOT NULL DEFAULT 1
+                    )
+                """)
+        except Exception:
+            pass
+
+    def _load_from_db(self) -> None:
+        if not self.db:
+            return
+        try:
+            with self.db.get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT id, timestamp, level, title, message, source, is_read, repeat_count
+                    FROM app_alerts
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (self.max_history,)).fetchall()
+
+                self._alerts = [
+                    AlertItem(
+                        id=r["id"],
+                        timestamp=r["timestamp"],
+                        level=AlertLevel(r["level"]),
+                        title=r["title"],
+                        message=r["message"],
+                        source=r["source"],
+                        read=bool(r["is_read"]),
+                        repeat_count=r["repeat_count"],
+                    )
+                    for r in rows
+                ]
+                # Update counter
+                for r in rows:
+                    try:
+                        num = int(r["id"].replace("ALT-", ""))
+                        if num > self._counter:
+                            self._counter = num
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def add_alert(
         self,
@@ -57,7 +128,7 @@ class AlertService:
     ) -> AlertItem:
         with self._mutex:
             now_iso = datetime.now(timezone.utc).isoformat()
-            
+
             # Deduplication check: check if last alert has identical level & title
             if self._alerts:
                 last_alert = self._alerts[0]
@@ -70,6 +141,17 @@ class AlertService:
                     last_alert.timestamp = now_iso
                     last_alert.message = message
                     last_alert.read = False
+
+                    if self.db:
+                        try:
+                            with self.db.get_connection() as conn:
+                                conn.execute("""
+                                    UPDATE app_alerts
+                                    SET timestamp = ?, message = ?, is_read = 0, repeat_count = ?
+                                    WHERE id = ?
+                                """, (now_iso, message, last_alert.repeat_count, last_alert.id))
+                        except Exception:
+                            pass
                     return last_alert
 
             self._counter += 1
@@ -87,6 +169,17 @@ class AlertService:
             self._alerts.insert(0, item)
             if len(self._alerts) > self.max_history:
                 self._alerts.pop()
+
+            if self.db:
+                try:
+                    with self.db.get_connection() as conn:
+                        conn.execute("""
+                            INSERT OR REPLACE INTO app_alerts (id, timestamp, level, title, message, source, is_read, repeat_count)
+                            VALUES (?, ?, ?, ?, ?, ?, 0, 1)
+                        """, (alert_id, now_iso, level.value, title, message, source))
+                except Exception:
+                    pass
+
             return item
 
     def get_alerts(
@@ -116,6 +209,12 @@ class AlertService:
             for a in self._alerts:
                 if a.id == alert_id:
                     a.read = True
+                    if self.db:
+                        try:
+                            with self.db.get_connection() as conn:
+                                conn.execute("UPDATE app_alerts SET is_read = 1 WHERE id = ?", (alert_id,))
+                        except Exception:
+                            pass
                     return True
             return False
 
@@ -126,9 +225,20 @@ class AlertService:
                 if not a.read:
                     a.read = True
                     count += 1
+            if self.db:
+                try:
+                    with self.db.get_connection() as conn:
+                        conn.execute("UPDATE app_alerts SET is_read = 1")
+                except Exception:
+                    pass
             return count
 
     def clear(self) -> None:
         with self._mutex:
             self._alerts.clear()
-
+            if self.db:
+                try:
+                    with self.db.get_connection() as conn:
+                        conn.execute("DELETE FROM app_alerts")
+                except Exception:
+                    pass

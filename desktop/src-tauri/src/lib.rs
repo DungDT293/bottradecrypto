@@ -216,6 +216,8 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
     }
 
     let child = cmd
@@ -226,7 +228,7 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
 
     // 2. Wait for fresh handshake file to be written and marked READY by the child process
     let start = Instant::now();
-    let timeout = Duration::from_secs(14);
+    let timeout = Duration::from_secs(25);
 
     while start.elapsed() < timeout {
         if handshake_path.exists() {

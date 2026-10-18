@@ -244,6 +244,7 @@ export interface AppSnapshot {
   positions: PositionRecord[];
   orders: OrderRecord[];
   alerts: AlertRecord[];
+  unread_alerts_count?: number;
 }
 
 export interface ChannelLeaderboardItem {
