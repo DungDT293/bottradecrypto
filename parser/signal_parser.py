@@ -279,6 +279,20 @@ class SignalParser:
             except InvalidOperation:
                 pass
 
+        # Check Dual Entry with "ENTRY PRICE: ... 2nd ENTRY: ..."
+        m_wolf_dual = re.search(
+            r"ENTRY\s*(?:PRICE|TARGET)?\s*:\s*\$?([\d\.]+).*?(?:2nd|second)\s*ENTRY\s*:\s*\$?([\d\.]+)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if m_wolf_dual:
+            try:
+                p1 = Decimal(m_wolf_dual.group(1))
+                p2 = Decimal(m_wolf_dual.group(2))
+                return [p1, p2], EntryMode.MULTIPLE, None, False
+            except InvalidOperation:
+                pass
+
         # Check Multiple numbered entries:
         # Format 1: Explicit "Entry 1: ... \n Entry 2: ..." or "1st ENTRY: ... \n 2nd ENTRY: ..."
         m_explicit_numbered = re.findall(r"(?:Entry\s*\d+|\d+(?:st|nd|rd|th)\s*ENTRY)\s*[:\-\>\s\u27a1\ufe0f]*\$?([\d\.]+)", text, re.IGNORECASE)
