@@ -112,7 +112,7 @@ def create_app(
 
     app = FastAPI(
         title="Telegram Binance Signal Executor API",
-        version="1.1.7",
+        version="1.1.8",
         docs_url="/docs" if config.mode.value != "LIVE" else None,
         redoc_url=None,
         lifespan=lifespan,

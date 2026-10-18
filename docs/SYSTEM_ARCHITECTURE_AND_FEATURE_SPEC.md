@@ -335,6 +335,19 @@ Từ những quan sát trên hình ảnh thực tế của người dùng:
 - Đóng gói file cài đặt tự động `telegram-binance-signal-executor_1.1.7_x64-setup.exe` trong `target/release/bundle/nsis` và thư mục gốc của dự án.
 - Tự động tích hợp biểu tượng desktop shortcut, dọn dẹp tiến trình cũ và cấu hình đường dẫn dữ liệu `%APPDATA%`.
 
+### Bug 12: Lỗi Scope UnboundLocalError 'asyncio' Trong Binance Client
+- **Hiện tượng:** Khi nhận tín hiệu mới (như QUSDT #177820), hệ thống xác thực tín hiệu hợp lệ nhưng không thể gửi lệnh lên sàn Binance, ghi nhật ký lỗi: `cannot access local variable 'asyncio' where it is not associated with a value`.
+- **Nguyên nhân:** Lệnh `import asyncio` bị đặt cục bộ bên trong khối `if` rate-limiter của hàm `_request()`. Khi khối `if` không chạy qua, câu lệnh `except (asyncio.TimeoutError, ...)` bên dưới không thể truy cập được biến `asyncio`.
+- **Khắc phục:** Đưa `import asyncio` lên phạm vi module-level tại `binance_client.py` và `telegram/client.py`, giải quyết triệt để lỗi scope trong Python.
+
+### Bug 13: Lỗi Regex Bullet Gọt Mất Phần Thập Phân ('0.04800' -> '4800')
+- **Hiện tượng:** Trong `signal_parser.py`, biểu thức chính quy nhận diện chỉ mục bullet `(?:\d+[\)\.]\s*)?` nhận nhầm chuỗi `0.` của số thập phân `0.04800` thành bullet, dẫn đến việc cắt số thập phân thành số nguyên `4800`.
+- **Khắc phục:** Cập nhật regex phân tách rành mạch: `(?:\d+\)\s*|\d+\.(?!\d)\s*)?`, bảo đảm dấu chấm của số thập phân không bao giờ bị coi là ký tự bullet.
+
+### Feature 14: Bộ Cài Đặt Tự Động NSIS v1.1.8
+- Đóng gói bản cài đặt Windows mới nhất `telegram-binance-signal-executor_1.1.8_x64-setup.exe` tích hợp trọn vẹn toàn bộ các bản vá trên.
+
+
 ---
 
 ## 7. QUY TRÌNH KIỂM CHỨNG & VẬN HÀNH CHUẨN (STANDARD OPERATING PROCEDURE)

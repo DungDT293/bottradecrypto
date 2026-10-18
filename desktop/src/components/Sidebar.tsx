@@ -56,7 +56,7 @@ export const Sidebar: React.FC = () => {
         <ShieldCheck size={24} className="text-success" />
         <div>
           <h1>Signal Executor</h1>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v1.1.7 Desktop Shell</div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v1.1.8 Desktop Shell</div>
         </div>
 
       </div>

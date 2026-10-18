@@ -372,19 +372,25 @@ copy dist\backend-x86_64-pc-windows-msvc.exe desktop\src-tauri\binaries\
 cd desktop\src-tauri
 cargo tauri build --bundles nsis
 ```
-- **Tệp cài đặt đầu ra:** `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.1.7_x64-setup.exe`
+- **Tệp cài đặt đầu ra:** `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.1.8_x64-setup.exe`
 - **Tệp thực thi độc lập:** `desktop/src-tauri/target/release/app.exe`
 
 ---
 
-## 11. NHẬT KÝ PHIÊN BẢN (CHANGELOG v1.1.7)
+## 11. NHẬT KÝ PHIÊN BẢN (CHANGELOG)
 
+### Bản phát hành v1.1.8:
+- **Triệt tiêu lỗi gửi lệnh Binance (UnboundLocalError `asyncio`):** Đưa `import asyncio` ra phạm vi module-level tại `binance_client.py` và `telegram/client.py`, giải quyết triệt để lỗi gián đoạn gửi lệnh khi rate-limiter không bị kích hoạt.
+- **Sửa lỗi regex Bullet Parser:** Tách biệt rõ ràng chỉ mục bullet `\d+\)` và `\d+\.(?!\d)` với số thập phân, bảo toàn nguyên vẹn các mức giá như `0.04800` không bị nhận nhầm thành `4800`.
+- **Kiểm soát chặt chẽ khoảng cách SL gốc:** Kiểm tra tỷ lệ khoảng cách `sl_dist_pct` trên giá SL nguyên bản của admin trước khi áp dụng đệm chống quét râu nến (anti-wick buffer).
+- **Bộ cài đặt NSIS v1.1.8:** Đóng gói file cài đặt tự động `telegram-binance-signal-executor_1.1.8_x64-setup.exe`.
+
+### Bản phát hành v1.1.7:
 - **Single-entry Target Parser:** Khắc phục lỗi bóc tách khi tín hiệu chỉ có 1 mức entry dạng `Entry Targets: 1) 0.1160`.
 - **Dynamic Auto-Entry:** Tự động bắt lệnh đón ngay khi giá thị trường tốt hơn hoặc bằng giá entry admin đưa ra.
 - **Phân bổ Multi-TP (60% / 26% / 14%):** Tự động chia tỷ trọng khối lượng 3 bậc chốt lời, dời Stop Loss về Breakeven (Hòa vốn) ngay khi khớp TP1.
 - **Tối ưu Rate Limiter Binance (2000 weight/phút):** Tách luồng ưu tiên cao nhất cho endpoint đặt lệnh `/order` và `/algoOrder`.
 - **Self-Healing Reconciliation:** Tự động phát hiện vị thế mở và đối chiếu lệnh sàn, ngăn chặn tình trạng đặt lặp lệnh Stop Loss khi khởi động lại.
-- **Bộ cài đặt NSIS v1.1.7:** Đóng gói file cài đặt tự động `telegram-binance-signal-executor_1.1.7_x64-setup.exe` và phím tắt Desktop tiện lợi.
 
 
 
