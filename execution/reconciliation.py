@@ -375,17 +375,11 @@ class ReconciliationEngine:
 
                                     # Check if TP1 order was FILLED in database or on Binance
                                     tp1_orders = [o for o in db_orders if ("tp_" in o.client_order_id and ("_1_" in o.client_order_id or "_1" in o.client_order_id))]
-                                    tp1_filled_in_db = any(o.status == "FILLED" or (o.filled_quantity and Decimal(str(o.filled_quantity)) > Decimal("0")) for o in tp1_orders)
+                                    # Guard: For LONG, mark_p MUST be strictly above entry_p to move SL up to breakeven!
+                                    # Placing a STOP_MARKET SELL with stopPrice >= mark_p causes immediate fill on Binance.
+                                    price_favorable_for_be = (mark_p > entry_p) if is_long else (mark_p < entry_p)
 
-                                    tp1_filled_on_exchange = False
-                                    if tp1_orders and all_open_orders is not None:
-                                        tp1_cids = {o.client_order_id for o in tp1_orders}
-                                        open_cids = {str(o.get("clientOrderId")) for o in all_open_orders if o.get("symbol") == symbol}
-                                        # If TP1 order existed but is no longer open on Binance, it has filled!
-                                        if any(cid not in open_cids for cid in tp1_cids):
-                                            tp1_filled_on_exchange = True
-
-                                    if tp1_reached or tp1_filled_in_db or tp1_filled_on_exchange:
+                                    if (tp1_reached or tp1_filled_in_db) and price_favorable_for_be:
                                         validated_sig = build_validated_signal_from_row(row, self.config)
                                         old_sl_id = None
                                         for o in db_orders:

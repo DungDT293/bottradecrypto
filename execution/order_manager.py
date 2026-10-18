@@ -257,14 +257,17 @@ class OrderManager:
                 be_price = (be_price // f.tick_size) * f.tick_size
                 position_qty = (position_qty // f.step_size) * f.step_size
 
-                # Guard against Binance -2021: Order would immediately trigger
+                # Guard against Binance -2021: Never place a Stop Loss across current mark price!
+                # Setting SL 2 ticks away from market price causes instant unwanted market exit.
                 pos = await self.client.get_position(signal.symbol)
                 if pos and float(pos.get("markPrice", 0)) > 0:
                     current_mark = Decimal(str(pos.get("markPrice")))
                     if signal.side == PositionSide.LONG and be_price >= current_mark:
-                        be_price = ((current_mark - (f.tick_size * Decimal("2"))) // f.tick_size) * f.tick_size
+                        print(f"[HOAN DOI SL BREAKEVEN] Gia thi truong ({current_mark}) <= gia BE ({be_price}). Khong the doi SL cao hon gia thi truong. Giu nguyen SL cu.")
+                        return None
                     elif signal.side == PositionSide.SHORT and be_price <= current_mark:
-                        be_price = ((current_mark + (f.tick_size * Decimal("2"))) // f.tick_size) * f.tick_size
+                        print(f"[HOAN DOI SL BREAKEVEN] Gia thi truong ({current_mark}) >= gia BE ({be_price}). Khong the doi SL thap hon gia thi truong. Giu nguyen SL cu.")
+                        return None
             except Exception:
                 pass
 
