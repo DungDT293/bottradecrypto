@@ -218,12 +218,10 @@ export const api = {
   },
 
   // 10. Channel Leaderboard & Performance
-  getChannelLeaderboard: (timeframe = "all", bankroll = 5000, marginPct = 5.0) => {
-    const params = new URLSearchParams({
-      timeframe,
-      bankroll: bankroll.toString(),
-      margin_pct: marginPct.toString(),
-    });
+  getChannelLeaderboard: (timeframe = "all", bankroll?: number, marginPct?: number) => {
+    const params = new URLSearchParams({ timeframe });
+    if (bankroll !== undefined && bankroll !== null) params.append("bankroll", bankroll.toString());
+    if (marginPct !== undefined && marginPct !== null) params.append("margin_pct", marginPct.toString());
     return request<ChannelLeaderboardResponse>(`/channels/leaderboard?${params.toString()}`);
   },
   getChannelDetail: (chatId: number) => request<ChannelDetailResponse>(`/channels/${chatId}/detail`),

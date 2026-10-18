@@ -692,13 +692,33 @@ def create_api_router(
     @router.get("/channels/leaderboard", dependencies=[Depends(verify_token)])
     async def get_channel_leaderboard(
         timeframe: str = Query("all", pattern="^(all|month|week|day)$"),
-        bankroll: float = Query(5000.0, ge=100.0),
-        margin_pct: float = Query(5.0, ge=0.5, le=50.0),
+        bankroll: Optional[float] = Query(None, ge=1.0),
+        margin_pct: Optional[float] = Query(None, ge=0.1, le=50.0),
     ):
+        target_bankroll = bankroll
+        if target_bankroll is None:
+            # Fallback to real Binance equity if connected
+            cached_acc = binance_svc.get_cached_snapshot()
+            eq = getattr(cached_acc, "equity", None) or getattr(cached_acc, "total_margin_balance", None)
+            try:
+                if eq and float(eq) > 0:
+                    target_bankroll = float(eq)
+            except Exception:
+                pass
+        if target_bankroll is None:
+            target_bankroll = 86.18
+
+        target_margin_pct = margin_pct
+        if target_margin_pct is None:
+            try:
+                target_margin_pct = float(getattr(config.risk, "target_margin_pct", 1.5))
+            except Exception:
+                target_margin_pct = 1.5
+
         return channel_analytics_svc.get_channel_leaderboard(
             timeframe=timeframe,
-            bankroll_usd=bankroll,
-            margin_per_trade_pct=margin_pct,
+            bankroll_usd=target_bankroll,
+            margin_per_trade_pct=target_margin_pct,
         )
 
     @router.get("/channels/{chat_id}/detail", dependencies=[Depends(verify_token)])

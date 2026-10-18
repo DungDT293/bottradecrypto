@@ -32,8 +32,8 @@ class ChannelAnalyticsService:
     def get_channel_leaderboard(
         self,
         timeframe: str = "all",  # 'all', 'month', 'week', 'day'
-        bankroll_usd: float = 5000.0,
-        margin_per_trade_pct: float = 5.0,  # 5% margin ($250 per trade)
+        bankroll_usd: float = 86.18,
+        margin_per_trade_pct: float = 1.5,  # 1.5% margin per trade based on user's real risk config
     ) -> Dict[str, Any]:
         margin_per_trade = bankroll_usd * (margin_per_trade_pct / 100.0)
 
@@ -339,6 +339,8 @@ class ChannelAnalyticsService:
             "success": True,
             "timeframe": timeframe,
             "bankroll_usd": bankroll_usd,
+            "margin_per_trade_pct": margin_per_trade_pct,
+            "margin_per_trade_usd": round(margin_per_trade, 2),
             "summary": {
                 "total_pinned_channels": total_channels,
                 "active_trading_channels": active_channels,

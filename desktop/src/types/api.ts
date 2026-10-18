@@ -300,6 +300,8 @@ export interface ChannelLeaderboardResponse {
   success: boolean;
   timeframe: string;
   bankroll_usd: number;
+  margin_per_trade_pct?: number;
+  margin_per_trade_usd?: number;
   summary: ChannelLeaderboardSummary;
   channels: ChannelLeaderboardItem[];
 }

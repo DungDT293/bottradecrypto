@@ -18,11 +18,27 @@ import type {
 } from "../types/api";
 
 export const LeaderboardPage: React.FC = () => {
-  const { addToast } = useApp();
+  const { snapshot, addToast } = useApp();
   const [loading, setLoading] = useState<boolean>(true);
   const [timeframe, setTimeframe] = useState<string>("all");
-  const bankroll = 5000;
-  const marginPct = 5.0;
+
+  // Determine user's real Binance Futures capital from live snapshot
+  const rawEquity =
+    snapshot?.account?.equity ||
+    snapshot?.account?.total_margin_balance ||
+    snapshot?.account?.wallet_balance ||
+    "86.18";
+  const realEquitySafe =
+    Number.isFinite(parseFloat(rawEquity)) && parseFloat(rawEquity) > 0
+      ? parseFloat(parseFloat(rawEquity).toFixed(2))
+      : 86.18;
+
+  // Capital simulation mode: "real" (default) or "1000" or "5000"
+  const [capitalMode, setCapitalMode] = useState<"real" | "1000" | "5000">("real");
+  const marginPct = 1.5; // Matches config.risk.target_margin_pct (1.5%)
+
+  const effectiveBankroll =
+    capitalMode === "real" ? realEquitySafe : capitalMode === "1000" ? 1000 : 5000;
 
   const [summary, setSummary] = useState<ChannelLeaderboardSummary | null>(null);
   const [channels, setChannels] = useState<ChannelLeaderboardItem[]>([]);
@@ -38,7 +54,11 @@ export const LeaderboardPage: React.FC = () => {
   const fetchLeaderboard = async () => {
     setLoading(true);
     try {
-      const res: ChannelLeaderboardResponse = await api.getChannelLeaderboard(timeframe, bankroll, marginPct);
+      const res: ChannelLeaderboardResponse = await api.getChannelLeaderboard(
+        timeframe,
+        effectiveBankroll,
+        marginPct
+      );
       if (res.success) {
         setSummary(res.summary);
         setChannels(res.channels);
@@ -52,7 +72,7 @@ export const LeaderboardPage: React.FC = () => {
 
   useEffect(() => {
     fetchLeaderboard();
-  }, [timeframe, bankroll, marginPct]);
+  }, [timeframe, effectiveBankroll, marginPct]);
 
   const handleOpenDetail = async (channel: ChannelLeaderboardItem) => {
     setSelectedChannel(channel);
@@ -100,8 +120,36 @@ export const LeaderboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Global Controls: Timeframe & Refresh */}
+        {/* Global Controls: Capital Mode, Timeframe & Refresh */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+          {/* Capital Simulation Mode Selector */}
+          <div style={{ display: "flex", background: "var(--bg-card)", padding: "4px", borderRadius: "8px", border: "1px solid var(--border-color)", gap: "4px" }}>
+            {[
+              { key: "real", label: `💎 Vốn thật Binance ($${realEquitySafe})` },
+              { key: "1000", label: "Mô phỏng $1,000" },
+              { key: "5000", label: "Mô phỏng $5,000" },
+            ].map((c) => (
+              <button
+                key={c.key}
+                onClick={() => setCapitalMode(c.key as any)}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  borderRadius: "6px",
+                  border: "none",
+                  cursor: "pointer",
+                  background: capitalMode === c.key ? "rgba(16, 185, 129, 0.2)" : "transparent",
+                  color: capitalMode === c.key ? "#10b981" : "var(--text-muted)",
+                  outline: capitalMode === c.key ? "1px solid #10b981" : "none",
+                  transition: "all 0.2s",
+                }}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+
           {/* Timeframe Tabs */}
           <div style={{ display: "flex", background: "var(--bg-card)", padding: "4px", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
             {[
@@ -161,7 +209,7 @@ export const LeaderboardPage: React.FC = () => {
             </span>
             <span style={{ color: "var(--text-muted)" }}>•</span>
             <span style={{ color: (summary?.best_channel_pnl ?? 0) >= 0 ? "#10b981" : "#ef4444", fontWeight: 700 }}>
-              PnL: {(summary?.best_channel_pnl ?? 0) >= 0 ? "+" : ""}${summary?.best_channel_pnl?.toLocaleString() ?? "0"}
+              PnL: {(summary?.best_channel_pnl ?? 0) >= 0 ? "+" : ""}${summary?.best_channel_pnl?.toFixed(2) ?? "0.00"}
             </span>
           </div>
         </div>
@@ -203,17 +251,17 @@ export const LeaderboardPage: React.FC = () => {
         <div className="card" style={{ padding: "18px", borderLeft: "4px solid #8b5cf6", background: "var(--bg-card)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <span style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "0.5px" }}>
-              💰 Tổng Lợi Nhuận Mô Phỏng ($5k vốn)
+              💰 Lợi Nhuận Giả Định {capitalMode === "real" ? `(Vốn thật $${realEquitySafe})` : `(Vốn $${effectiveBankroll.toLocaleString()})`}
             </span>
             <span className="badge" style={{ background: "rgba(139, 92, 246, 0.2)", color: "#a78bfa", fontSize: "11px" }}>
-              ROI: +{(((summary?.total_net_pnl_usd ?? 0) / bankroll) * 100).toFixed(1)}%
+              ROI: +{(((summary?.total_net_pnl_usd ?? 0) / effectiveBankroll) * 100).toFixed(1)}%
             </span>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "bold", color: (summary?.total_net_pnl_usd ?? 0) >= 0 ? "#10b981" : "#ef4444" }}>
-            {(summary?.total_net_pnl_usd ?? 0) >= 0 ? "+" : ""}${summary?.total_net_pnl_usd?.toLocaleString() ?? "0"}
+            {(summary?.total_net_pnl_usd ?? 0) >= 0 ? "+" : ""}${summary?.total_net_pnl_usd?.toFixed(2) ?? "0.00"}
           </div>
           <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "6px" }}>
-            Quy mô lệnh: 5% ($250) • Đòn bẩy tối đa 5x
+            Ký quỹ: {marginPct}% (~${(effectiveBankroll * (marginPct / 100)).toFixed(2)}/lệnh) • Crossed • Tối đa 5x
           </div>
         </div>
       </div>
@@ -394,10 +442,10 @@ export const LeaderboardPage: React.FC = () => {
                       {ch.validated_signals > 0 ? (
                         <div>
                           <div style={{ fontWeight: 700, fontSize: "14px", color: isProfitable ? "#10b981" : "#ef4444" }}>
-                            {isProfitable ? "+" : ""}${ch.performance.net_pnl_usd.toLocaleString()}
+                            {isProfitable ? "+" : ""}${ch.performance.net_pnl_usd.toFixed(2)}
                           </div>
                           <div style={{ fontSize: "11px", color: isProfitable ? "#10b981" : "#ef4444" }}>
-                            ROI: {isProfitable ? "+" : ""}{ch.performance.roi_pct}% • PF: {ch.performance.profit_factor}
+                            ROI: {isProfitable ? "+" : ""}{ch.performance.roi_pct.toFixed(1)}% • PF: {ch.performance.profit_factor}
                           </div>
                         </div>
                       ) : (
@@ -495,7 +543,7 @@ export const LeaderboardPage: React.FC = () => {
                   </span>
                 </div>
                 <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
-                  Chat ID: {selectedChannel.chat_id} • Winrate: <strong>{selectedChannel.performance.win_rate_pct}%</strong> • PnL mô phỏng: <strong style={{ color: selectedChannel.performance.net_pnl_usd >= 0 ? "#10b981" : "#ef4444" }}>+${selectedChannel.performance.net_pnl_usd}</strong>
+                  Chat ID: {selectedChannel.chat_id} • Winrate: <strong>{selectedChannel.performance.win_rate_pct}%</strong> • PnL mô phỏng: <strong style={{ color: selectedChannel.performance.net_pnl_usd >= 0 ? "#10b981" : "#ef4444" }}>{selectedChannel.performance.net_pnl_usd >= 0 ? "+" : ""}${selectedChannel.performance.net_pnl_usd.toFixed(2)}</strong>
                 </div>
               </div>
               <button
