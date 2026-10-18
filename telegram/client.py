@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Any, List, Optional
 from telethon import TelegramClient
@@ -84,7 +85,6 @@ class TelegramUserClient:
         - Handles FloodWaitError gracefully with backoff sleep.
         - Supports checkpoint callback for resuming interrupted fetches.
         """
-        import asyncio
         from datetime import datetime, timezone, timedelta
         from telethon.errors import FloodWaitError
 

@@ -315,7 +315,7 @@ class SignalParser:
 
         # Check Single entry:
         # "Entry Targets: 0.048", "Entrys : 0.04800", "ENTRY ➜ 0.002075", "ENTERY PRICE: 0.02923", "Entry Price: 9.17", "Entry Zone: 0.1988", "BUY :\n 1) 1.674 - 100%"
-        m_single = re.search(r"(?:Entrys|Entry\s*Targets?|ENTRY\s*PRICE|ENTERY\s*PRICE|Entry\s*Price|ENTERY|Entry\s*Zone|Entry|BUY)\s*[:\-\>\u279c\u2794\s]*\n?\s*(?:\d+[\)\.]\s*)?(?:[^\d\$\.]*)\s*\$?([\d\.]+)", text, re.IGNORECASE)
+        m_single = re.search(r"(?:Entrys|Entry\s*Targets?|ENTRY\s*PRICE|ENTERY\s*PRICE|Entry\s*Price|ENTERY|Entry\s*Zone|Entry|BUY)\s*[:\-\>\u279c\u2794\s]*\n?\s*(?:\d+\)\s*|\d+\.(?!\d)\s*)?(?:[^\d\$\.]*)\s*\$?([\d\.]+)", text, re.IGNORECASE)
         if m_single:
             try:
                 p = Decimal(m_single.group(1))

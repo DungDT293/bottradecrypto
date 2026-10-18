@@ -92,6 +92,17 @@ class SignalValidator:
 
         # 3. SL Distance Safety Checks & Anti-Wick Hunt Buffer
         raw_sl = signal.stop_loss
+        avg_entry = sum(signal.entries) / len(signal.entries)
+        sl_dist_pct = (abs(avg_entry - raw_sl) / avg_entry) * Decimal("100")
+        if sl_dist_pct < self.config.execution.min_sl_distance_pct:
+            signal.validation_status = SignalState.REJECTED
+            signal.blocking_reason = f"Khoang cach SL qua hep ({sl_dist_pct:.2f}% < {self.config.execution.min_sl_distance_pct}%)"
+            return signal, None
+        if sl_dist_pct > self.config.execution.max_sl_distance_pct:
+            signal.validation_status = SignalState.REJECTED
+            signal.blocking_reason = f"Khoang cach SL qua xa ({sl_dist_pct:.2f}% > {self.config.execution.max_sl_distance_pct}%)"
+            return signal, None
+
         sl_buffer_pct = getattr(self.config.risk, "sl_buffer_pct", Decimal("1.0"))
         buffered_sl = raw_sl
         if sl_buffer_pct and sl_buffer_pct > Decimal("0") and raw_sl:
@@ -105,16 +116,6 @@ class SignalValidator:
             )
             signal.stop_loss = buffered_sl
 
-        avg_entry = sum(signal.entries) / len(signal.entries)
-        sl_dist_pct = (abs(avg_entry - signal.stop_loss) / avg_entry) * Decimal("100")
-        if sl_dist_pct < self.config.execution.min_sl_distance_pct:
-            signal.validation_status = SignalState.REJECTED
-            signal.blocking_reason = f"Khoang cach SL qua hep ({sl_dist_pct:.2f}% < {self.config.execution.min_sl_distance_pct}%)"
-            return signal, None
-        if sl_dist_pct > self.config.execution.max_sl_distance_pct:
-            signal.validation_status = SignalState.REJECTED
-            signal.blocking_reason = f"Khoang cach SL qua xa ({sl_dist_pct:.2f}% > {self.config.execution.max_sl_distance_pct}%)"
-            return signal, None
 
         # 4. Resolve Range Entry Policy
         resolved_entries: List[Tuple[Decimal, Decimal]] = []

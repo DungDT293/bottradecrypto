@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import time
@@ -135,7 +136,6 @@ class BinanceFuturesClient:
             oldest_t = BinanceFuturesClient._weight_history[0][0]
             wait_sec = max(0.1, min(5.0, 60.0 - (now_mono - oldest_t) + 0.1))
             print(f"[BINANCE RATE LIMITER] Luu luong ({curr_weight}+{req_weight} > {effective_limit}). Cho {wait_sec:.1f}s...")
-            import asyncio
             await asyncio.sleep(wait_sec)
             now_mono = time.monotonic()
         BinanceFuturesClient._weight_history.append((now_mono, req_weight))
