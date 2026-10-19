@@ -30,6 +30,8 @@ class BinanceFuturesClient:
     _symbol_filter_cache: Dict[str, SymbolFilterInfo] = {}
     _weight_history: List[Any] = []
     _MAX_WEIGHT_PER_60S: int = 2000
+    _time_offset_ms: int = 0
+    _last_time_sync: float = 0.0
 
     def __init__(self, config: AppConfig, session: Optional[aiohttp.ClientSession] = None):
         self.config = config
@@ -92,12 +94,39 @@ class BinanceFuturesClient:
         if self._own_session and self._session and not self._session.closed:
             await self._session.close()
 
+    async def sync_time(self) -> int:
+        """
+        Dong bo gio he thong voi may chu Binance Futures.
+        Offset = server_time - local_time_ms.
+        Dam bao timestamp gui len luon khop gio may chu va triet tieu loi -1021.
+        """
+        session = await self._get_session()
+        time_url = f"{self.base_url}/fapi/v1/time"
+        try:
+            start_req = time.monotonic()
+            async with session.get(time_url, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    server_time = int(data["serverTime"])
+                    rtt_ms = int((time.monotonic() - start_req) * 1000)
+                    local_now_ms = int(time.time() * 1000)
+                    estimated_server_now = server_time + (rtt_ms // 2)
+                    offset = estimated_server_now - local_now_ms
+                    BinanceFuturesClient._time_offset_ms = offset
+                    BinanceFuturesClient._last_time_sync = time.time()
+                    print(f"[BINANCE TIME SYNC] Dong bo thanh cong gio Binance: offset = {offset:+d}ms (RTT = {rtt_ms}ms)")
+                    return offset
+        except Exception as e:
+            print(f"[BINANCE TIME SYNC] Khong the dong bo gio Binance: {e}")
+        return BinanceFuturesClient._time_offset_ms
+
     def _sign_payload(self, params: Dict[str, Any]) -> str:
         if not self.api_secret:
             raise ExchangeAdapterError("API Secret chua duoc cau hinh")
-        params["timestamp"] = int(time.time() * 1000)
-        params["recvWindow"] = self.config.binance.recv_window
-        query_string = urllib.parse.urlencode(params)
+        p = dict(params)
+        p["timestamp"] = int(time.time() * 1000) + BinanceFuturesClient._time_offset_ms
+        p["recvWindow"] = max(10000, self.config.binance.recv_window)
+        query_string = urllib.parse.urlencode(p)
         signature = hmac.new(
             self.api_secret.encode("utf-8"),
             query_string.encode("utf-8"),
@@ -111,6 +140,7 @@ class BinanceFuturesClient:
         endpoint: str,
         params: Optional[Dict[str, Any]] = None,
         signed: bool = False,
+        _retry_count: int = 0,
     ) -> Dict[str, Any]:
         # Circuit Breaker: Do NOT send requests if currently banned by Binance
         now_ms = int(time.time() * 1000)
@@ -139,6 +169,10 @@ class BinanceFuturesClient:
             await asyncio.sleep(wait_sec)
             now_mono = time.monotonic()
         BinanceFuturesClient._weight_history.append((now_mono, req_weight))
+
+        # Auto sync Binance server time before signed requests if not yet synced or expired (> 1h)
+        if signed and (BinanceFuturesClient._last_time_sync == 0 or (time.time() - BinanceFuturesClient._last_time_sync > 3600)):
+            await self.sync_time()
 
         session = await self._get_session()
         headers = {}
@@ -173,6 +207,12 @@ class BinanceFuturesClient:
                 if resp.status >= 400:
                     code = data.get("code")
                     msg = data.get("msg", "")
+
+                    # Timestamp desync auto-recovery (-1021)
+                    if code == -1021 and _retry_count < 2:
+                        print(f"[BINANCE TIME SYNC] Phat hien lech gio (-1021: {msg}). Dang dong bo lai va thu lai...")
+                        await self.sync_time()
+                        return await self._request(method, endpoint, params, signed=signed, _retry_count=_retry_count + 1)
 
                     # Detect IP Ban / Rate limit
                     if code == -1003 or resp.status in (429, 418):
