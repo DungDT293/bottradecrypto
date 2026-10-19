@@ -241,10 +241,8 @@ class SignalValidator:
                         f"Don bay {orig_lev}x qua cao so voi khoang cach SL ({sl_dist_pct*100:.1f}%). Tu dong ha xuong {final_leverage}x de dam bao khong bi thanh ly truoc khi cham SL."
                     )
 
-        # 8. Force ISOLATED margin mode per requirement
-        final_margin_mode = MarginMode.ISOLATED
-        if signal.margin_mode_requested and signal.margin_mode_requested != MarginMode.ISOLATED:
-            signal.warnings.append("Che do margin duoc chuyen ve ISOLATED theo chinh sach an toan he thong")
+        # 8. Margin mode determination (use signal margin mode if specified, otherwise fall back to config)
+        final_margin_mode = signal.margin_mode_requested or getattr(self.config.risk, "margin_mode", MarginMode.CROSSED)
 
         # 9. Breakeven handling
         is_be = signal.is_breakeven_mandatory or self.config.risk.breakeven_after_tp1_default

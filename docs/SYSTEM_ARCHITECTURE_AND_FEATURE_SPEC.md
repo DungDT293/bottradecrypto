@@ -355,6 +355,16 @@ Từ những quan sát trên hình ảnh thực tế của người dùng:
 ### Feature 16: Bộ Cài Đặt Tự Động NSIS v1.1.9
 - Đóng gói bản cài đặt Windows mới nhất `telegram-binance-signal-executor_1.1.9_x64-setup.exe` tích hợp trọn vẹn cơ chế Cross Margin và bảo vệ vốn tối ưu.
 
+### Bug 17: Tự Động Bù Lệch Giờ Binance (Server-Time Auto Sync & Error -1021 Recovery)
+- **Hiện tượng:** Đồng hồ Windows bị lệch so với máy chủ Binance Futures (> 1000ms) khiến sàn từ chối request với mã lỗi: `Binance API Error -1021: Timestamp for this request was 1000ms ahead of the server's time`.
+- **Khắc phục:** Tích hợp cơ chế tự động bù giờ thời gian thực trong `BinanceFuturesClient`:
+  - Gọi `/fapi/v1/time` khi khởi động để đo độ trễ mạng (RTT) và tính toán sai lệch giờ (`_time_offset_ms`).
+  - Mọi request ký HMAC-SHA256 tự động áp dụng `timestamp = now_ms + _time_offset_ms`.
+  - Bổ sung cơ chế tự phục hồi: nếu gặp lại mã `-1021`, tự động kích hoạt `sync_time()` và gửi lại request ngay lập tức mà không làm rớt lệnh.
+
+### Feature 18: Kẹp Đòn Bẩy An Toàn & Chuẩn Hóa Ký Quỹ Động (Safe Clamp & Dynamic Margin Mode)
+- **Kẹp đòn bẩy an toàn (Safe Leverage Clamp):** Tự động tính toán khoảng cách từ Entry đến SL và ép đòn bẩy tối đa theo công thức $\text{Max Safe Lev} = \text{int}(0.75 / \text{SL Distance})$. Đảm bảo điểm Cắt Lỗ (SL) luôn kích hoạt trước điểm Thanh Lý ít nhất 25% biên độ an toàn, triệt tiêu nguy cơ cháy tài khoản do thị trường đi ngược.
+- **Ký quỹ linh hoạt (Configurable Margin Mode):** Sửa lỗi ghim cứng `ISOLATED` tại `parser/validator.py`, cho phép hệ thống áp dụng chế độ `CROSSED` theo cấu hình người dùng `config.yaml` hoặc tôn trọng yêu cầu riêng từ tín hiệu admin.
 
 ---
 
