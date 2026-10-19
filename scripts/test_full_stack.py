@@ -55,3 +55,4 @@ for i in range(25):
 if not ready and proc.poll() is None:
     print("Handshake was not ready within 25s, terminating...")
     proc.terminate()
+
