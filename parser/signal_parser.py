@@ -310,7 +310,7 @@ class SignalParser:
                 pass
 
         # Format 2: "Entry Targets:" section with bulleted lines (1) ... 2) ...) before any Take-Profit/Stop
-        m_sec = re.search(r"Entry\s*Targets?\s*:\s*\n*((?:[^\n]+\n*)+?)(?=\b(?:Take-Profit|Targets?|Stop)\b)", text, re.IGNORECASE)
+        m_sec = re.search(r"Entry\s*Targets?\s*:\s*\n*(.*?)(?=\n\s*(?:Take-Profit|Targets?|Stop)\b|\Z)", text, re.IGNORECASE | re.DOTALL)
         if m_sec:
             sec_text = m_sec.group(1)
             sec_nums = re.findall(r"^\s*\d+[\)\.]\s*(?:[^\d\$\.]*)\s*\$?([\d\.]+)", sec_text, re.MULTILINE)
