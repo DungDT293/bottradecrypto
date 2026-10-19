@@ -343,6 +343,67 @@ class BinanceFuturesClient:
                 pass
         return active
 
+    async def get_market_trend_context(self, symbol: str) -> Dict[str, Any]:
+        """
+        Retrieves 24h ticker, funding rate, 1h klines (EMA20 trend), and BTC market context.
+        Used for intelligent pre-trade verification and duplicate symbol analysis.
+        """
+        result = {
+            "symbol": symbol,
+            "change_24h": 0.0,
+            "volume_24h": 0.0,
+            "funding_rate": 0.0,
+            "last_close": 0.0,
+            "ema20_1h": 0.0,
+            "trend_1h": "NEUTRAL",
+            "trend_diff_pct": 0.0,
+            "btc_change_24h": 0.0,
+            "market_status": "NORMAL",
+        }
+        try:
+            # 1. 24h Ticker for symbol
+            t24 = await self._request("GET", "/fapi/v1/ticker/24hr", params={"symbol": symbol})
+            result["change_24h"] = float(t24.get("priceChangePercent", 0.0))
+            result["volume_24h"] = float(t24.get("quoteVolume", 0.0))
+            result["last_close"] = float(t24.get("lastPrice", 0.0))
+        except Exception:
+            pass
+
+        try:
+            # 2. Premium / Funding rate
+            p_idx = await self._request("GET", "/fapi/v1/premiumIndex", params={"symbol": symbol})
+            result["funding_rate"] = float(p_idx.get("lastFundingRate", 0.0))
+        except Exception:
+            pass
+
+        try:
+            # 3. 1h Klines (20 candles)
+            klines = await self._request("GET", "/fapi/v1/klines", params={"symbol": symbol, "interval": "1h", "limit": 20})
+            if klines and len(klines) >= 5:
+                closes = [float(k[4]) for k in klines]
+                ema20 = sum(closes) / len(closes)
+                result["ema20_1h"] = ema20
+                last_c = closes[-1]
+                result["last_close"] = last_c
+                result["trend_1h"] = "BULLISH" if last_c >= ema20 else "BEARISH"
+                result["trend_diff_pct"] = ((last_c - ema20) / ema20 * 100) if ema20 > 0 else 0.0
+        except Exception:
+            pass
+
+        try:
+            # 4. BTC 24h market context
+            btc_24 = await self._request("GET", "/fapi/v1/ticker/24hr", params={"symbol": "BTCUSDT"})
+            btc_change = float(btc_24.get("priceChangePercent", 0.0))
+            result["btc_change_24h"] = btc_change
+            if btc_change <= -5.0:
+                result["market_status"] = "BTC_HIGH_VOLATILITY_DUMP"
+            elif btc_change >= 5.0:
+                result["market_status"] = "BTC_HIGH_VOLATILITY_PUMP"
+        except Exception:
+            pass
+
+        return result
+
     # 7. Standard Orders (LIMIT Entry & TP)
     async def create_standard_order(
         self,

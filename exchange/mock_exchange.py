@@ -76,6 +76,20 @@ class MockBinanceFuturesClient:
     async def get_open_positions(self) -> List[Dict[str, Any]]:
         return list(self.positions.values())
 
+    async def get_market_trend_context(self, symbol: str) -> Dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "change_24h": 1.5,
+            "volume_24h": 50000000.0,
+            "funding_rate": 0.0001,
+            "last_close": 150.0,
+            "ema20_1h": 148.0,
+            "trend_1h": "BULLISH",
+            "trend_diff_pct": 1.35,
+            "btc_change_24h": 1.2,
+            "market_status": "NORMAL",
+        }
+
     async def create_standard_order(
         self,
         symbol: str,

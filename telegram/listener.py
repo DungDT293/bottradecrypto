@@ -464,6 +464,105 @@ class TelegramSignalListener:
                     filters = await client.get_symbol_filter(validated.symbol)
                     equity = await client.get_account_equity()
 
+                    # 1. Fetch live open positions from Binance
+                    open_positions = []
+                    try:
+                        open_positions = await client.get_open_positions()
+                    except Exception:
+                        pass
+
+                    # 2. Check Chart Trend & Market Context (1h EMA20 trend, 24h change, funding rate, BTC context)
+                    market_ctx = {}
+                    if hasattr(client, "get_market_trend_context"):
+                        try:
+                            market_ctx = await client.get_market_trend_context(validated.symbol)
+                        except Exception:
+                            pass
+
+                    # 3. TÌNH HUỐNG 1: BẢO VỆ XUNG ĐỘT TRÙNG CẶP (DUPLICATE SYMBOL PROTECTION)
+                    existing_pos = next((p for p in open_positions if p.get("symbol") == validated.symbol and Decimal(str(p.get("positionAmt", "0"))) != Decimal("0")), None)
+                    existing_sig = self.signal_repo.get_active_signal_for_symbol(validated.symbol)
+
+                    if existing_pos or existing_sig:
+                        pos_amt = Decimal(str(existing_pos.get("positionAmt", "0"))) if existing_pos else Decimal("0")
+                        if pos_amt != Decimal("0"):
+                            pos_side = PositionSide.LONG if pos_amt > Decimal("0") else PositionSide.SHORT
+                        else:
+                            pos_side = PositionSide(existing_sig["side"]) if existing_sig and existing_sig.get("side") in (PositionSide.LONG.value, PositionSide.SHORT.value) else validated.side
+
+                        trend_str = market_ctx.get("trend_1h", "NEUTRAL")
+                        chg_24 = market_ctx.get("change_24h", 0.0)
+                        funding = market_ctx.get("funding_rate", 0.0)
+                        btc_chg = market_ctx.get("btc_change_24h", 0.0)
+
+                        # Subcase A: Conflicting direction (Opposite) -> Strictly reject to protect One-Way mode
+                        if pos_side != validated.side:
+                            reject_reason = (
+                                f"Đang có vị thế {validated.symbol} {pos_side.value} mở trên sàn. "
+                                f"Từ chối tín hiệu {validated.side.value} từ nhóm '{channel_name}' để bảo vệ vị thế và tránh xung đột One-Way mode. "
+                                f"[Chart 1h: {trend_str}, 24h: {chg_24:+.2f}%, Funding: {funding*100:.3f}%, BTC 24h: {btc_chg:+.2f}%]"
+                            )
+                            print(f"\n[TỪ CHỐI TÍN HIỆU NGƯỢC CHIỀU] {reject_reason}\n")
+                            self.signal_repo.record_timeline_event(validated.signal_id, "DUPLICATE_OPPOSITE_SYMBOL_REJECTED", reject_reason)
+                            self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, reject_reason)
+                            return
+
+                        # Subcase B: Same direction -> Check if existing position has hit TP1 (Risk-Free)
+                        existing_timeline = self.signal_repo.get_timeline(existing_sig["signal_id"]) if existing_sig else []
+                        is_existing_be = any(e.get("event_type") in ("BREAKEVEN_SL_ACTIVATED", "BREAKEVEN_ACTIVATED", "TP1_TRIGGERED") for e in existing_timeline)
+                        if not is_existing_be:
+                            reject_reason = (
+                                f"Đang có vị thế {validated.symbol} {pos_side.value} chưa chốt TP1 (đang chịu rủi ro). "
+                                f"Từ chối nhồi thêm lệnh trùng cặp để tránh đội rủi ro kép. "
+                                f"[Chart 1h: {trend_str}, 24h: {chg_24:+.2f}%, Funding: {funding*100:.3f}%, BTC 24h: {btc_chg:+.2f}%]"
+                            )
+                            print(f"\n[TỪ CHỐI NHỒI LỆNH TRÙNG CẶP] {reject_reason}\n")
+                            self.signal_repo.record_timeline_event(validated.signal_id, "DUPLICATE_SAME_SYMBOL_REJECTED", reject_reason)
+                            self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, reject_reason)
+                            return
+                        else:
+                            print(f"[THÔNG TIN TRÙNG CẶP] Vị thế {validated.symbol} {pos_side.value} cũ đã đạt TP1 / Kèo Bất Tử. Đang thẩm định theo dõi thêm.")
+
+                    # 4. TÌNH HUỐNG 2: DYNAMIC RISK-FREE SLOT FREEING & ADMIN VIP PRIORITY
+                    at_risk_count = 0
+                    risk_free_count = 0
+                    for p in open_positions:
+                        sym = p.get("symbol")
+                        sig = self.signal_repo.get_active_signal_for_symbol(sym)
+                        t_events = self.signal_repo.get_timeline(sig["signal_id"]) if sig else []
+                        if any(e.get("event_type") in ("BREAKEVEN_SL_ACTIVATED", "BREAKEVEN_ACTIVATED", "TP1_TRIGGERED") for e in t_events):
+                            risk_free_count += 1
+                        else:
+                            at_risk_count += 1
+
+                    source_cfg = self.config.sources.get(chat_id)
+                    margin_mult = getattr(source_cfg, "margin_multiplier", 1.0) if source_cfg else 1.0
+                    is_elite_admin = (chat_id in (-1001756316676, -1002052872813, -1001754095061, -1002007658025, -1001552004524)) or (margin_mult == 1.0)
+                    max_allowed_at_risk = 4
+
+                    if at_risk_count >= max_allowed_at_risk and not is_elite_admin:
+                        slot_reject_reason = (
+                            f"Danh mục đã đạt tối đa {at_risk_count} vị thế đang chịu rủi ro "
+                            f"(Đã có {risk_free_count} vị thế đạt Kèo Bất Tử giải phóng slot). "
+                            f"Kèo Scalp {validated.symbol} từ '{channel_name}' tạm hoãn để bảo toàn vốn. "
+                            f"Slot sẽ tự động mở lại ngay khi có 1 vị thế chạm TP1!"
+                        )
+                        print(f"\n[QUẢN LÝ SLOT RỦI RO] {slot_reject_reason}\n")
+                        self.signal_repo.record_timeline_event(validated.signal_id, "RISK_SLOT_LIMIT_REACHED", slot_reject_reason)
+                        self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, slot_reject_reason)
+                        return
+                    elif at_risk_count >= max_allowed_at_risk and is_elite_admin:
+                        print(f"[VIP ADMIN PRIORITY] Kèo Tinh Hoa {validated.symbol} từ '{channel_name}' được ưu tiên đặc cách vào lệnh!")
+
+                    # 5. MARKET TREND & NEWS SANITY CHECK
+                    if market_ctx.get("market_status") == "BTC_HIGH_VOLATILITY_DUMP" and validated.side == PositionSide.LONG:
+                        print(f"[CẢNH BÁO THỊ TRƯỜNG BIẾN ĐỘNG MẠNH] BTC đang sụt giảm mạnh ({market_ctx.get('btc_change_24h'):+.2f}%). Thận trọng với kèo LONG {validated.symbol}.")
+                        self.signal_repo.record_timeline_event(
+                            validated.signal_id,
+                            "MARKET_VOLATILITY_WARNING",
+                            f"Cảnh báo: BTC đang dump mạnh ({market_ctx.get('btc_change_24h'):+.2f}%). Lệnh vẫn được gửi nhưng kèm chặt bảo vệ SL.",
+                        )
+
                     open_risk = Decimal("0.0")
 
                     ticker = await client._request("GET", "/fapi/v1/ticker/price", params={"symbol": validated.symbol})
