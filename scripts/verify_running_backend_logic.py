@@ -14,13 +14,28 @@ from core.models import SourceMetadata, ParsedSignal
 from parser.validator import SignalValidator
 from risk.risk_engine import RiskEngine
 
-def verify_running_backend(session_token: str = None):
+def verify_running_backend(session_token: str = None, port: int = None):
     print("\n" + "="*85)
     print("  KIỂM TRA ĐỐI SOÁT TOÀN DIỆN TIẾN TRÌNH BACKEND ĐANG CHẠY")
     print("="*85)
+
+    handshake_file = Path(r"C:\Users\PC Gaming\AppData\Roaming\telegram_binance_signal_executor\backend_handshake.json")
+    if handshake_file.exists():
+        try:
+            with open(handshake_file, "r", encoding="utf-8") as f:
+                hs_data = json.load(f)
+                if not port:
+                    port = hs_data.get("port")
+                if not session_token:
+                    session_token = hs_data.get("session_token")
+                print(f"   [Handshake] Nạp thông tin kết nối: PID {hs_data.get('pid')}, Port {port}")
+        except Exception as e:
+            print(f"   [Handshake Warning] Không đọc được handshake file: {e}")
+
+    effective_port = port or 55563
     
     # 1. Health Endpoint
-    health_url = "http://127.0.0.1:55563/health"
+    health_url = f"http://127.0.0.1:{effective_port}/health"
     req_h = urllib.request.urlopen(health_url)
     h_data = json.loads(req_h.read())
     print("\n1. KẾT QUẢ ENDPOINT /health:")
@@ -38,7 +53,7 @@ def verify_running_backend(session_token: str = None):
 
     # 2. Settings Endpoint (with token)
     if session_token:
-        settings_url = "http://127.0.0.1:55563/settings"
+        settings_url = f"http://127.0.0.1:{effective_port}/settings"
         req_s = urllib.request.Request(settings_url, headers={"X-Session-Token": session_token})
         s_data = json.loads(urllib.request.urlopen(req_s).read())
         print("\n2. KẾT QUẢ ENDPOINT /settings:")
