@@ -59,7 +59,7 @@ class Sidebar(QFrame):
         layout.addStretch()
 
         # Version tag
-        ver = QLabel("v1.2.0 • One-Way")
+        ver = QLabel("v1.3.0 • One-Way")
         ver.setStyleSheet("color: #475569; font-size: 11px; text-align: center; padding-left: 12px;")
         layout.addWidget(ver)
 

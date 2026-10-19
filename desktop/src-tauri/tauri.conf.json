@@ -5,6 +5,7 @@
   "identifier": "com.bottradecrypto.executor",
 
   "build": {
+    "beforeBuildCommand": "npm.cmd run build",
     "frontendDist": "../dist"
   },
   "app": {
