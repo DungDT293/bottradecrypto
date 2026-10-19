@@ -42,53 +42,106 @@ class OrderManager:
         self,
         signal: ValidatedSignal,
         entry_sizes: List[Tuple[Decimal, Decimal]],
+        current_market_price: Optional[Decimal] = None,
     ) -> List[Order]:
         """
         Submits entry orders using exchange filters and unique clientOrderIds.
+        Distinguishes between standard LIMIT orders (pullback/dip) and STOP_MARKET orders (breakout/breakdown).
         """
         created_orders: List[Order] = []
         entry_side = OrderSide.BUY if signal.side == PositionSide.LONG else OrderSide.SELL
 
         for idx, (price, qty) in enumerate(entry_sizes):
-            cid = f"ent_{signal.signal_id[:10]}_{idx}_{uuid.uuid4().hex[:4]}"
-            order = Order(
-                client_order_id=cid,
-                signal_id=signal.signal_id,
-                symbol=signal.symbol,
-                side=entry_side,
-                order_type=OrderType.LIMIT,
-                price=price,
-                quantity=qty,
-                is_reduce_only=False,
-                is_algo=False,
-                status="NEW",
-            )
-            self.order_repo.save_order(order)
+            # Determine if this entry is a breakout/stop order
+            is_breakout = False
+            if current_market_price and current_market_price > Decimal("0"):
+                if signal.side == PositionSide.LONG and price > current_market_price * Decimal("1.002"):
+                    is_breakout = True
+                elif signal.side == PositionSide.SHORT and price < current_market_price * Decimal("0.998"):
+                    is_breakout = True
 
-            # Send order to exchange with up to 3 automatic fast retries
-            resp = None
-            last_err = None
-            for attempt in range(1, 4):
-                try:
-                    resp = await self.client.create_standard_order(
-                        symbol=signal.symbol,
-                        side=entry_side,
-                        order_type=OrderType.LIMIT,
-                        quantity=qty,
-                        price=price,
-                        client_order_id=cid,
-                    )
-                    break
-                except Exception as e_order:
-                    last_err = e_order
-                    await asyncio.sleep(attempt * 0.4)
+            cid_prefix = "ent_algo" if is_breakout else "ent"
+            cid = f"{cid_prefix}_{signal.signal_id[:10]}_{idx}_{uuid.uuid4().hex[:4]}"
 
-            if not resp:
-                raise last_err or ExchangeAdapterError(f"Khong the dat lenh {signal.symbol} sau 3 lan thu")
+            if is_breakout:
+                order = Order(
+                    client_order_id=cid,
+                    signal_id=signal.signal_id,
+                    symbol=signal.symbol,
+                    side=entry_side,
+                    order_type=OrderType.STOP_MARKET,
+                    trigger_price=price,
+                    price=None,
+                    quantity=qty,
+                    is_reduce_only=False,
+                    is_algo=True,
+                    status="NEW",
+                )
+                self.order_repo.save_order(order)
 
-            order.exchange_order_id = str(resp.get("orderId"))
-            self.order_repo.save_order(order)
-            created_orders.append(order)
+                resp = None
+                last_err = None
+                for attempt in range(1, 4):
+                    try:
+                        resp = await self.client.create_algo_order(
+                            symbol=signal.symbol,
+                            side=entry_side,
+                            order_type=OrderType.STOP_MARKET,
+                            trigger_price=price,
+                            quantity=qty,
+                            client_algo_id=cid,
+                            close_position=False,
+                            reduce_only=False,
+                        )
+                        break
+                    except Exception as e_order:
+                        last_err = e_order
+                        await asyncio.sleep(attempt * 0.4)
+
+                if not resp:
+                    raise last_err or ExchangeAdapterError(f"Khong the dat lenh Breakout {signal.symbol} sau 3 lan thu")
+
+                order.exchange_order_id = str(resp.get("algoId"))
+                self.order_repo.save_order(order)
+                created_orders.append(order)
+            else:
+                order = Order(
+                    client_order_id=cid,
+                    signal_id=signal.signal_id,
+                    symbol=signal.symbol,
+                    side=entry_side,
+                    order_type=OrderType.LIMIT,
+                    price=price,
+                    quantity=qty,
+                    is_reduce_only=False,
+                    is_algo=False,
+                    status="NEW",
+                )
+                self.order_repo.save_order(order)
+
+                resp = None
+                last_err = None
+                for attempt in range(1, 4):
+                    try:
+                        resp = await self.client.create_standard_order(
+                            symbol=signal.symbol,
+                            side=entry_side,
+                            order_type=OrderType.LIMIT,
+                            quantity=qty,
+                            price=price,
+                            client_order_id=cid,
+                        )
+                        break
+                    except Exception as e_order:
+                        last_err = e_order
+                        await asyncio.sleep(attempt * 0.4)
+
+                if not resp:
+                    raise last_err or ExchangeAdapterError(f"Khong the dat lenh {signal.symbol} sau 3 lan thu")
+
+                order.exchange_order_id = str(resp.get("orderId"))
+                self.order_repo.save_order(order)
+                created_orders.append(order)
 
         self.signal_repo.update_signal_state(signal.signal_id, SignalState.ENTRY_PENDING)
         return created_orders
@@ -220,7 +273,14 @@ class OrderManager:
         for ord in orders:
             if not ord.is_reduce_only and ord.status in ["NEW", "PARTIALLY_FILLED"]:
                 try:
-                    await self.client.cancel_standard_order(symbol, ord.client_order_id)
+                    if ord.is_algo:
+                        await self.client.cancel_algo_order(
+                            symbol,
+                            algo_id=ord.exchange_order_id if ord.exchange_order_id else None,
+                            client_algo_id=ord.client_order_id,
+                        )
+                    else:
+                        await self.client.cancel_standard_order(symbol, ord.client_order_id)
                     self.order_repo.update_order_fill(ord.client_order_id, "CANCELED", ord.filled_quantity, ord.avg_fill_price)
                 except Exception:
                     pass

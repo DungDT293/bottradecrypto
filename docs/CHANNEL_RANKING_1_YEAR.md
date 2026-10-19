@@ -58,3 +58,4 @@ Các kênh sau đây trong 1 năm qua **hoàn toàn không có tín hiệu chu�
    - `ESTR - EAT SLEEP TRADE REPEAT` (ID: `-1001656921849`)
    - `Global Crypto Research` (ID: `-1001161683441`) *(Kênh kèo GTCUSDT)*
 3. **Bỏ ghim các kênh rác:** Bỏ ghim `VIP Rose Signal`, `Green Rock Signal`, `KING CRYPTO` để thanh lọc giao diện và tiết kiệm tài nguyên hệ thống.
+

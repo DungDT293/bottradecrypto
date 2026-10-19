@@ -381,6 +381,7 @@ class BinanceFuturesClient:
         client_algo_id: Optional[str] = None,
         close_position: bool = False,
         working_type: str = "MARK_PRICE",
+        reduce_only: bool = True,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
             "algoType": "CONDITIONAL",
@@ -393,7 +394,10 @@ class BinanceFuturesClient:
         if close_position:
             params["closePosition"] = "true"
         else:
-            params["reduceOnly"] = "true"
+            if reduce_only:
+                params["reduceOnly"] = "true"
+            else:
+                params["reduceOnly"] = "false"
             if quantity:
                 params["quantity"] = str(quantity)
 

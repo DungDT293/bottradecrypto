@@ -11,11 +11,21 @@ KNOWN_CHANNELS: Dict[int, str] = {
     -1002052872813: "CRYPTO LEOPARD'S",
     -1001370457350: "Crypto Neon",
     -1001895315984: "Crypto spider 🕷️ scalper",
-    -1001590450482: "THE CRYPTO TRADER",
     -1002007658025: "THE WOLF (CRYPTO)®",
     -1001161683441: "Global Crypto Research",
     -1002266035358: "THE MASTER (CRYPTO)",
     -1001652601224: "Crypto World Updates",
+    -1002191067035: "Crypto Hunters",
+    -1001754095061: "Crypto Radar",
+    -1001656921849: "ESTR - EAT SLEEP TRADE REPEAT",
+    -1001552004524: "CRYPTO MONK",
+    -1001966506182: "Crypto Pulse Matrix®",
+    -1001519589508: "Binance Team® - By Jhonny",
+    -1001212188460: "White Rose Crypto",
+    -1001860630181: "Alpha Trade Zone",
+    -1001756316676: "Boom_Boom_Billionaires",
+    -1001553551852: "Binance 360",
+    -1001781413045: "Binance 360 VIP Signals",
 }
 
 
@@ -151,17 +161,27 @@ class ChannelAnalyticsService:
 
             # Signal outcomes & PnL simulation
             import os
+            import sys
             empirical_map: Dict[int, Dict[str, Any]] = {}
-            backtest_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "channel_winrates_6_months.json")
-            if os.path.exists(backtest_path):
-                try:
-                    with open(backtest_path, "r", encoding="utf-8") as f:
-                        bt_list = json.load(f)
-                        for item in bt_list:
-                            if "id" in item:
-                                empirical_map[item["id"]] = item
-                except Exception:
-                    pass
+            possible_paths = [
+                os.path.join(getattr(sys, "_MEIPASS", ""), "data", "channel_winrates_6_months.json"),
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "channel_winrates_6_months.json"),
+                os.path.join(os.path.dirname(self.db_path), "channel_winrates_6_months.json"),
+                r"C:\Users\PC Gaming\AppData\Roaming\telegram_binance_signal_executor\data\channel_winrates_6_months.json",
+                r"e:\TOOL DUNG CODE\bottradecrypto\data\channel_winrates_6_months.json"
+            ]
+            for bp in possible_paths:
+                if bp and os.path.exists(bp):
+                    try:
+                        with open(bp, "r", encoding="utf-8") as f:
+                            bt_list = json.load(f)
+                            for item in bt_list:
+                                if "id" in item:
+                                    empirical_map[item["id"]] = item
+                        if empirical_map:
+                            break
+                    except Exception:
+                        pass
 
             emp_info = empirical_map.get(cid, {})
             emp_winrate = float(emp_info.get("winrate", 55.0))
@@ -207,13 +227,10 @@ class ChannelAnalyticsService:
                             rr = reward_diff / risk_diff
                             rr_list.append(rr)
 
-                    # Determine trade outcome
-                    is_win = "RESULT_TP_REPORTED" in events or "CLOSE_PARTIAL" in events
-                    is_loss = "RESULT_SL_REPORTED" in events
-
-                    if not is_win and not is_loss:
-                        # Statistically calibrated to the 6-month empirical backtest winrate
-                        is_win = (abs(hash(sid + str(cid))) % 1000) < int(emp_winrate * 10)
+                    # Determine trade outcome strictly based on Binance market backtest winrate
+                    # to eliminate admin fake profit claims (lãi ảo)
+                    is_win = (abs(hash(sid + str(cid))) % 1000) < int(emp_winrate * 10)
+                    is_loss = not is_win
 
                     if is_win:
                         win_count += 1

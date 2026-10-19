@@ -108,12 +108,22 @@ class ReconciliationEngine:
 
         # 2. Check active signals from local DB
         with self.signal_repo.db.get_connection() as conn:
-            active_rows = conn.execute(
+            raw_active_rows = conn.execute(
                 """
                 SELECT * FROM signals
-                WHERE state IN ('VALIDATED', 'ENTRY_PENDING', 'PARTIALLY_FILLED', 'OPEN_PROTECTED', 'EXITING')
+                WHERE state IN ('ENTRY_PENDING', 'PARTIALLY_FILLED', 'OPEN_PROTECTED', 'EXITING')
+                ORDER BY created_at DESC
                 """
             ).fetchall()
+
+        # Deduplicate to strictly 1 active signal per symbol (the latest one)
+        seen_symbols = set()
+        active_rows = []
+        for r in raw_active_rows:
+            sym = dict(r)["symbol"]
+            if sym not in seen_symbols:
+                seen_symbols.add(sym)
+                active_rows.append(r)
 
         # Pre-fetch all active open positions, orders, and algo orders in single calls
         positions_map = {}
@@ -305,14 +315,19 @@ class ReconciliationEngine:
                                 if a.get("symbol") == symbol
                                 and (a.get("orderType") == "STOP_MARKET" or a.get("type") == "STOP_MARKET")
                             ]
-                            # A STOP_MARKET with closePosition=True or qty=None/0 covers 100% of the position!
+                            def _algo_qty(a: dict) -> Decimal:
+                                raw = a.get("quantity") or a.get("origQty") or "0"
+                                try:
+                                    return Decimal(str(raw))
+                                except Exception:
+                                    return Decimal("0")
+
                             has_full_coverage = any(
                                 a.get("closePosition") in [True, "true", "True"] or
-                                not a.get("origQty") or str(a.get("origQty")) == "0" or
-                                Decimal(str(a.get("origQty", "0"))) >= abs(amt)
+                                _algo_qty(a) >= abs(amt)
                                 for a in active_sl_orders
                             )
-                            total_sl_qty = sum(Decimal(str(a.get("origQty") or a.get("quantity") or "0")) for a in active_sl_orders)
+                            total_sl_qty = sum(_algo_qty(a) for a in active_sl_orders)
                             if total_sl_qty >= abs(amt):
                                 has_full_coverage = True
 
@@ -351,6 +366,7 @@ class ReconciliationEngine:
                                     signal=validated_sig,
                                     filled_qty=abs(amt),
                                     avg_entry_price=entry_p,
+                                    current_market_price=mark_p,
                                 )
                                 report["positions_protected"] += 1
                                 self.signal_repo.record_timeline_event(
@@ -365,42 +381,55 @@ class ReconciliationEngine:
                     if self.order_manager and self.config and getattr(self.config.risk, "breakeven_after_tp1_default", True):
                         try:
                             db_orders = self.order_repo.get_orders_for_signal(sig_id)
-                            has_be = any(o.client_order_id.startswith("be_") for o in db_orders)
-                            if not has_be:
-                                tps_raw = json.loads(row.get("take_profits_json") or "[]")
-                                if tps_raw:
-                                    tp1_price = Decimal(str(tps_raw[0]))
-                                    is_long = amt > Decimal("0")
-                                    tp1_reached = (mark_p >= tp1_price) if is_long else (mark_p <= tp1_price)
+                            if db_orders:
+                                has_be = any(o.client_order_id.startswith("be_") for o in db_orders)
+                                if not has_be:
+                                    tps_raw = json.loads(row.get("take_profits_json") or "[]")
+                                    if tps_raw:
+                                        tp1_price = Decimal(str(tps_raw[0]))
+                                        is_long = amt > Decimal("0")
 
-                                    # Check if TP1 order was FILLED in database or on Binance
-                                    tp1_orders = [o for o in db_orders if ("tp_" in o.client_order_id and ("_1_" in o.client_order_id or "_1" in o.client_order_id))]
-                                    # Guard: For LONG, mark_p MUST be strictly above entry_p to move SL up to breakeven!
-                                    # Placing a STOP_MARKET SELL with stopPrice >= mark_p causes immediate fill on Binance.
-                                    price_favorable_for_be = (mark_p > entry_p) if is_long else (mark_p < entry_p)
+                                        # Check if TP1 order was FILLED in database or on Binance
+                                        tp1_orders = [
+                                            o for o in db_orders
+                                            if ("tp_" in o.client_order_id and ("_1_" in o.client_order_id or o.client_order_id.endswith("_1")))
+                                        ]
+                                        tp1_filled_in_db = any(o.status == "FILLED" for o in tp1_orders)
+                                        open_order_cids = {o.get("clientOrderId") for o in (all_open_orders or []) if o.get("clientOrderId")}
+                                        tp1_filled_on_exchange = bool(tp1_orders) and not any(o.client_order_id in open_order_cids for o in tp1_orders)
 
-                                    if (tp1_reached or tp1_filled_in_db) and price_favorable_for_be:
-                                        validated_sig = build_validated_signal_from_row(row, self.config)
-                                        old_sl_id = None
-                                        for o in db_orders:
-                                            if o.is_algo and o.status == "NEW" and not o.client_order_id.startswith("be_"):
-                                                old_sl_id = o.client_order_id
-                                                break
-                                        await self.order_manager.move_sl_to_breakeven(
-                                            signal=validated_sig,
-                                            position_qty=abs(amt),
-                                            avg_entry_price=entry_p,
-                                            existing_sl_algo_id=old_sl_id,
+                                        # Require actual TP1 fill OR price firmly past TP1 (0.3% buffer so a momentary touch doesn't trigger BE)
+                                        tp1_confirmed = (
+                                            tp1_filled_in_db
+                                            or tp1_filled_on_exchange
+                                            or (mark_p >= tp1_price * Decimal("1.003") if is_long else mark_p <= tp1_price * Decimal("0.997"))
                                         )
-                                        report["breakeven_activated"] += 1
-                                        report["discrepancies"].append(
-                                            f"KÈO BẤT TỬ: TP1 ({tp1_price}) của {symbol} đã khớp/chạm! Đã tự động dời SL về hòa vốn Entry ({entry_p})!"
-                                        )
-                                        self.signal_repo.record_timeline_event(
-                                            sig_id,
-                                            "BREAKEVEN_SL_ACTIVATED",
-                                            f"Kèo Bất Tử: TP1 ({tp1_price}) đã khớp. Đã dời SL về Entry ({entry_p}) + phí sàn!",
-                                        )
+
+                                        # Guard: Current mark price MUST be comfortably in profit compared to entry price (at least 0.2%)
+                                        price_favorable_for_be = (mark_p >= entry_p * Decimal("1.002")) if is_long else (mark_p <= entry_p * Decimal("0.998"))
+
+                                        if tp1_confirmed and price_favorable_for_be:
+                                            validated_sig = build_validated_signal_from_row(row, self.config)
+                                            old_sl_id = None
+                                            for o in db_orders:
+                                                if o.is_algo and o.status == "NEW" and not o.client_order_id.startswith("be_"):
+                                                    old_sl_id = o.client_order_id
+                                                    break
+                                            await self.order_manager.move_sl_to_breakeven(
+                                                signal=validated_sig,
+                                                position_qty=abs(amt),
+                                                avg_entry_price=entry_p,
+                                                existing_sl_algo_id=old_sl_id,
+                                            )
+                                            report["breakeven_activated"] += 1
+                                            report["discrepancies"].append(
+                                                f"KÈO BẤT TỬ: TP1 ({tp1_price}) của {symbol} đã khớp! Đã tự động dời SL về hòa vốn Entry ({entry_p})!"
+                                            )
+                                            self.signal_repo.record_timeline_event(
+                                                sig_id,
+                                                "BREAKEVEN_SL_ACTIVATED",
+                                                f"Kèo Bất Tử: TP1 ({tp1_price}) đã khớp. Đã dời SL về Entry ({entry_p}) + phí sàn!",
+                                            )
                         except Exception as ex_be:
                             report["discrepancies"].append(f"Lỗi kiểm tra Breakeven cho {symbol}: {ex_be}")
 

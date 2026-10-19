@@ -168,7 +168,7 @@ def create_api_router(
         # Clean health check: NEVER exposes session token
         return {
             "status": "HEALTHY",
-            "version": "2.0.0",
+            "version": "1.3.0",
             "mode": config.mode.value,
             "live_trading_enabled": config.live_trading_enabled,
             "engine_status": trading_svc.get_engine_status().value,

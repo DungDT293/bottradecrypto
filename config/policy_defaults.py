@@ -4,7 +4,7 @@ from pydantic import BaseModel, field_validator
 from core.enums import EntryRangePolicy, MarginMode, MultiEntryWeightMode, MultiTPWeightMode
 
 
-def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("60.0")) -> List[Decimal]:
+def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("35.0")) -> List[Decimal]:
     """
     Calculates weights for multi-TP signals based on configurable TP1 ratio.
     - If 1 TP: [Decimal("1.0")]
@@ -48,15 +48,15 @@ def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("60.0")) -> List[
 
 
 class RiskPolicy(BaseModel):
-    risk_per_signal_pct: Decimal = Decimal("1.5")
-    max_total_open_risk_pct: Decimal = Decimal("6.0")
+    risk_per_signal_pct: Decimal = Decimal("2.5")
+    max_total_open_risk_pct: Decimal = Decimal("10.0")
     max_daily_loss_pct: Decimal = Decimal("10.0")
     max_active_signals: int = 4
-    default_leverage: int = 25
-    max_leverage: int = 50
+    default_leverage: int = 20
+    max_leverage: int = 25
     margin_mode: MarginMode = MarginMode.CROSSED
-    target_margin_pct: Decimal = Decimal("1.5")
-    max_margin_per_trade_pct: Decimal = Decimal("2.0")
+    target_margin_pct: Decimal = Decimal("5.0")
+    max_margin_per_trade_pct: Decimal = Decimal("7.0")
     signal_max_age_seconds: int = 300
     entry_order_ttl_seconds: int = 900
     breakeven_after_tp1_default: bool = True
@@ -80,7 +80,7 @@ class ExecutionPolicyConfig(BaseModel):
     multi_entry_default_weight_mode: MultiEntryWeightMode = MultiEntryWeightMode.EQUAL_QUANTITY
     entry_range_policy: EntryRangePolicy = EntryRangePolicy.BEST_PRICE
     multi_tp_default_weight_mode: MultiTPWeightMode = MultiTPWeightMode.CUSTOM_TP1_RATIO
-    tp1_target_weight_pct: Decimal = Decimal("60.0")
+    tp1_target_weight_pct: Decimal = Decimal("35.0")
     breakeven_trigger_tp_index: int = 1
     breakeven_offset_pct: Decimal = Decimal("0.05")
     min_sl_distance_pct: Decimal = Decimal("0.2")
@@ -131,4 +131,5 @@ class SourcePolicyOverride(BaseModel):
     allow_buy_as_short_exception: bool = False  # e.g. for channel ATOM if user approved
     max_leverage_override: int | None = None
     default_leverage_override: int | None = None
+    margin_multiplier: Decimal = Decimal("1.0")
 

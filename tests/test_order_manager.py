@@ -129,3 +129,36 @@ async def test_failsafe_emergency_close_when_sl_fails(test_setup):
     sig_db = signal_repo.get_signal(signal.signal_id)
     assert sig_db["state"] == SignalState.CLOSED.value
     assert "SL THAT BAI - DA DONG KHAN CAP VI THE" in sig_db["blocking_reason"]
+
+
+@pytest.mark.asyncio
+async def test_submit_breakout_entries(test_setup):
+    order_mgr, client, signal_repo, order_repo = test_setup
+    signal = make_validated_signal()
+
+    signal_repo.save_message(101, 1, 1, datetime.utcnow(), datetime.utcnow(), "msg", "msg")
+    from core.models import ParsedSignal
+    parsed = ParsedSignal(
+        signal_id=signal.signal_id,
+        metadata=signal.metadata,
+        symbol_raw="BTC/USDT",
+        symbol_candidate="BTCUSDT",
+        side=signal.side,
+        validation_status=SignalState.VALIDATED,
+    )
+    signal_repo.save_signal(parsed)
+
+    # Current market price is 55000, while entries are 60000 and 59000 (Breakout LONG)
+    entry_sizes = [(Decimal("60000"), Decimal("0.025")), (Decimal("59000"), Decimal("0.025"))]
+    created = await order_mgr.submit_entries(signal, entry_sizes, current_market_price=Decimal("55000"))
+
+    assert len(created) == 2
+    assert created[0].is_algo is True
+    assert created[0].order_type == OrderType.STOP_MARKET
+    assert created[0].trigger_price == Decimal("60000")
+    assert len(client.open_algo_orders) == 2
+    assert len(client.open_orders) == 0
+
+    # Test cancelling pending breakout entries
+    await order_mgr.cancel_pending_entries_for_signal(signal.signal_id, signal.symbol)
+    assert len(client.open_algo_orders) == 0

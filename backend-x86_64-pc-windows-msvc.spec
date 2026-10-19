@@ -21,6 +21,7 @@ for mod in ['telethon', 'uvicorn', 'fastapi', 'pytz', 'psutil']:
     hiddenimports += ret[2]
 
 datas.append(('desktop/dist', 'desktop/dist'))
+datas.append(('data/channel_winrates_6_months.json', 'data'))
 
 a = Analysis(
     ['backend\\launcher.py'],

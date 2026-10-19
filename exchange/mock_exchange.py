@@ -132,6 +132,7 @@ class MockBinanceFuturesClient:
         client_algo_id: Optional[str] = None,
         close_position: bool = False,
         working_type: str = "MARK_PRICE",
+        reduce_only: bool = True,
     ) -> Dict[str, Any]:
         if self.always_fail_algo_order:
             raise ExchangeAdapterError("Binance Algo Order Placement Failed (Persistent Failure)")
@@ -150,6 +151,7 @@ class MockBinanceFuturesClient:
             "triggerPrice": str(trigger_price),
             "quantity": str(quantity) if quantity else None,
             "closePosition": close_position,
+            "reduceOnly": reduce_only,
             "status": "NEW",
             "workingType": working_type,
         }

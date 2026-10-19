@@ -210,9 +210,12 @@ class SignalValidator:
         if source_override and source_override.max_leverage_override:
             max_allowed_lev = min(max_allowed_lev, source_override.max_leverage_override)
 
-        # Select leverage: never pick highest of range, take lower or default
+        # Select leverage: pick optimal target (e.g. 20x) within range, or respect requested
         if signal.leverage_range:
-            chosen_lev = signal.leverage_range[0]  # lower bound of range
+            lower, upper = min(signal.leverage_range), max(signal.leverage_range)
+            target_lev = getattr(source_override, "default_leverage_override", None) or self.config.risk.default_leverage
+            # Select target leverage within [lower, upper] range
+            chosen_lev = max(lower, min(upper, target_lev))
         elif signal.leverage_requested:
             chosen_lev = signal.leverage_requested
         else:
@@ -221,9 +224,9 @@ class SignalValidator:
             else:
                 chosen_lev = self.config.risk.default_leverage
 
-        # Clamp to max policy (e.g. 200X clamped to 5X)
+        # Clamp to max policy (e.g. 50X/100X clamped to 25X)
         final_leverage = min(chosen_lev, max_allowed_lev)
-        if final_leverage != signal.leverage_requested:
+        if signal.leverage_requested and final_leverage != signal.leverage_requested:
             signal.warnings.append(f"Don bay yeu cau ({signal.leverage_requested}x) duoc ap tran an toan thanh {final_leverage}x")
 
         # Smart Safety Clamp: Leverage must never cause liquidation price to be tighter than Stop Loss!

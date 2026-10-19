@@ -153,3 +153,4 @@ Khi đã mở đủ 4 lệnh (đạt mức trần rủi ro 6.0%), nếu có 1 k�
 2. **Theo dõi các kênh Tier S:** Chỉ tập trung nguồn lực và bật auto-trade cho các kênh có độ sạch tín hiệu (Purity) cao và R:R từ 1:1.5 trở lên.
 3. **Đồng bộ thời gian máy tính (NTP):** Luôn đảm bảo Windows Time được đồng bộ để tránh sai lệch timestamp với Binance API.
 4. **Sao lưu dữ liệu định kỳ:** Thư mục `AppData\Roaming\telegram_binance_signal_executor` chứa toàn bộ lịch sử lệnh, session Telegram và cấu hình an toàn của bạn.
+

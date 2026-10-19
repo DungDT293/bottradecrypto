@@ -46,9 +46,14 @@ class RiskEngine:
         if current_equity <= Decimal("0"):
             raise RiskCheckError("Equity tai khoan nho hon hoac bang 0")
 
+        # Check source policy override for tiered margin multiplier (1.0 for Elite = 5.0%, 0.5 for Scalp = 2.5%)
+        chat_id = getattr(signal.metadata, "chat_id", None) if hasattr(signal, "metadata") else None
+        source_override = self.config.sources.get(chat_id) if chat_id else None
+        margin_mult = Decimal(str(getattr(source_override, "margin_multiplier", 1.0))) if source_override else Decimal("1.0")
+
         # 1. Check max total open risk
         max_total_risk_amount = (self.config.risk.max_total_open_risk_pct / Decimal("100")) * current_equity
-        signal_risk_pct = min(signal.risk_pct, self.config.risk.risk_per_signal_pct)
+        signal_risk_pct = min(signal.risk_pct, self.config.risk.risk_per_signal_pct) * margin_mult
         signal_risk_budget = (signal_risk_pct / Decimal("100")) * current_equity
 
         if open_risk_amount + signal_risk_budget > max_total_risk_amount:
@@ -64,7 +69,8 @@ class RiskEngine:
         # Check if margin cap should be enforced (CROSSED mode)
         margin_mode = signal.margin_mode or getattr(self.config.risk, "margin_mode", None)
         enforce_margin_cap = margin_mode in (MarginMode.CROSSED, MarginMode.CROSS, "CROSS", "CROSSED")
-        max_margin_pct = getattr(self.config.risk, "max_margin_per_trade_pct", Decimal("2.0"))
+        base_max_margin_pct = getattr(self.config.risk, "max_margin_per_trade_pct", Decimal("7.0"))
+        max_margin_pct = base_max_margin_pct * margin_mult
         max_margin_amount = (max_margin_pct / Decimal("100")) * current_equity
         lev = Decimal(str(signal.leverage or getattr(self.config.risk, "default_leverage", 25)))
 

@@ -252,14 +252,21 @@ async def run_full_scan():
 
         all_channel_stats.append(ch_stat)
 
-        print(f"  ✅ Quét xong: {total_msgs:,} tin nhắn ({oldest_s} -> {newest_s})")
-        print(f"     + Kèo hợp lệ (Valid): {total_valid:,} | Lỗi/Từ chối: {total_rej:,} | Tin rác/câu view: {clickbait_spam_count}")
-        print(f"     + Độ sạch tín hiệu (Purity): {signal_purity:.1f}% | Tần suất: {signals_per_month} kèo/tháng")
-        print(f"     + Đòn bẩy TB: {avg_lev:.0f}x | Tỷ lệ R:R TP1: 1:{avg_rr}")
-        print(f"     + Xếp hạng: {tier}")
+        # Save intermediate results so far
+        try:
+            with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+                json.dump(all_channel_stats, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+        print(f"  ✅ Quét xong: {total_msgs:,} tin nhắn ({oldest_s} -> {newest_s})", flush=True)
+        print(f"     + Kèo hợp lệ (Valid): {total_valid:,} | Lỗi/Từ chối: {total_rej:,} | Tin rác/câu view: {clickbait_spam_count}", flush=True)
+        print(f"     + Độ sạch tín hiệu (Purity): {signal_purity:.1f}% | Tần suất: {signals_per_month} kèo/tháng", flush=True)
+        print(f"     + Đòn bẩy TB: {avg_lev:.0f}x | Tỷ lệ R:R TP1: 1:{avg_rr}", flush=True)
+        print(f"     + Xếp hạng: {tier}", flush=True)
 
         # Sleep briefly between channels to avoid Telegram rate limits
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(0.5)
 
     await client.disconnect()
 
