@@ -131,3 +131,4 @@ async def test_dynamic_slot_freeing_when_breakeven_reached(tmp_path):
     assert risk_free_count == 1
     assert at_risk_count == 3
     print("\n[TEST 2 PASS] Keo cham TP1 doi BE da giai phong slot rui ro thanh cong! at_risk_count = 3/4")
+
