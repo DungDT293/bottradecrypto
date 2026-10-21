@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import type { AppSnapshot, AlertRecord } from "../types/api";
+import type { AppSnapshot, AlertRecord, LicenseInfo } from "../types/api";
 import { api } from "../services/api";
 import { wsClient } from "../services/websocket";
 
@@ -26,6 +26,7 @@ interface AppContextValue {
   tab: NavTab;
   setTab: (tab: NavTab) => void;
   snapshot: AppSnapshot | null;
+  license: LicenseInfo | null;
   loading: boolean;
   httpConnected: boolean;
   wsConnected: boolean;
@@ -34,6 +35,11 @@ interface AppContextValue {
   lastSyncTime: string | null;
   error: string | null;
   refreshSnapshot: () => Promise<void>;
+  refreshLicense: () => Promise<void>;
+  isLicenseModalOpen: boolean;
+  setIsLicenseModalOpen: (open: boolean) => void;
+  openLicenseModal: () => void;
+  closeLicenseModal: () => void;
   toasts: ToastMessage[];
   addToast: (text: string, type?: "success" | "error" | "info" | "warning") => void;
   removeToast: (id: string) => void;
@@ -44,12 +50,26 @@ const AppContext = createContext<AppContextValue | null>(null);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [tab, setTab] = useState<NavTab>("overview");
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
+  const [license, setLicense] = useState<LicenseInfo | null>(null);
+  const [isLicenseModalOpen, setIsLicenseModalOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [httpConnected, setHttpConnected] = useState<boolean>(false);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const openLicenseModal = useCallback(() => setIsLicenseModalOpen(true), []);
+  const closeLicenseModal = useCallback(() => setIsLicenseModalOpen(false), []);
+
+  const refreshLicense = useCallback(async () => {
+    try {
+      const lic = await api.getLicenseStatus();
+      setLicense(lic);
+    } catch {
+      // License check failed or backend unavailable
+    }
+  }, []);
 
   const addToast = useCallback((text: string, type: "success" | "error" | "info" | "warning" = "info") => {
     setToasts((prev) => {
@@ -71,11 +91,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const refreshSnapshot = useCallback(async () => {
     try {
-      const data = await api.getSnapshot();
-      setSnapshot(data);
-      setHttpConnected(true);
-      setError(null);
-      setLastSyncTime(new Date().toLocaleTimeString("vi-VN"));
+      const [snapRes, licRes] = await Promise.allSettled([
+        api.getSnapshot(),
+        api.getLicenseStatus(),
+      ]);
+
+      if (snapRes.status === "fulfilled") {
+        setSnapshot(snapRes.value);
+        setHttpConnected(true);
+        setError(null);
+        setLastSyncTime(new Date().toLocaleTimeString("vi-VN"));
+      } else {
+        throw snapRes.reason;
+      }
+
+      if (licRes.status === "fulfilled") {
+        setLicense(licRes.value);
+      }
     } catch (err: any) {
       // Light health check fallback to distinguish between network failure and server issue
       try {
@@ -108,6 +140,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         event.event_type === "stats_updated"
       ) {
         refreshSnapshot();
+      } else if (event.event_type === "license_updated") {
+        refreshLicense();
       } else if (event.event_type === "alert_added") {
         const alert = event.payload as AlertRecord;
         addToast(`${alert.title}: ${alert.message}`, alert.level === "CRITICAL" ? "error" : "warning");
@@ -125,7 +159,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       clearInterval(interval);
       wsClient.disconnect();
     };
-  }, [refreshSnapshot, addToast]);
+  }, [refreshSnapshot, refreshLicense, addToast]);
 
   return (
     <AppContext.Provider
@@ -133,6 +167,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         tab,
         setTab,
         snapshot,
+        license,
         loading,
         httpConnected,
         wsConnected,
@@ -141,6 +176,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         lastSyncTime,
         error,
         refreshSnapshot,
+        refreshLicense,
+        isLicenseModalOpen,
+        setIsLicenseModalOpen,
+        openLicenseModal,
+        closeLicenseModal,
         toasts,
         addToast,
         removeToast,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { RefreshCw, Shield, AlertTriangle, Flame, PauseCircle, PlayCircle } from "lucide-react";
+import { RefreshCw, Shield, AlertTriangle, Flame, PauseCircle, PlayCircle, Crown } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import { ConfirmModal } from "./ConfirmModal";
@@ -7,6 +7,8 @@ import { ConfirmModal } from "./ConfirmModal";
 export const Header: React.FC = () => {
   const {
     snapshot,
+    license,
+    openLicenseModal,
     refreshSnapshot,
     loading,
     connected,
@@ -134,6 +136,47 @@ export const Header: React.FC = () => {
         <span className={`badge ${isLiveTrading ? "badge-live-on" : "badge-live-off"}`}>
           Giao dịch Live: {isLiveTrading ? "ĐANG BẬT" : "ĐÃ TẮT"}
         </span>
+
+        {/* Commercial License Badge */}
+        <button
+          className={`badge ${
+            license?.is_lifetime
+              ? "badge-vip-lifetime"
+              : license?.is_active
+              ? (license.plan?.includes("TRIAL") ? "badge-vip-trial" : "badge-vip-active")
+              : "badge-vip-expired"
+          }`}
+          onClick={openLicenseModal}
+          title="Xem và quản lý bản quyền thương mại VIP"
+          style={{
+            cursor: "pointer",
+            border: "none",
+            outline: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+          }}
+        >
+          <Crown
+            size={13}
+            color={
+              license?.is_lifetime
+                ? "#fbbf24"
+                : license?.is_active
+                ? (license.plan?.includes("TRIAL") ? "#60a5fa" : "#34d399")
+                : "#f87171"
+            }
+          />
+          <span>
+            {license?.is_lifetime
+              ? "VIP TRỌN ĐỜI"
+              : license?.is_active
+              ? (license.plan?.includes("TRIAL")
+                  ? `DÙNG THỬ: Còn ${license.days_remaining ?? 0} ngày`
+                  : `VIP: Còn ${license.days_remaining ?? 0} ngày`)
+              : "KÍCH HOẠT VIP"}
+          </span>
+        </button>
 
         {/* Entry Enabled / Paused Toggle Pill */}
         <button

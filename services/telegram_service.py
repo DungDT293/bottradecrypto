@@ -16,7 +16,12 @@ from telethon.errors import (
     FloodWaitError,
     PasswordHashInvalidError,
     ApiIdInvalidError,
+    UserAlreadyParticipantError,
+    InviteHashExpiredError,
+    InviteHashInvalidError,
 )
+from telethon.tl.functions.channels import JoinChannelRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest
 
 from config.config import AppConfig
 from core.exceptions import BotTradingError
@@ -698,4 +703,177 @@ class TelegramService:
             except Exception:
                 return False
         return True
+
+    async def auto_join_elite_channels(self) -> Dict[str, Any]:
+        """
+        Commercial 1-Click Auto-Join:
+        Automatically joins the 5 Elite Whitelisted channels using MTProto Telethon.
+        Handles invite hashes, public usernames, and already-joined scenarios.
+        """
+        client = self.get_client()
+        if not client.is_connected():
+            await client.connect()
+        if not await client.is_user_authorized():
+            return {
+                "success": False,
+                "message": "Tài khoản Telegram chưa đăng nhập. Vui lòng đăng nhập trước khi tham gia nhóm.",
+                "results": [],
+            }
+
+        elite_targets = [
+            {
+                "id": -1002007658025,
+                "name": "THE WOLF (CRYPTO)®",
+                "link": "https://t.me/+lBx7BGAjD4wxY2I5",
+                "hash": "lBx7BGAjD4wxY2I5",
+                "username": None,
+            },
+            {
+                "id": -1001756316676,
+                "name": "Boom_Boom_Billionaires",
+                "link": "https://t.me/+n5N2aXPU5Y42MTNk",
+                "hash": "n5N2aXPU5Y42MTNk",
+                "username": None,
+            },
+            {
+                "id": -1002052872813,
+                "name": "CRYPTO LEOPARD'S",
+                "link": "https://t.me/+2qFH92pocvhhNWFk",
+                "hash": "2qFH92pocvhhNWFk",
+                "username": None,
+            },
+            {
+                "id": -1001552004524,
+                "name": "CRYPTO MONK",
+                "link": "https://t.me/+KacfkVSBR0tkNzI0",
+                "hash": "KacfkVSBR0tkNzI0",
+                "username": None,
+            },
+            {
+                "id": -1001370457350,
+                "name": "Crypto Neon",
+                "link": "https://t.me/CryptoNeon0",
+                "hash": None,
+                "username": "CryptoNeon0",
+            },
+        ]
+
+        results = []
+        joined_count = 0
+        already_count = 0
+        failed_count = 0
+
+        # Query existing dialogs once to quickly detect already-joined channels
+        existing_chat_ids = set()
+        try:
+            dialogs = await client.get_dialogs(limit=200)
+            existing_chat_ids = {d.id for d in dialogs}
+        except Exception:
+            pass
+
+        for target in elite_targets:
+            name = target["name"]
+            inv_hash = target["hash"]
+            uname = target["username"]
+            target_id = target["id"]
+
+            try:
+                # 1. Quick check if already in channel
+                if target_id in existing_chat_ids:
+                    results.append({
+                        "name": name,
+                        "chat_id": target_id,
+                        "status": "ALREADY_JOINED",
+                        "message": "Đã tham gia từ trước",
+                    })
+                    already_count += 1
+                    continue
+
+                # 2. Join via hash or username
+                if inv_hash:
+                    try:
+                        await client(ImportChatInviteRequest(inv_hash))
+                        results.append({
+                            "name": name,
+                            "chat_id": target_id,
+                            "status": "JOINED",
+                            "message": "Tham gia thành công",
+                        })
+                        joined_count += 1
+                    except UserAlreadyParticipantError:
+                        results.append({
+                            "name": name,
+                            "chat_id": target_id,
+                            "status": "ALREADY_JOINED",
+                            "message": "Đã tham gia từ trước",
+                        })
+                        already_count += 1
+                    except (InviteHashExpiredError, InviteHashInvalidError):
+                        results.append({
+                            "name": name,
+                            "chat_id": target_id,
+                            "status": "LINK_EXPIRED",
+                            "message": "Link mời của kênh này đã hết hạn",
+                        })
+                        failed_count += 1
+                elif uname:
+                    try:
+                        await client(JoinChannelRequest(uname))
+                        results.append({
+                            "name": name,
+                            "chat_id": target_id,
+                            "status": "JOINED",
+                            "message": "Tham gia thành công",
+                        })
+                        joined_count += 1
+                    except UserAlreadyParticipantError:
+                        results.append({
+                            "name": name,
+                            "chat_id": target_id,
+                            "status": "ALREADY_JOINED",
+                            "message": "Đã tham gia từ trước",
+                        })
+                        already_count += 1
+
+                # Polite delay to prevent Telegram FloodWait
+                await asyncio.sleep(1.5)
+
+            except FloodWaitError as e:
+                results.append({
+                    "name": name,
+                    "chat_id": target_id,
+                    "status": "RATE_LIMITED",
+                    "message": f"Telegram giới hạn tạm thời (Vui lòng thử lại sau {e.seconds}s)",
+                })
+                failed_count += 1
+                break
+            except Exception as e:
+                results.append({
+                    "name": name,
+                    "chat_id": target_id,
+                    "status": "ERROR",
+                    "message": str(e),
+                })
+                failed_count += 1
+
+        # Automatically ensure all 5 IDs are in allowed_chat_ids in config
+        try:
+            from config.config import save_config
+            top5_ids = [-1002007658025, -1001756316676, -1002052872813, -1001552004524, -1001370457350]
+            current_allowed = list(getattr(self.config.telegram, "allowed_chat_ids", []))
+            updated_allowed = list(set(current_allowed + top5_ids))
+            self.config.telegram.allowed_chat_ids = updated_allowed
+            save_config(self.config, "config.yaml")
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "joined_count": joined_count,
+            "already_count": already_count,
+            "failed_count": failed_count,
+            "total_channels": len(elite_targets),
+            "message": f"Hoàn tất: Tham gia mới {joined_count} nhóm, đã có sẵn {already_count} nhóm.",
+            "results": results,
+        }
 

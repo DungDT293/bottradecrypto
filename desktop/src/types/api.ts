@@ -315,3 +315,31 @@ export interface ChannelDetailResponse {
   signal_count: number;
   signals: any[];
 }
+
+export interface LicenseInfo {
+  is_active: boolean;
+  status: "ACTIVE" | "EXPIRED" | "UNLICENSED" | "ERROR" | string;
+  plan: string;
+  days_remaining: number | null;
+  expires_at: string | null;
+  is_lifetime: boolean;
+  hwid: string;
+  message: string;
+}
+
+export interface AutoJoinResult {
+  name: string;
+  chat_id: number;
+  status: "JOINED" | "ALREADY_JOINED" | "LINK_EXPIRED" | "RATE_LIMITED" | "ERROR" | string;
+  message: string;
+}
+
+export interface AutoJoinResponse {
+  success: boolean;
+  joined_count: number;
+  already_count: number;
+  failed_count: number;
+  total_channels: number;
+  message: string;
+  results: AutoJoinResult[];
+}

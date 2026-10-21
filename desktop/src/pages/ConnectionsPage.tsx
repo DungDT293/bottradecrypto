@@ -11,10 +11,12 @@ import {
   ArrowLeft,
   Settings,
   ExternalLink,
+  Zap,
+  Sparkles,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
-import type { TelegramProfile, TelegramCredentialsStatus } from "../types/api";
+import type { TelegramProfile, TelegramCredentialsStatus, AutoJoinResponse } from "../types/api";
 
 export type TelegramLoginState =
   | "BACKEND_UNAVAILABLE"
@@ -77,6 +79,28 @@ export const ConnectionsPage: React.FC = () => {
   const [liveKey, setLiveKey] = useState("");
   const [liveSecret, setLiveSecret] = useState("");
   const [savingLiveBinanceCreds, setSavingLiveBinanceCreds] = useState(false);
+
+  // Auto-Join 5 Elite Channels state
+  const [autoJoining, setAutoJoining] = useState(false);
+  const [autoJoinResult, setAutoJoinResult] = useState<AutoJoinResponse | null>(null);
+
+  const handleAutoJoinElite = async () => {
+    setAutoJoining(true);
+    try {
+      const res = await api.autoJoinEliteChannels();
+      setAutoJoinResult(res);
+      addToast(
+        res.message || `Đã tham gia thành công ${res.joined_count} kênh mới (${res.already_count} kênh đã có sẵn).`,
+        res.success ? "success" : "warning"
+      );
+      await refreshSnapshot();
+    } catch (err: any) {
+      const msg = err?.user_message || err?.message || "Lỗi khi tự động tham gia nhóm Telegram.";
+      addToast(msg, "error");
+    } finally {
+      setAutoJoining(false);
+    }
+  };
 
   // Cooldown countdown timer
   useEffect(() => {
@@ -745,6 +769,100 @@ export const ConnectionsPage: React.FC = () => {
                   <RefreshCw size={13} />
                   <span>Làm mới</span>
                 </button>
+              </div>
+
+              {/* 1-Click Auto-Join Elite Channels Banner */}
+              <div
+                style={{
+                  marginTop: "20px",
+                  padding: "16px",
+                  borderRadius: "8px",
+                  background: "linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.6) 100%)",
+                  border: "1px solid rgba(16, 185, 129, 0.35)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: "14px", fontWeight: 700, color: "#34d399", display: "flex", alignItems: "center", gap: "8px" }}>
+                      <Zap size={18} />
+                      <span>Tham Gia Nhanh 5 Kênh Tinh Hoa (1-Click Auto-Join)</span>
+                    </div>
+                    <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "var(--text-secondary)" }}>
+                      Tự động vào 5 kênh Telegram tín hiệu có winrate & PnL cao nhất: <strong>THE WOLF, Boom Boom Billionaires, Leopard, Monk, Neon</strong> và tự động đưa vào danh sách theo dõi lệnh.
+                    </p>
+                  </div>
+
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={handleAutoJoinElite}
+                    disabled={autoJoining}
+                    style={{
+                      whiteSpace: "nowrap",
+                      background: "linear-gradient(135deg, #059669 0%, #10b981 100%)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      padding: "8px 14px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {autoJoining ? (
+                      <>
+                        <RefreshCw size={14} className="spin" />
+                        <span>Đang tham gia...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14} />
+                        <span>Tham Gia 5 Kênh Ngay</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Results breakdown if triggered */}
+                {autoJoinResult && (
+                  <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid rgba(255, 255, 255, 0.1)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 600, color: "#fff", marginBottom: "8px" }}>
+                      Kết quả ({autoJoinResult.joined_count} kênh mới, {autoJoinResult.already_count} kênh đã tham gia):
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {autoJoinResult.results.map((r, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: "12px",
+                            padding: "6px 10px",
+                            background: "rgba(0, 0, 0, 0.25)",
+                            borderRadius: "4px",
+                          }}
+                        >
+                          <span style={{ fontWeight: 500, color: "var(--text-primary)" }}>{r.name}</span>
+                          <span
+                            style={{
+                              fontSize: "11px",
+                              color:
+                                r.status === "JOINED"
+                                  ? "#34d399"
+                                  : r.status === "ALREADY_JOINED"
+                                  ? "#60a5fa"
+                                  : "#f87171",
+                            }}
+                          >
+                            {r.status === "JOINED"
+                              ? "✅ Đã tham gia"
+                              : r.status === "ALREADY_JOINED"
+                              ? "ℹ️ Đã tham gia trước đó"
+                              : `⚠️ ${r.message || "Lỗi"}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

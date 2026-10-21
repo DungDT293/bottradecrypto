@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  Zap,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
@@ -42,6 +43,7 @@ export const GroupsPage: React.FC = () => {
   const [savedAllowedIds, setSavedAllowedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoJoining, setAutoJoining] = useState(false);
 
   // Filter & Search states - Default strictly to the 8 MONITORED channels
   const [selectedFolderId, setSelectedFolderId] = useState<string | number>("MONITORED");
@@ -130,6 +132,23 @@ export const GroupsPage: React.FC = () => {
       addToast(err?.user_message || err?.message || "Lỗi lưu danh sách theo dõi.", "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAutoJoinElite = async () => {
+    setAutoJoining(true);
+    try {
+      const res = await api.autoJoinEliteChannels();
+      addToast(
+        res.message || `Đã tham gia thành công ${res.joined_count} kênh mới (${res.already_count} kênh đã có sẵn).`,
+        res.success ? "success" : "warning"
+      );
+      await fetchDialogs(true);
+    } catch (err: any) {
+      const msg = err?.user_message || err?.message || "Lỗi khi tự động tham gia nhóm Telegram.";
+      addToast(msg, "error");
+    } finally {
+      setAutoJoining(false);
     }
   };
 
@@ -327,6 +346,23 @@ export const GroupsPage: React.FC = () => {
           </p>
         </div>
         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <button
+            className="btn btn-secondary"
+            onClick={handleAutoJoinElite}
+            disabled={autoJoining}
+            title="Tự động tham gia 5 kênh tín hiệu tinh hoa và đưa vào danh sách theo dõi"
+            style={{
+              borderColor: "rgba(16, 185, 129, 0.4)",
+              color: "#34d399",
+              background: "rgba(16, 185, 129, 0.1)",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            {autoJoining ? <RefreshCw size={14} className="spin" /> : <Zap size={14} />}
+            <span>{autoJoining ? "Đang tham gia..." : "⚡ Auto-Join 5 Kênh Tinh Hoa"}</span>
+          </button>
           <button className="btn btn-secondary" onClick={() => fetchDialogs(true)} disabled={loading} title="Tải lại từ Telegram">
             <RefreshCw size={14} className={loading ? "spin" : ""} />
             <span>Tải lại</span>

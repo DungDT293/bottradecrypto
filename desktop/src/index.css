@@ -243,6 +243,37 @@ body {
   font-weight: 700;
 }
 
+/* VIP License Badges */
+.badge-vip-lifetime {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.25) 0%, rgba(217, 119, 6, 0.15) 100%);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+  font-weight: 700;
+}
+
+.badge-vip-active {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  font-weight: 600;
+}
+
+.badge-vip-trial {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  font-weight: 600;
+}
+
+.badge-vip-expired {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  font-weight: 600;
+  animation: pulse-danger 2.5s infinite;
+}
+
 /* Cards & Grid */
 .card-grid {
   display: grid;

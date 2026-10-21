@@ -22,6 +22,7 @@ from parser.validator import SignalValidator
 from services.alert_service import AlertLevel, AlertService
 from services.binance_service import BinanceService
 from services.channel_analytics_service import ChannelAnalyticsService
+from services.license_service import LicenseService
 from services.stats_service import StatsService
 from services.telegram_service import TelegramService
 from services.trading_service import EngineStatus, TradingService
@@ -47,6 +48,7 @@ def create_api_router(
     trading_svc = TradingService(db, config)
     stats_svc = StatsService(db, config)
     channel_analytics_svc = ChannelAnalyticsService(db.db_path)
+    license_svc = LicenseService()
     alert_svc = AlertService.get_instance(db=db)
     if not alert_svc._alerts:
         alert_svc.add_alert(
@@ -313,6 +315,63 @@ def create_api_router(
             "USER",
         )
         return {"success": True, "allowed_chat_ids": config.telegram.allowed_chat_ids}
+
+    @router.post("/telegram/auto-join-elite", dependencies=[Depends(verify_token)])
+    async def auto_join_elite():
+        try:
+            res = await telegram_svc.auto_join_elite_channels()
+            alert_svc.add_alert(
+                AlertLevel.INFO,
+                "Tự động tham gia nhóm tinh hoa",
+                res.get("message", "Đã quét và tham gia các nhóm tinh hoa."),
+                "TELEGRAM",
+            )
+            return res
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=make_error_response("AUTO_JOIN_FAILED", str(e)),
+            )
+
+    # === COMMERCIAL LICENSE ENDPOINTS ===
+    @router.get("/license/status", dependencies=[Depends(verify_token)])
+    async def get_license_status():
+        return license_svc.get_license_info()
+
+    class LicenseKeyModel(BaseModel):
+        key: str
+
+    @router.post("/license/activate", dependencies=[Depends(verify_token)])
+    async def activate_license(body: LicenseKeyModel):
+        res = license_svc.activate_key(body.key)
+        if not res.get("success", False):
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response("LICENSE_INVALID", res.get("message", "Key không hợp lệ")),
+            )
+        alert_svc.add_alert(
+            AlertLevel.INFO,
+            "Bản quyền kích hoạt thành công",
+            res.get("message", ""),
+            "LICENSE",
+        )
+        return res
+
+    @router.post("/license/trial", dependencies=[Depends(verify_token)])
+    async def activate_license_trial():
+        res = license_svc.activate_trial()
+        if not res.get("success", False):
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response("TRIAL_FAILED", res.get("message", "Không thể kích hoạt dùng thử")),
+            )
+        alert_svc.add_alert(
+            AlertLevel.INFO,
+            "Kích hoạt Dùng Thử 3 Ngày",
+            res.get("message", ""),
+            "LICENSE",
+        )
+        return res
 
     class CollectHistoryModel(BaseModel):
         chat_id: int

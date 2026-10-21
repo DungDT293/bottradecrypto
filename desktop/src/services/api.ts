@@ -16,6 +16,8 @@ import type {
   ChannelLeaderboardResponse,
   ChannelDetailResponse,
   TelegramChannelMessagesResponse,
+  LicenseInfo,
+  AutoJoinResponse,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -225,4 +227,17 @@ export const api = {
     return request<ChannelLeaderboardResponse>(`/channels/leaderboard?${params.toString()}`);
   },
   getChannelDetail: (chatId: number) => request<ChannelDetailResponse>(`/channels/${chatId}/detail`),
+
+  // 11. Commercial License & Auto-Join
+  getLicenseStatus: () => request<LicenseInfo>("/license/status"),
+  activateLicense: (key: string) => request<{ success: boolean; message: string; license: LicenseInfo }>("/license/activate", {
+    method: "POST",
+    body: JSON.stringify({ key }),
+  }),
+  activateTrial: () => request<{ success: boolean; message: string; license?: LicenseInfo }>("/license/trial", {
+    method: "POST",
+  }),
+  autoJoinEliteChannels: () => request<AutoJoinResponse>("/telegram/auto-join-elite", {
+    method: "POST",
+  }),
 };
