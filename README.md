@@ -1,6 +1,6 @@
-# TELEGRAM BINANCE SIGNAL EXECUTOR
+# TELEGRAM BINANCE SIGNAL EXECUTOR (v1.3.1 PRO)
 
-Hệ thống tự động tiếp nhận tín hiệu giao dịch từ các nhóm/kênh Telegram qua tài khoản cá nhân (MTProto Telethon), phân tích entry/SL/TP, kiểm soát rủi ro và quản lý lệnh trên sàn Binance USD-M Futures.
+Hệ thống tự động tiếp nhận tín hiệu giao dịch từ các nhóm/kênh Telegram tinh hoa qua tài khoản cá nhân (MTProto Telethon), phân tích cú pháp đa tầng, kiểm soát rủi ro không cháy vốn (Zero-Liquidation), tự động dời hòa vốn (Kèo Bất Tử) và quản lý lệnh chuyên nghiệp trên sàn Binance USD-M Futures.
 
 ---
 
@@ -10,12 +10,14 @@ Hệ thống tự động tiếp nhận tín hiệu giao dịch từ các nhóm/
 2. **Binance USD-M Futures:**
    - Chỉ hỗ trợ hợp đồng Perpetual ký quỹ USDT.
    - Tài khoản Futures thông thường, **One-Way Position Mode**.
-   - **ISOLATED margin** theo chính sách an toàn mặc định.
-   - **Tối đa 1 tín hiệu đang hoạt động trên mỗi symbol**.
+   - Hỗ trợ cả **CROSSED** và **ISOLATED margin** (mặc định CROSSED với chốt chặn khống chế ký quỹ nghiêm ngặt theo % vốn).
+   - **Tối đa 1 tín hiệu đang hoạt động trên mỗi symbol** (chống trùng lặp lệnh trên cùng 1 cặp coin).
    - Nếu tài khoản sàn ở chế độ Hedge Mode hoặc có vị thế thủ công ngoài hệ thống trên symbol đó: Báo **BLOCKED**, không can thiệp.
-3. **Mặc định an toàn:**
-   - Mặc định khởi chạy ở chế độ **READ_ONLY**.
-   - Không tự ý đặt lệnh thật, không hứa hẹn lợi nhuận, không tự ý nới lỏng rủi ro để vào nhiều lệnh hơn.
+3. **Mặc định an toàn & Quản trị vốn:**
+   - **Đòn bẩy tối đa 25x** (có bộ khóa an toàn tự động co nhỏ đòn bẩy nếu SL xa để tránh bị thanh lý trước khi chạm SL).
+   - **Margin mục tiêu 2.5% - 5.0% vốn** cho mỗi lệnh, bảo toàn hơn 75% vốn dự phòng tiền mặt.
+   - **Cầu chì ngắt ngày (Max Daily Loss = 15%):** Tự động khóa vào lệnh nếu chạm trần lỗ ngày để bảo vệ 85% vốn còn lại.
+   - **Chốt lời & Kèo Bất Tử:** TP1 chốt 35% vị thế, lập tức dời SL về `Entry + 0.05%` (hòa vốn + phí), triệt tiêu hoàn toàn rủi ro thua ngược.
 
 ---
 
@@ -77,7 +79,7 @@ telegram_binance_signal_executor/
 │   └── listener.py            # Lắng nghe tin nhắn mới & chỉnh sửa, chống trùng lặp
 ├── cli/
 │   └── main.py                # Điểm vào dòng lệnh (gui, telegram-login, list-chats...)
-├── tests/                     # 55 bài kiểm thử đơn vị, dịch vụ và UI (100% PASS)
+├── tests/                     # 108 bài kiểm thử đơn vị, dịch vụ và UI (100% PASS)
 ├── DOCUMENTATION_BINANCE_API.md
 ├── POLICY_SPECIFICATION.md
 ├── requirements.txt
@@ -149,12 +151,15 @@ telegram_binance_signal_executor/
    ```bash
    python -m cli.main list-chats
    ```
-5. Mở file `config.yaml`, dán các `chat_id` bạn muốn bot theo dõi vào mục:
+5. Mở file `config.yaml`, dán danh sách 5 Kênh Tinh Hoa (Top 5 Elite Whitelist) đã được kiểm chứng vào mục:
    ```yaml
    telegram:
      allowed_chat_ids:
-       - -1001234567890
-       - -1009876543210
+       - -1002007658025  # THE WOLF (CRYPTO)®
+       - -1001756316676  # Boom_Boom_Billionaires
+       - -1002052872813  # CRYPTO LEOPARD'S
+       - -1001552004524  # CRYPTO MONK
+       - -1001370457350  # Crypto Neon
    ```
 
 ---
@@ -253,8 +258,8 @@ Hệ thống hỗ trợ 4 chế độ qua tham số `mode` trong `config.yaml`:
 ## 9. BÁO CÁO KẾT QUẢ KIỂM THỬ THỰC TẾ
 
 Toàn bộ kiểm thử được chạy bằng `pytest`:
-- **Tổng số test:** 55/55 PASSED (100%).
-- **Thời gian chạy:** ~4.63s.
+- **Tổng số test:** 108/108 PASSED (100%).
+- **Thời gian chạy:** ~9.19s.
 
 ### Phân loại phạm vi kiểm thử:
 - **Offline / Mock & Service Testing (Đã kiểm thử toàn diện 55/55 PASS):**
@@ -372,18 +377,27 @@ copy dist\backend-x86_64-pc-windows-msvc.exe desktop\src-tauri\binaries\
 cd desktop\src-tauri
 cargo tauri build --bundles nsis
 ```
-- **Tệp cài đặt đầu ra:** `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.1.9_x64-setup.exe`
+- **Tệp cài đặt đầu ra:** `telegram-binance-signal-executor_1.3.1_x64-setup.exe` (được đưa ra thư mục gốc để người dùng cài đặt nhanh)
 - **Tệp thực thi độc lập:** `desktop/src-tauri/target/release/app.exe`
+- **Kịch bản khởi chạy đồng bộ:** `launch_app.bat` (tự động dọn dẹp tiến trình treo, đồng bộ database, copy file nhị phân mới và bật ứng dụng).
 
 ---
 
 ## 11. NHẬT KÝ PHIÊN BẢN (CHANGELOG)
 
-### Bản phát hành v1.1.9:
-- **Chuyển đổi hoàn toàn sang CROSSED Margin theo chuẩn Admin:** Tự động thiết lập chế độ ký quỹ `CROSSED` cho toàn bộ các cặp giao dịch theo đúng logic tín hiệu admin Telegram.
-- **Kiểm soát rủi ro kép (Dual-Constraint Position Sizing):** Áp dụng đồng thời 2 điều kiện: giới hạn lỗ đô la và giới hạn ký quỹ ví nghiêm ngặt 1.5% - 2.0% equity (`max_margin_per_trade_pct = 2.0%`). Khắc phục triệt để tình trạng tài khoản nhỏ bị chiếm dụng margin lớn (như 10% vốn) khi đòn bẩy sàn thấp hoặc SL xa.
-- **Nâng cấp cơ chế Breakeven (Kèo Bất Tử) tức thì:** Tự động dời SL về Entry + phí sàn ngay khi lệnh chốt lời TP1 được khớp trên sàn (nhận diện qua `tp1_reached`, trạng thái DB hoặc đối chiếu biến mất khỏi Binance open orders), triệt tiêu rủi ro giá quét chạm TP1 rồi giật ngược về cắn SL ban đầu.
-- **Bộ cài đặt NSIS v1.1.9:** Đóng gói file cài đặt tự động `telegram-binance-signal-executor_1.1.9_x64-setup.exe`.
+### Bản phát hành v1.3.1 (Hiện hành):
+- **Khóa cứng Whitelist 5 Nhóm Tinh Hoa (Top 5 Elite):** Chỉ tiếp nhận và xử lý tín hiệu từ 5 kênh có winrate cao nhất: `THE WOLF (CRYPTO)®`, `Boom_Boom_Billionaires`, `CRYPTO LEOPARD'S`, `CRYPTO MONK`, `Crypto Neon`.
+- **Thanh lọc dữ liệu triệt để (Database Purging):** Xóa sạch toàn bộ dữ liệu tin nhắn, tín hiệu cũ ngoài 5 nhóm tinh hoa trên cả AppData Local, AppData Roaming và thư mục dự án.
+- **Phòng thủ đa tầng trên giao diện (Defense-in-Depth UI):** Khóa cứng bộ lọc hiển thị tại `LeaderboardPage`, `SignalsPage`, và `GroupsPage` đảm bảo không bao giờ hiển thị kênh ngoài whitelist.
+- **Kẹp đòn bẩy an toàn (Safe Leverage Liquidation Clamp):** Áp dụng công thức $\text{Safe Leverage} = \min(25, \lfloor 0.75 / \text{SL distance} \rfloor)$ để đảm bảo giá thanh lý luôn nằm xa hơn mức Stop Loss tối thiểu 25%, triệt tiêu 100% rủi ro cháy tài khoản trước khi chạm SL.
+- **Phân bổ Multi-TP thông minh (Geometric Decay):** Chốt 35% tại TP1 để kích hoạt Kèo Bất Tử (dời SL về `Entry + 0.05%`), phần còn lại 65% được phân bổ giảm dần theo luật hàm mũ cho TP2, TP3, TP4... kèm cơ chế gộp coin lẻ chống lỗi sàn (Anti-Dust).
+- **Bộ cài đặt NSIS v1.3.1:** Đóng gói bản cài đặt hoàn chỉnh `telegram-binance-signal-executor_1.3.1_x64-setup.exe` dung lượng 96.47 MiB.
+- **Kiểm thử toàn diện:** Vượt qua 108/108 bài test tự động (`108 passed`).
+
+### Bản phát hành v1.3.0:
+- Nâng trần đòn bẩy tối đa lên 25x theo kỷ luật quản trị vốn mới.
+- Hỗ trợ phân tầng ký quỹ theo độ tin cậy của nhóm (Tiered Margin Allocation).
+- Cơ chế giải phóng slot rủi ro động khi vị thế đã đạt trạng thái Kèo Bất Tử (Risk-Free).
 
 ### Bản phát hành v1.1.8:
 - **Triệt tiêu lỗi gửi lệnh Binance (UnboundLocalError `asyncio`):** Đưa `import asyncio` ra phạm vi module-level tại `binance_client.py` và `telegram/client.py`, giải quyết triệt để lỗi gián đoạn gửi lệnh khi rate-limiter không bị kích hoạt.

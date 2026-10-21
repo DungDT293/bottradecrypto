@@ -8,24 +8,27 @@
 
 Tài liệu này hệ thống hóa toàn bộ kiến thức, quy luật định dạng, đặc trưng hành vi và cơ chế phòng vệ rủi ro sau quá trình quét, phân tích và chuẩn hóa dữ liệu từ các nhóm tín hiệu Telegram hàng đầu.
 
-### 1.1. Danh mục 8 Kênh Ghim Chính thức (Whitelist)
-Toàn bộ hệ thống bot chỉ lắng nghe và giao dịch trên 8 nhóm được xác thực sau:
+### 1.1. Danh mục 5 Kênh Ghim Tinh Hoa Chính Thức (Top 5 Elite Whitelist)
+Toàn bộ hệ thống bot chỉ lắng nghe, phân tích và thực thi lệnh trên 5 nhóm tinh hoa sau:
 
-| STT | Tên Kênh Telegram | Chat ID | Tỉ Lệ Thắng Thực Tế | Tỷ lệ Kèo Chuẩn | Đòn bẩy Áp dụng | Mức độ Ưu tiên |
-|:---:|:---|:---:|:---:|:---:|:---:|:---:|
-| 1 | **CRYPTO LEOPARD'S** | `-1002052872813` | **84.6%** | 98.3% | 20x - 50x | 🥇 **Ưu tiên 1** (Vào vùng giá BELOW cực tốt) |
-| 2 | **Crypto Neon** | `-1001370457350` | **80.0%** | 99.4% | **10x cố định** | 🥈 **Ưu tiên 1** (Kỷ luật cao, TP1 +0.7%) |
-| 3 | **Crypto spider 🕷️ scalper** | `-1001895315984` | **78.9%** | 98.6% | 20x - 50x | 🥉 **Ưu tiên 1** (Scalp ngắn chuẩn, ít rác) |
-| 4 | **THE CRYPTO TRADER** | `-1001590450482` | **63.9%** | 81.4% | 20x | ⭐⭐⭐ **Ăn đậm** (R:R cao 1:2.02, ghép 2 bước) |
-| 5 | **THE WOLF (CRYPTO)®** | `-1002007658025` | **56.4%** | 87.4% | 20x - 50x | ⭐⭐⭐ **Khá** (TP dải gạch nối, R:R 1:1.24) |
-| 6 | **Global Crypto Research** | `-1001161683441` | **55.0%** | 86.9% | 20x | ⭐⭐⭐ **Khá** (SL chặt 3.36%, TP xa +7.1%) |
-| 7 | **THE MASTER (CRYPTO)** | `-1002266035358` | **52.5%** | 96.0% | 25x - 50x | ⭐⭐⭐ **Trung bình** (Kèo nhiều, Entry Zone) |
-| 8 | **Crypto World Updates** | `-1001652601224` | **47.5%** | 94.6% | 20x - 50x | ⭐⭐ **Hơi yếu** (Tần suất dày) |
+| STT | Tên Kênh Telegram | Chat ID | Tỉ Lệ Thắng Thực Tế | Tần Suất Kèo | Đòn bẩy Áp dụng | Đặc trưng & Chiến lược |
+|:---:|:---|:---:|:---:|:---:|:---:|:---|
+| 1 | **THE WOLF (CRYPTO)®** | `-1002007658025` | **65.0%** | ~48 kèo/tháng | 11x - 20x | 🥇 Kèo R:R dương (1.24), TP dải gạch nối, ăn đậm sóng trung bình. |
+| 2 | **Boom_Boom_Billionaires** | `-1001756316676` | **75.0%** | ~65 kèo/tháng | 12x - 20x | 🥈 Tỷ lệ chạm TP1 cực cao (75%), dời hòa vốn Kèo Bất Tử rất nhanh. |
+| 3 | **CRYPTO LEOPARD'S** | `-1002052872813` | **79.5%** | ~78 kèo/tháng | 20x - 25x | 🥉 Bắt vùng giá BELOW cực tốt, tỷ lệ thắng cao nhất bảng xếp hạng. |
+| 4 | **CRYPTO MONK** | `-1001552004524` | **62.5%** | ~20 kèo/tháng | 20x - 25x | ⭐ Kèo Scalp nhanh, chọn lọc kỹ, ít rác. |
+| 5 | **Crypto Neon** | `-1001370457350` | **71.4%** | ~58 kèo/tháng | 10x - 20x | ⭐ Kỷ luật cao, TP1 ngắn (+1.8%), cắn hòa vốn siêu tốc. |
 
-### 1.2. Danh mục 3 Kênh Bị Loại Bỏ (Blacklist)
-- **`Crypto Hunters` (`-1002191067035`):** Tỉ lệ quét Stop Loss thực tế trên sàn lên tới **77.5%** (Win rate chỉ 22.5%). Mặc dù trên channel đăng 151 tin chốt lời và 0 tin báo lỗ (giấu lỗ), nhưng thực tế nến sàn Binance cho thấy râu nến quét SL trước khi kịp chạm TP1. Đã tắt hoàn toàn.
-- **`CRYPTO MONK` (`-1001552004524`):** Tin quá thưa (64 tin/3 tháng), tỷ lệ rác dụ VIP lên đến 17.2%, thường xuyên gặp lỗi mâu thuẫn tiêu đề ghi `SHORT` nhưng nội dung ghi `BUY`. Đã tắt hoàn toàn.
-- **`ESTR - EAT SLEEP TRADE REPEAT` (`-1001656921849`):** Tỷ lệ lỗi logic SL/TP lên tới 72.7% do admin soạn nhầm template (SL cao hơn Entry của lệnh LONG, TP ngược chiều). Đã tắt hoàn toàn.
+### 1.2. Danh mục Các Kênh Bị Loại Bỏ & Thanh Lọc Triệt Để (Purged & Blacklist)
+Toàn bộ dữ liệu của các nhóm sau đã được xóa sạch khỏi cơ sở dữ liệu và bị chặn vĩnh viễn:
+- **`Global Crypto Research` (`-1001161683441`):** Quá nhiều tin tức vĩ mô và quảng cáo sàn làm loãng tín hiệu.
+- **`Crypto spider scalper` (`-1001895315984`):** Tần suất bắn quá dày, tỷ lệ quét SL cao khi BTC biến động.
+- **`Alpha Trade Zone` (`-1001860630181`):** Cú pháp không nhất quán, giấu số liệu cắt lỗ.
+- **`THE MASTER (CRYPTO)` (`-1002266035358`):** Vùng Entry Zone quá rộng, dễ bị trượt giá.
+- **`Crypto Pulse Matrix®` (`-1001966506182`):** Tỷ lệ tín hiệu rác và câu view cao.
+- **`Crypto Hunters` (`-1002191067035`):** Tỷ lệ quét SL thực tế lên tới 77.5% (giấu lỗ trên channel).
+- **`Crypto World Updates` (`-1001652601224`):** Tần suất dày nhưng tỷ lệ R:R âm, không tối ưu cho tài khoản nhỏ.
+- **`ESTR - EAT SLEEP TRADE REPEAT` (`-1001656921849`):** Lỗi template đảo ngược SL/TP thường xuyên.
 
 ---
 

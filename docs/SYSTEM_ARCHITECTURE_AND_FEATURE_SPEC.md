@@ -1,5 +1,5 @@
 # TÀI LIỆU TOÀN DIỆN VỀ KIẾN TRÚC, TÍNH NĂNG VÀ VẬN HÀNH DỰ ÁN
-## TELEGRAM BINANCE SIGNAL EXECUTOR (v2.0 PRO)
+## TELEGRAM BINANCE SIGNAL EXECUTOR (v1.3.1 PRO)
 
 ---
 
@@ -8,14 +8,14 @@
 **Telegram Binance Signal Executor** là hệ thống giao dịch tự động hóa cấp độ tổ chức (Institutional-Grade Trading Terminal) chạy trực tiếp trên máy tính người dùng (Desktop Application). 
 
 Hệ thống giải quyết trọn vẹn bài toán:
-1. **Lắng nghe trực tiếp từ Telegram cá nhân (MTProto Userbot):** Đọc tin nhắn thời gian thực từ các nhóm kín/kênh phân tích tín hiệu được ghim mà không cần quyền Admin Bot hay Webhook.
-2. **Bóc tách thông minh (Grammar-Aware Natural Language Parser):** Tự động nhận diện cấu trúc lệnh (Long/Short, Entry, TP đa tầng, SL, Đòn bẩy) từ nhiều phong cách soạn tin khác nhau, tự sửa lỗi chính tả (`AKE- PROFIT`, `1) 0.018100`), nhận diện vung giá Range / Below.
-3. **Quản trị rủi ro nghiêm ngặt (Risk Policy Engine):** Tự động tính toán khối lượng lệnh (Position Sizing) theo đúng tỷ lệ rủi ro tài khoản (mặc định 1.5% equity cho một kèo), khóa đòn bẩy tối đa 50x (riêng kênh Crypto Neon giới hạn cứng 10x), bắt buộc ký quỹ cô lập (`ISOLATED`).
+1. **Lắng nghe trực tiếp từ Telegram cá nhân (MTProto Userbot):** Đọc tin nhắn thời gian thực từ 5 kênh tín hiệu tinh hoa được cấp phép mà không cần quyền Admin Bot hay Webhook.
+2. **Bóc tách thông minh (Grammar-Aware Natural Language Parser):** Tự động nhận diện cấu trúc lệnh (Long/Short, Entry, TP đa tầng, SL, Đòn bẩy) từ nhiều phong cách soạn tin khác nhau, tự sửa lỗi chính tả (`AKE- PROFIT`, `1) 0.018100`), nhận diện vùng giá Range / Below.
+3. **Quản trị rủi ro nghiêm ngặt (Zero-Liquidation Risk Policy Engine):** Tự động tính toán khối lượng lệnh (Position Sizing) theo đúng tỷ lệ rủi ro tài khoản (2.5% - 5.0% equity cho một kèo), khóa đòn bẩy tối đa 25x kèm cơ chế **Safe Leverage Liquidation Clamp** (tự động co nhỏ đòn bẩy nếu SL xa để đảm bảo giá thanh lý luôn nằm xa hơn SL tối thiểu 25%).
 4. **Thực thi và bảo vệ lệnh kép trên Binance Futures (USD-M):**
-   - Đặt lệnh Entry (Limit hoặc Market).
+   - Đặt lệnh Entry (Limit hoặc Market theo chính sách `BEST_PRICE`).
    - Ngay khi khớp Entry, đặt ngay lệnh Cắt lỗ Stop-Market qua endpoint chuyên biệt `/fapi/v1/algoOrder` (tránh lỗi Binance Error -4120).
-   - Đặt chốt lời từng phần (TP1 60%, TP2 25%, TP3 15%).
-   - Tự động dời SL về Entry (Breakeven - Kèo Bất Tử) ngay khi chạm TP1.
+   - Đặt chốt lời từng phần (TP1 35%, phần còn lại 65% suy giảm hình học cho TP2, TP3, TP4...).
+   - Tự động dời SL về Entry + 0.05% (**Kèo Bất Tử - Breakeven**) ngay khi chạm TP1.
 5. **Giao diện Dashboard Quản Trị Trực Quan (Tauri v2 + React 19):** Giúp người dùng theo dõi tài sản, trạng thái kết nối, tín hiệu vào ra, lịch sử khớp lệnh sàn, đánh giá hiệu suất kênh và can thiệp thủ công khi cần.
 
 ---
@@ -125,16 +125,16 @@ graph LR
 - **Mục tiêu:** Quản lý danh sách hội thoại, thư mục Telegram (Chat Folders), lọc các kênh cho phép bot quét tín hiệu.
 - **Tính năng nổi bật:**
   - Bộ lọc thông minh theo Thư mục: `Tất cả`, `Đã ghim`, `Đang theo dõi`, `Kèo trade`...
-  - **Danh sách Whitelist 8 kênh chính thức:** Chỉ 8 kênh chất lượng cao nhất được kích hoạt.
+  - **Danh sách Whitelist 5 Kênh Tinh Hoa:** Chỉ 5 kênh chất lượng cao nhất được cấp phép (`THE WOLF`, `Boom_Boom_Billionaires`, `CRYPTO LEOPARD'S`, `CRYPTO MONK`, `Crypto Neon`). Toàn bộ các kênh rác ngoài danh sách bị loại bỏ hoàn toàn.
   - Nút "Quét lịch sử 7d": Thu thập lại tin nhắn cũ của kênh để huấn luyện và kiểm thử.
   - Lưu cấu hình danh sách theo dõi trực tiếp xuống `config.yaml`.
 - **Liên kết dữ liệu:** `/telegram/dialogs`, `/telegram/folders`, `/telegram/allowlist`.
 
 ### 4. Bảng Xếp Hạng & Đánh Giá Nhóm (`LeaderboardPage.tsx`)
-- **Mục tiêu:** Đánh giá khách quan chất lượng tín hiệu từng kênh dựa trên kiểm thử thị trường thực tế (Backtest).
+- **Mục tiêu:** Đánh giá khách quan chất lượng tín hiệu từng kênh dựa trên kiểm thử thị trường thực tế (Backtest 6 tháng).
 - **Thành phần cốt lõi:**
-  - Phân loại Tier rõ ràng: **Tier S** ($\ge 75\%$), **Tier A** ($55\% - 74\%$), **Tier B** ($45\% - 54\%$), **Tier D** (Bị chặn/Rủi ro cao).
-  - Cảnh báo trực diện các kênh scam hoặc kênh có tỷ lệ quét SL quá cao (Crypto Hunters 77.5% SL, ESTR 72.7% lỗi template).
+  - Bảng xếp hạng tinh hoa chỉ hiển thị đúng 5 kênh Whitelist, tự động lọc sạch các kênh rác hoặc kênh lừa đảo.
+  - Phân loại Tier rõ ràng: **Tier S** ($\ge 75\%$), **Tier A** ($55\% - 74\%$), **Tier B** ($45\% - 54\%$).
   - Modal chi tiết: Khi bấm "Xem" từng kênh, hiển thị toàn bộ lịch sử kèo, tỷ lệ R:R, số lần chạm TP1, TP2, TP3.
 - **Liên kết dữ liệu:** `/channels/leaderboard`, `/channels/{chat_id}/signals`.
 

@@ -1,70 +1,79 @@
-# DANH SACH POLICY VA HUONG XU LY (POLICY SPECIFICATIONS)
+# DANH SÁCH CHÍNH SÁCH VÀ QUY TẮC XỬ LÝ (POLICY SPECIFICATIONS v1.3.1)
 
-He thong tuân thu nguyen tac: **Khong tu doan, khong tu tien sua so, khong gia dinh du lieu mo ho**.
-
----
-
-## 1. PHAN LOAI NGUON CUA CAC GIA TRI (FIELD SOURCE TRACKING)
-
-Moi truong du lieu cua tin hieu khi parse phai co nguon goc xac thuc:
-- `EXPLICIT_SIGNAL`: Du lieu duoc ghi ro rang, khong mo ho trong tin nhan goc.
-- `SOURCE_POLICY`: Chinh sach duoc nguoi dung phe duyet rieng cho kenh/nguon nay.
-- `GLOBAL_POLICY`: Chinh sach mac dinh toan he thong trong `config.yaml`.
-- `UNRESOLVED`: Khong co trong tin va chua co policy nao duoc duyet -> Chuyen trang thai `NEEDS_POLICY` hoac `NEEDS_REVIEW`.
+Hệ thống tuân thủ nguyên tắc cốt lõi: **Không tự đoán, không tự tiện sửa số, không giả định dữ liệu mơ hồ, triệt tiêu rủi ro thanh lý (Zero Liquidation)**.
 
 ---
 
-## 2. CHINH SACH CHO NHIEU ENTRY (MULTI-ENTRY POLICY)
+## 1. PHÂN LOẠI NGUỒN CỦA CÁC GIÁ TRỊ (FIELD SOURCE TRACKING)
 
-Khi tin co 2 hoac nhieu muc entry (vi du: GRASS co Entry 1: 0.5020, Entry 2: 0.4870; ETH co 2367, 2387):
-- **Van de:** Tin hieu khong ghi ty le phan bo von giua Entry 1 va Entry 2.
-- **Cac lua chon:**
-  1. `EQUAL_RISK`: Chia rui ro bang nhau cho moi entry (Quantity tinh sao cho `Qty1 * |E1 - SL| == Qty2 * |E2 - SL|`).
-  2. `EQUAL_NOTIONAL`: Chia gia tri danh nghia bang nhau (`Qty1 * E1 == Qty2 * E2`).
-  3. `EQUAL_QUANTITY`: Chia so luong token bang nhau (`Qty1 == Qty2`).
-  4. `NEEDS_POLICY` (Mac dinh): Neu nguoi dung chua chon 1 trong 3 cach tren cho nguon nay, tin hieu bi tam giu o trang thai `NEEDS_POLICY`.
+Mọi trường dữ liệu của tín hiệu khi bóc tách phải có nguồn gốc xác thực rõ ràng:
+- `EXPLICIT_SIGNAL`: Dữ liệu được ghi rõ ràng, không mơ hồ trong tin nhắn gốc của Admin.
+- `SOURCE_POLICY`: Chính sách được người dùng phê duyệt riêng cho kênh/nguồn đó trong `source_registry.py` hoặc `config.yaml`.
+- `GLOBAL_POLICY`: Chính sách mặc định toàn hệ thống trong `config.yaml` / `policy_defaults.py`.
+- `UNRESOLVED`: Không có trong tin và chưa có chính sách nào được duyệt $\rightarrow$ Chuyển trạng thái `NEEDS_POLICY` hoặc `NEEDS_REVIEW`.
 
 ---
 
-## 3. CHINH SACH CHO VUNG ENTRY (ENTRY RANGE POLICY)
+## 2. CHÍNH SÁCH VÙNG ENTRY (RANGE ENTRY POLICY)
 
-Khi tin co vung entry (vi du: QTUM co `Entries: 0.8960 - 0.9160`):
-- **Van de:** Day la mot khoang gia, khong phai 1 muc gia limit cu the.
-- **Cac lua chon:**
-  1. `BEST_PRICE`: Chi dat 1 lenh limit o muc gia tot nhat cua vung (SHORT dat tai gia cao nhat cua vung, LONG dat tai gia thap nhat cua vung).
-  2. `MID_POINT`: Dat 1 lenh limit o muc gia trung binh `(min + max) / 2`.
-  3. `SPLIT_2_LIMITS`: Dat 2 lenh limit o 2 dau cua range.
-  4. `NEEDS_POLICY` (Mac dinh): Neu chua duoc cau hinh, giu o trang thai `NEEDS_POLICY`.
-
----
-
-## 4. CHINH SACH CHO NHIEU TP (MULTI-TP ALLOCATION)
-
-Khi tin co 3 hoac 4 muc TP nhung khong ghi ty le chot:
-- Neu tin co ghi ro (vi du: GRASS ghi "Close 50% at TP1 and 50% at TP2"): dung `EXPLICIT_SIGNAL`.
-- Neu tin KHONG ghi ty le (vi du: ZEREBRO 3 TP, RSR 4 TP, ETH 3 TP, QTUM 3 TP):
-  - Mac dinh he thong la `NEEDS_POLICY`.
-  - Nguoi dung co the cau hinh: `EQUAL_SPLIT` (chia deu) hoac `FRONT_LOADED_50_30_20`.
-  - Luu y: Phai kiem tra tung phan sau khi chia co dat `minQty` va `minNotional` cua san khong. Neu phan cuoi bi nho hon filter, tu dong gop vao phan truoc de tranh loi san.
+Khi tín hiệu cung cấp một vùng giá Entry (ví dụ: `Short BELOW (0.2125)(0.2150)` hoặc `Entry: 0.8960 - 0.9160`):
+- `BEST_PRICE` (Mặc định & Khuyến nghị): Đặt 1 lệnh limit ở mức giá tối ưu nhất cho vị thế:
+  - Lệnh **LONG**: Đặt ở đáy vùng giá (giá thấp nhất).
+  - Lệnh **SHORT**: Đặt ở đỉnh vùng giá (giá cao nhất).
+  - Giúp tối ưu hóa tỷ lệ Risk/Reward (R:R) và mức giá khớp lệnh đẹp nhất.
+- `MID_POINT`: Đặt 1 lệnh limit ở mức giá trung bình `(min + max) / 2`.
+- `SPLIT_2_LIMITS`: Chia đều 50/50 khối lượng thành 2 lệnh limit ở 2 đầu của vùng giá.
+- **Bảo vệ chống rượt giá (Price Chase Protection):** Nếu thị giá hiện tại đã chạy trượt qua vùng Entry $> 1.0\%$ theo hướng bất lợi, hệ thống tự động từ chối (`REJECTED`) để tránh đu đỉnh/đu đáy.
 
 ---
 
-## 5. CHINH SACH DOI BREAKEVEN (BREAKEVEN POLICY)
+## 3. CHÍNH SÁCH CHỐT LỜI ĐA TẦNG (MULTI-TP ALLOCATION & GEOMETRIC DECAY)
 
-- "Consider moving SL to breakeven after TP1" (vi du: GRASS): Day la loi khuyen/goi y ("Consider"), KHONG phai chi dan bat buoc. Mac dinh khong tu dong doi SL tru khi nguoi dung bat `breakeven_after_tp1_default: true`.
-- "Trailing Configuration: Stop: Breakeven - Trigger: Target (1)" (vi du: ETH): Day la chi dan ro rang tu tin hieu.
-- Quy tac khi dời Breakeven:
-  1. Dung gia khop thuc te binh quan (Weighted Average Fill Price), khong dung gia ly thuyet.
-  2. Tinh them phi giao dich 2 chieu (phi mo + phi dong du kien) de dam bao hoa von thuc te.
-  3. Truoc khi doi SL, phai huy cac pending entry con lai neu co.
-  4. Gui algo order SL moi truoc, sau khi xac nhan thanh cong moi huy algo order SL cu (tranh khoang trong khong co SL bao ve).
+Khi tín hiệu có nhiều mốc chốt lời Take Profit:
+- **Chế độ mặc định (`CUSTOM_TP1_RATIO`):**
+  - **Mức TP1 (Chủ lực):** Luôn khóa cố định **35% khối lượng vị thế**. Ngay khi khớp TP1, bot tự động kích hoạt **Kèo Bất Tử** (dời Stop Loss về `Entry + 0.05%` để bảo vệ tài khoản).
+  - **Phần còn lại (65%):** Được phân bổ giảm dần theo luật hàm mũ (Geometric Decay Factor = 0.6) cho các mốc TP tiếp theo:
+    - **Kèo 2 TP:** TP1: 35% | TP2: 65%
+    - **Kèo 3 TP:** TP1: 35% | TP2: 35% | TP3: 30%
+    - **Kèo 4 TP:** TP1: 35.0% | TP2: 33.2% | TP3: 19.9% | TP4: 11.9%
+    - **Kèo 5 TP:** TP1: 35.0% | TP2: 29.9% | TP3: 17.9% | TP4: 10.8% | TP5: 6.4%
+    - **Kèo 6 TP:** TP1: 35.0% | TP2: 28.2% | TP3: 16.9% | TP4: 10.1% | TP5: 6.1% | TP6: 3.7%
+- **Cơ chế chống tồn dư coin lẻ (Anti-Dust Protection):**
+  - Trước khi gửi lệnh Limit TP lên Binance, bot đối chiếu từng mốc với bộ lọc `LOT_SIZE` (minQty) và `MIN_NOTIONAL` của sàn.
+  - Nếu mốc TP cuối cùng có khối lượng quá nhỏ không đủ điều kiện sàn, bot tự động gộp khối lượng đó vào mốc TP liền kề trước đó.
 
 ---
 
-## 6. XU LY BAT DONG NGHIA VA TIN MO HO (CONFLICT & AMBIGUITY RULES)
+## 4. CHÍNH SÁCH DỜI HÒA VỐN TỨC THÌ (KÈO BẤT TỬ - SMART BREAKEVEN)
 
-- **Mau ATOM:** Tieu de ghi `#SHORT`, nhung noi dung entry ghi `BUY : 1) 1.674 - 100%`. Day la mau thuan truc tiep ve huong lenh -> Bat buoc danh dau `NEEDS_REVIEW`, chan tuyet doi khong dat lenh.
-- **Mau TRUTH:** `Short BELOW (0.02300)(0.02325)` -> Co 2 con so sau chu "BELOW", ngu nghia entry khong ro rang (la vung gia hay 2 muc gia) -> Bat buoc danh dau `NEEDS_REVIEW`.
-- **Mau Q/USD:** SL ghi `052506` khong co dau cham thap phan. Trong boi canh crypto gia 0.05, khong duoc tu sua thanh 0.052506. Symbol Q/USD khong co quote USDT -> Bat buoc danh dau `REJECTED` (Symbol khong hop le / SL mo ho).
-- **Don bay cao (200x trong ETH, 50-75x trong RSR):** San va chinh sach rui ro dat tran (vd: max 5x). He thong khong sao chep 200x ma luon ap tran an toan `min(requested_leverage, policy_max_leverage)`.
+- **Thời điểm kích hoạt:** Ngay khi nhận được sự kiện lệnh **TP1 FILLED** trên sàn Binance (hoặc thông qua luồng đối soát trạng thái định kỳ).
+- **Quy tắc dời:**
+  1. Hủy lệnh Stop Loss cũ ở mức giá ban đầu.
+  2. Gửi lệnh `STOP_MARKET` mới với `reduceOnly=true` tại mức giá:
+     $$\text{Breakeven Price} = \text{Entry} \pm (\text{Entry} \times 0.05\%)$$
+     *(Dương cho lệnh Long, Âm cho lệnh Short để bù đắp toàn bộ phí taker 2 chiều).*
+  3. Sau khi lệnh SL mới được xác nhận trên server Binance, vị thế chính thức trở thành **Kèo Bất Tử** (Risk = 0, đảm bảo có lãi ròng).
 
+---
+
+## 5. CHÍNH SÁCH KẸP ĐÒN BẨY AN TOÀN (SAFE LEVERAGE LIQUIDATION CLAMP)
+
+- **Trần đòn bẩy tối đa:** **25x**.
+- **Công thức kẹp đòn bẩy chống cháy:**
+  $$\text{Safe Leverage} = \min\left(25, \left\lfloor \frac{0.75}{\text{Khoảng cách SL \%}} \right\rfloor\right)$$
+- **Mục đích:** Đảm bảo mức giá thanh lý (Liquidation Price) luôn luôn nằm xa hơn mức Stop Loss ít nhất **25% biên độ an toàn**.
+  - Ví dụ: Kèo có SL cách 6.6% $\rightarrow$ Bot tự động hạ đòn bẩy xuống tối đa **11x**. Tuyệt đối không cho phép dùng 25x-50x để tránh bị sàn thanh lý cưỡng bức trước khi chạm SL.
+  - Khi kèo có SL ngắn (1.5% - 3.0%) $\rightarrow$ Bot đi trọn vẹn **20x - 25x**.
+
+---
+
+## 6. DANH SÁCH 5 NHÓM TINH HOA ĐƯỢC CẤP PHÉP (TOP 5 ELITE WHITELIST)
+
+Hệ thống chỉ tiếp nhận và xử lý tín hiệu từ 5 kênh có tỷ lệ thắng và kỷ luật cao nhất:
+1. **THE WOLF (CRYPTO)®** (`-1002007658025`)
+2. **Boom_Boom_Billionaires** (`-1001756316676`)
+3. **CRYPTO LEOPARD'S** (`-1002052872813`)
+4. **CRYPTO MONK** (`-1001552004524`)
+5. **Crypto Neon** (`-1001370457350`)
+
+Toàn bộ các kênh ngoài danh sách trên đều bị cô lập và từ chối xử lý ở mọi tầng hệ thống.

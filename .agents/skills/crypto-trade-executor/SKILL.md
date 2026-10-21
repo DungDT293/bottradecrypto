@@ -90,11 +90,14 @@ Kích hoạt kỹ năng này khi:
 
 ## 4. BẢNG PHÂN LOẠI & QUY TẮC BẮT KÈO THEO KÊNH
 
-| Kênh Telegram | Phân Hạng | Margin Mục Tiêu | Multiplier | Chiến Thuật Áp Dụng |
-|:---|:---:|:---:|:---:|:---|
-| **Top 5 Elite** (`Boom Boom`, `Crypto Neon`, `Wolf Futures`, `THE WOLF`, `CRYPTO MONK`) | **Tier S & A** | **5.0% Vốn (~$5)** | **1.0x** | Kèo chủ lực, chuẩn R:R $\ge 2.5:1$, giữ trọn TP1, TP2, TP3. |
-| **13 Kênh Siêu Scalp** (`Cryptosignal`, `Blue`, `Quality Signals`, `Pulse Matrix`, v.v.) | **Tier B & C** | **2.5% Vốn (~$2.5)** | **0.5x** | Giảm 1 nửa vốn, tối ưu tần suất lướt sóng mà không tốn cạn ký quỹ. |
-| **Kênh Khoe Lãi Ảo / Coin Rác / Không SL** | **Blacklist** | **0% (Hủy)** | **0.0x** | **CHẶN HOÀN TOÀN.** |
+| Kênh Telegram | Chat ID | Phân Hạng | Margin Mục Tiêu | Multiplier | Chiến Thuật Áp Dụng |
+|:---|:---:|:---:|:---:|:---:|:---|
+| **THE WOLF (CRYPTO)®** | `-1002007658025` | **Tier S** | **5.0% Vốn** | **1.0x** | Kèo chủ lực, R:R dương (1.24), giữ trọn TP1 (35%), TP2, TP3. |
+| **Boom_Boom_Billionaires** | `-1001756316676` | **Tier S** | **5.0% Vốn** | **1.0x** | Winrate 75%, dời Breakeven Kèo Bất Tử siêu tốc. |
+| **CRYPTO LEOPARD'S** | `-1002052872813` | **Tier S** | **5.0% Vốn** | **1.0x** | Winrate 79.5%, vào vùng giá BELOW cực tốt. |
+| **CRYPTO MONK** | `-1001552004524` | **Tier A** | **3.5% - 5.0% Vốn** | **1.0x** | Kèo Scalp nhanh, chọn lọc kỹ. |
+| **Crypto Neon** | `-1001370457350` | **Tier A** | **3.5% - 5.0% Vốn** | **1.0x** | Kỷ luật thép, đòn bẩy khống chế an toàn 10x - 20x. |
+| **Các kênh cũ ngoài Top 5 / Khoe Lãi Ảo / Không SL** | *Tất cả các ID khác* | **Blacklist** | **0% (Hủy)** | **0.0x** | **XÓA SẠCH DỮ LIỆU & CHẶN HOÀN TOÀN.** |
 
 ---
 
