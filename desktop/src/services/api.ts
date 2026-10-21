@@ -240,4 +240,5 @@ export const api = {
   autoJoinEliteChannels: () => request<AutoJoinResponse>("/telegram/auto-join-elite", {
     method: "POST",
   }),
+  getPublicIp: () => request<{ ip: string; success: boolean }>("/system/public-ip"),
 };

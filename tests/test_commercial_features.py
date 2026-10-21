@@ -204,3 +204,14 @@ async def test_telegram_auto_join_elite_mock(commercial_api_client):
         assert res_data["joined_count"] == 3
         assert res_data["already_count"] == 2
         assert len(res_data["results"]) == 5
+
+
+def test_system_public_ip_endpoint(commercial_api_client):
+    client, token, _ = commercial_api_client
+    headers = {"X-Session-Token": token}
+
+    resp = client.get("/system/public-ip", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "success" in data
+    assert "ip" in data

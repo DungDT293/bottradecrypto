@@ -107,6 +107,8 @@ export const ConnectionsPage: React.FC = () => {
   // API Guide Modal state
   const [guideModalOpen, setGuideModalOpen] = useState(false);
   const [guideInitialTab, setGuideInitialTab] = useState<"telegram" | "binance">("binance");
+  const [publicIp, setPublicIp] = useState<string>("");
+  const [copiedIp, setCopiedIp] = useState<boolean>(false);
 
   const openTelegramGuide = () => {
     setGuideInitialTab("telegram");
@@ -142,11 +144,16 @@ export const ConnectionsPage: React.FC = () => {
     setConnectionRetries(0);
 
     try {
-      const [credStatus, profile, bnCreds] = await Promise.all([
+      const [credStatus, profile, bnCreds, ipRes] = await Promise.all([
         api.getTelegramCredentialsStatus().catch(() => null),
         api.getTelegramProfile().catch(() => null),
         api.getBinanceCredentialsStatus().catch(() => null),
+        api.getPublicIp().catch(() => null),
       ]);
+
+      if (ipRes?.ip) {
+        setPublicIp(ipRes.ip);
+      }
 
       if (bnCreds) {
         setBinanceCredStatus(bnCreds);
@@ -1218,29 +1225,59 @@ export const ConnectionsPage: React.FC = () => {
           <div
             style={{
               marginTop: "14px",
-              padding: "10px 14px",
+              padding: "12px 14px",
               borderRadius: "6px",
               background: "linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.5) 100%)",
               border: "1px solid rgba(16, 185, 129, 0.3)",
               display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
+              flexDirection: "column",
               gap: "10px",
             }}
           >
-            <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.4" }}>
-              <strong style={{ color: "#34d399" }}>🛡️ Bảo mật vốn 100%:</strong> Chỉ bật quyền{" "}
-              <strong style={{ color: "#34d399" }}>Enable Futures</strong>. Tuyệt đối{" "}
-              <strong style={{ color: "#f87171" }}>KHÔNG bật Enable Withdrawals (Rút tiền)</strong>.
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+              <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.4" }}>
+                <strong style={{ color: "#34d399" }}>🛡️ Cấp phép IP & Bảo mật:</strong> Binance bắt buộc cấp phép IP để mở khóa quyền <strong style={{ color: "#34d399" }}>Enable Futures</strong>. Tuyệt đối <strong style={{ color: "#f87171" }}>KHÔNG bật Enable Withdrawals (Rút tiền)</strong>.
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={openBinanceGuide}
+                style={{ whiteSpace: "nowrap", fontSize: "11px", padding: "3px 8px", color: "#f3ba2f" }}
+              >
+                Xem hướng dẫn
+              </button>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={openBinanceGuide}
-              style={{ whiteSpace: "nowrap", fontSize: "11px", padding: "3px 8px", color: "#f3ba2f" }}
-            >
-              Xem chi tiết
-            </button>
+
+            {publicIp && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  background: "rgba(0, 0, 0, 0.35)",
+                  padding: "6px 10px",
+                  borderRadius: "4px",
+                  fontSize: "12px",
+                }}
+              >
+                <span style={{ color: "var(--text-muted)" }}>
+                  IP máy tính của bạn (Dán vào Binance): <strong className="mono" style={{ color: "#fde047" }}>{publicIp}</strong>
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(publicIp);
+                    setCopiedIp(true);
+                    addToast("Đã sao chép IP máy tính để dán vào Binance!", "success");
+                    setTimeout(() => setCopiedIp(false), 2000);
+                  }}
+                  style={{ padding: "2px 8px", fontSize: "11px" }}
+                >
+                  {copiedIp ? "✓ Đã chép" : "Sao Chép IP"}
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={{ marginTop: "16px" }}>

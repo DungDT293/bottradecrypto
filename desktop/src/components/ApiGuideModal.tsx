@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   BookOpen,
@@ -8,7 +8,11 @@ import {
   XCircle,
   Key,
   Send,
+  Copy,
+  Check,
+  Globe,
 } from "lucide-react";
+import { api } from "../services/api";
 
 interface ApiGuideModalProps {
   isOpen: boolean;
@@ -22,8 +26,50 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
   onClose,
 }) => {
   const [activeTab, setActiveTab] = useState<"telegram" | "binance">(initialTab);
+  const [publicIp, setPublicIp] = useState<string>("");
+  const [loadingIp, setLoadingIp] = useState<boolean>(true);
+  const [copiedIp, setCopiedIp] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+
+    const fetchIp = async () => {
+      try {
+        const res = await api.getPublicIp();
+        if (isMounted && res?.ip) {
+          setPublicIp(res.ip);
+          setLoadingIp(false);
+          return;
+        }
+      } catch {}
+
+      // Fallback directly to public ipify
+      try {
+        const resp = await fetch("https://api.ipify.org?format=json");
+        const data = await resp.json();
+        if (isMounted && data?.ip) {
+          setPublicIp(data.ip);
+        }
+      } catch {}
+
+      if (isMounted) setLoadingIp(false);
+    };
+
+    fetchIp();
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleCopyIp = () => {
+    if (!publicIp) return;
+    navigator.clipboard.writeText(publicIp);
+    setCopiedIp(true);
+    setTimeout(() => setCopiedIp(false), 2000);
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1000 }}>
@@ -31,7 +77,7 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
         className="modal-content"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: "680px",
+          maxWidth: "700px",
           width: "95%",
           maxHeight: "90vh",
           display: "flex",
@@ -61,7 +107,7 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
                 Hướng Dẫn Cấp Phép Kết Nối API & Bảo Mật
               </h3>
               <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
-                Hướng dẫn từng bước thiết lập Telegram & Binance Futures an toàn 100%
+                Hướng dẫn cấp quyền IP và cấu hình Binance Futures an toàn 100%
               </p>
             </div>
           </div>
@@ -107,7 +153,7 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
             }}
           >
             <Key size={15} color={activeTab === "binance" ? "#f3ba2f" : "var(--text-muted)"} />
-            <span>Sàn Binance Futures (Khuyên đọc)</span>
+            <span>Sàn Binance Futures (Cấp quyền IP bắt buộc)</span>
           </button>
 
           <button
@@ -154,23 +200,23 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
                 <ShieldCheck size={24} color="#34d399" style={{ flexShrink: 0, marginTop: "2px" }} />
                 <div style={{ fontSize: "13px", lineHeight: "1.5" }}>
                   <strong style={{ color: "#34d399", fontSize: "14px" }}>
-                    Cam Kết An Toàn Tài Khoản 100%:
+                    Cam Kết Bảo Vệ Vốn An Toàn 100%:
                   </strong>
                   <div style={{ color: "var(--text-secondary)", marginTop: "4px" }}>
                     Bot chỉ cần quyền đọc số dư và quyền đặt lệnh Futures.{" "}
                     <strong style={{ color: "#fff" }}>TUYỆT ĐỐI KHÔNG BẬT quyền Rút tiền (Withdrawals)</strong>.
-                    Khi quyền rút tiền bị tắt, bất kỳ ai (kể cả người giữ API key) cũng không thể rút 1 đồng nào ra khỏi tài khoản của bạn.
+                    Khi quyền rút tiền bị tắt, bất kỳ ai (kể cả người giữ API key) cũng không thể rút 1 xu nào ra khỏi ví sàn Binance của bạn.
                   </div>
                 </div>
               </div>
 
-              {/* Step by step */}
+              {/* 5 Steps Section */}
               <div>
                 <h4 style={{ margin: "0 0 12px 0", fontSize: "14px", fontWeight: 700, color: "#fff" }}>
-                  4 Bước Tạo & Phân Quyền API Key Binance:
+                  5 Bước Tạo API & Cấp Quyền IP Trên Binance:
                 </h4>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                   {/* Step 1 */}
                   <div
                     style={{
@@ -257,20 +303,20 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
                       <p style={{ margin: "4px 0 0 0", color: "var(--text-secondary)", fontSize: "12px" }}>
                         Bấm nút vàng <strong>Tạo API (Create API)</strong> → Chọn loại{" "}
                         <strong>"Tạo bởi hệ thống (System generated)"</strong> → Nhập nhãn đặt tên (vd:{" "}
-                        <code>BotTradeCrypto</code>) → Xác thực bảo mật 2FA (Email/Google Auth).
+                        <code>BotTradeCrypto</code>) → Xác thực bảo mật 2FA (Email / Google Auth).
                       </p>
                     </div>
                   </div>
 
-                  {/* Step 3 - Permissions Matrix */}
+                  {/* Step 3 - IP RESTRICTION (CRITICAL REQUIREMENT) */}
                   <div
                     style={{
-                      padding: "12px 14px",
+                      padding: "14px",
                       borderRadius: "6px",
-                      background: "rgba(255, 255, 255, 0.03)",
-                      border: "1px solid rgba(243, 186, 47, 0.3)",
+                      background: "linear-gradient(135deg, rgba(243, 186, 47, 0.12) 0%, rgba(217, 119, 6, 0.05) 100%)",
+                      border: "1px solid rgba(243, 186, 47, 0.5)",
                       display: "flex",
-                      gap: "10px",
+                      gap: "12px",
                     }}
                   >
                     <div
@@ -291,81 +337,86 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
                       3
                     </div>
                     <div style={{ fontSize: "13px", width: "100%" }}>
-                      <strong style={{ color: "#f3ba2f" }}>
-                        Thiết lập phân quyền (Bấm "Sửa / Edit restrictions"):
-                      </strong>
-                      <p style={{ margin: "4px 0 10px 0", color: "var(--text-secondary)", fontSize: "12px" }}>
-                        Kiểm tra cẩn thận các checkbox theo bảng bảo mật bên dưới:
-                      </p>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <strong style={{ color: "#f3ba2f", fontSize: "14px" }}>
+                          CẤP PHÉP IP (BẮT BUỘC ĐỂ MỞ KHÓA QUYỀN FUTURES):
+                        </strong>
+                      </div>
+                      
+                      <div
+                        style={{
+                          margin: "6px 0 10px 0",
+                          padding: "8px 12px",
+                          background: "rgba(0, 0, 0, 0.35)",
+                          borderRadius: "4px",
+                          fontSize: "12px",
+                          color: "#fde047",
+                          lineHeight: "1.5",
+                        }}
+                      >
+                        ⚠️ <strong>Lưu ý quan trọng từ Binance:</strong> Nếu bạn để tùy chọn <em>"Unrestricted (Không giới hạn IP)"</em>, Binance sẽ <strong>KHÓA / LÀM MỜ nút Enable Futures</strong> và không cho phép bạn bật. Bạn bắt buộc phải chọn <em>"Restrict access to trusted IPs only"</em> và thêm IP máy tính này vào thì nút <strong>Enable Futures</strong> mới sáng lên để tích chọn!
+                      </div>
 
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            padding: "6px 10px",
-                            background: "rgba(16, 185, 129, 0.1)",
-                            borderRadius: "4px",
-                            border: "1px solid rgba(16, 185, 129, 0.3)",
-                          }}
-                        >
-                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "#34d399", fontWeight: 600 }}>
-                            <CheckCircle2 size={14} /> Enable Reading (Đọc dữ liệu)
-                          </span>
-                          <span style={{ color: "#34d399", fontWeight: 600 }}>✓ BẬT (Mặc định)</span>
+                      {/* User's Public IP Box with Copy button */}
+                      <div
+                        style={{
+                          padding: "10px 14px",
+                          background: "rgba(15, 23, 42, 0.8)",
+                          borderRadius: "6px",
+                          border: "1px dashed rgba(243, 186, 47, 0.5)",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "10px",
+                          gap: "10px",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <Globe size={16} color="#60a5fa" />
+                          <div>
+                            <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                              Địa chỉ IP mạng máy tính hiện tại của bạn:
+                            </div>
+                            <div className="mono" style={{ fontSize: "14px", fontWeight: 700, color: "#fff" }}>
+                              {loadingIp ? "Đang phát hiện IP..." : publicIp || "Chưa lấy được IP (Kiểm tra mạng)"}
+                            </div>
+                          </div>
                         </div>
 
-                        <div
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={handleCopyIp}
+                          disabled={!publicIp}
                           style={{
+                            background: copiedIp ? "#10b981" : "#f3ba2f",
+                            color: "#000",
+                            fontWeight: 700,
                             display: "flex",
-                            justifyContent: "space-between",
-                            padding: "6px 10px",
-                            background: "rgba(16, 185, 129, 0.1)",
-                            borderRadius: "4px",
-                            border: "1px solid rgba(16, 185, 129, 0.3)",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "6px 12px",
+                            whiteSpace: "nowrap",
                           }}
                         >
-                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "#34d399", fontWeight: 600 }}>
-                            <CheckCircle2 size={14} /> Enable Futures (Hợp đồng tương lai)
-                          </span>
-                          <span style={{ color: "#34d399", fontWeight: 700 }}>✓ BẮT BUỘC BẬT</span>
-                        </div>
+                          {copiedIp ? <Check size={14} color="#000" /> : <Copy size={14} color="#000" />}
+                          <span>{copiedIp ? "Đã sao chép!" : "Sao Chép IP"}</span>
+                        </button>
+                      </div>
 
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            padding: "6px 10px",
-                            background: "rgba(239, 68, 68, 0.12)",
-                            borderRadius: "4px",
-                            border: "1px solid rgba(239, 68, 68, 0.3)",
-                          }}
-                        >
-                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "#f87171", fontWeight: 600 }}>
-                            <XCircle size={14} /> Enable Withdrawals (Rút tiền)
-                          </span>
-                          <span style={{ color: "#f87171", fontWeight: 700 }}>⛔ TUYỆT ĐỐI TẮT</span>
-                        </div>
-
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            padding: "6px 10px",
-                            background: "rgba(0, 0, 0, 0.2)",
-                            borderRadius: "4px",
-                          }}
-                        >
-                          <span style={{ color: "var(--text-muted)" }}>
-                            Spot & Margin, Chuyển nội bộ, Vay vốn...
-                          </span>
-                          <span style={{ color: "var(--text-muted)" }}>Tắt (Không cần)</span>
-                        </div>
+                      <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.6" }}>
+                        <strong>Thao tác thực hiện trên Binance:</strong>
+                        <ol style={{ margin: "4px 0 0 0", paddingLeft: "20px" }}>
+                          <li>Bấm nút <strong>"Sao Chép IP"</strong> ở khung màu vàng bên trên.</li>
+                          <li>Trên trang Binance, bấm nút <strong>"Sửa (Edit restrictions)"</strong>.</li>
+                          <li>Tại mục <em>IP Access Restriction</em>, tích chọn: <strong>"Restrict access to trusted IPs only (Recommended)"</strong>.</li>
+                          <li>Dán IP vừa chép vào ô trống → Bấm nút <strong>Xác nhận (Confirm)</strong>.</li>
+                        </ol>
                       </div>
                     </div>
                   </div>
 
-                  {/* Step 4 */}
+                  {/* Step 4 - Permissions Checklist */}
                   <div
                     style={{
                       padding: "12px 14px",
@@ -393,12 +444,117 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
                     >
                       4
                     </div>
+                    <div style={{ fontSize: "13px", width: "100%" }}>
+                      <strong>Tích chọn phân quyền (Ngay sau khi đã thêm IP):</strong>
+                      <p style={{ margin: "4px 0 10px 0", color: "var(--text-secondary)", fontSize: "12px" }}>
+                        Sau khi đã thêm IP ở bước 3, checkbox <strong>Enable Futures</strong> sẽ sáng lên. Hãy tích đúng như bảng sau:
+                      </p>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            padding: "6px 10px",
+                            background: "rgba(16, 185, 129, 0.1)",
+                            borderRadius: "4px",
+                            border: "1px solid rgba(16, 185, 129, 0.3)",
+                          }}
+                        >
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "#34d399", fontWeight: 600 }}>
+                            <CheckCircle2 size={14} /> Enable Reading (Đọc dữ liệu ví & lệnh)
+                          </span>
+                          <span style={{ color: "#34d399", fontWeight: 600 }}>✓ BẬT (Mặc định)</span>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            padding: "6px 10px",
+                            background: "rgba(16, 185, 129, 0.15)",
+                            borderRadius: "4px",
+                            border: "1px solid rgba(16, 185, 129, 0.4)",
+                          }}
+                        >
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "#34d399", fontWeight: 700 }}>
+                            <CheckCircle2 size={14} /> Enable Futures (Hợp đồng tương lai)
+                          </span>
+                          <span style={{ color: "#34d399", fontWeight: 700 }}>✓ BẮT BUỘC BẬT (Đã mở khóa)</span>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            padding: "6px 10px",
+                            background: "rgba(239, 68, 68, 0.12)",
+                            borderRadius: "4px",
+                            border: "1px solid rgba(239, 68, 68, 0.3)",
+                          }}
+                        >
+                          <span style={{ display: "flex", alignItems: "center", gap: "6px", color: "#f87171", fontWeight: 600 }}>
+                            <XCircle size={14} /> Enable Withdrawals (Rút tiền)
+                          </span>
+                          <span style={{ color: "#f87171", fontWeight: 700 }}>⛔ TUYỆT ĐỐI TẮT (Không chọn)</span>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            padding: "6px 10px",
+                            background: "rgba(0, 0, 0, 0.2)",
+                            borderRadius: "4px",
+                          }}
+                        >
+                          <span style={{ color: "var(--text-muted)" }}>
+                            Spot & Margin, Chuyển nội bộ, Vay vốn...
+                          </span>
+                          <span style={{ color: "var(--text-muted)" }}>Tắt (Không cần)</span>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: "10px", fontSize: "12px", color: "var(--text-secondary)" }}>
+                        Bấm nút <strong>Lưu (Save)</strong> ở góc trên bên phải trang Binance → Xác thực 2FA để hoàn tất lưu quyền!
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 5 */}
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: "6px",
+                      background: "rgba(255, 255, 255, 0.03)",
+                      border: "1px solid var(--border-color)",
+                      display: "flex",
+                      gap: "10px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "24px",
+                        height: "24px",
+                        borderRadius: "50%",
+                        background: "#f3ba2f",
+                        color: "#000",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 700,
+                        fontSize: "12px",
+                        flexShrink: 0,
+                      }}
+                    >
+                      5
+                    </div>
                     <div style={{ fontSize: "13px" }}>
-                      <strong>Dán vào Bot & Kiểm tra:</strong>
+                      <strong>Dán vào Bot & Xác nhận kết nối:</strong>
                       <p style={{ margin: "4px 0 0 0", color: "var(--text-secondary)", fontSize: "12px" }}>
                         Sao chép <strong>API Key</strong> và <strong>Secret Key</strong> dán vào mục{" "}
                         <strong>"Khóa API Live (Tài khoản thật Binance)"</strong> trong mục Kết nối của Bot → Bấm{" "}
-                        <strong>"Lưu khóa Live"</strong> → Bấm nút <strong>"Thử Live API"</strong> để xác nhận số dư!
+                        <strong>"Lưu khóa Live"</strong> → Bấm nút <strong>"Thử Live API"</strong> để bot hiển thị số dư ví thật!
                       </p>
                     </div>
                   </div>

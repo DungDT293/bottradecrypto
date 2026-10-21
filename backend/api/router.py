@@ -333,6 +333,24 @@ def create_api_router(
                 detail=make_error_response("AUTO_JOIN_FAILED", str(e)),
             )
 
+    @router.get("/system/public-ip", dependencies=[Depends(verify_token)])
+    async def get_public_ip():
+        """Returns the public IP address of this machine for Binance API IP whitelisting."""
+        import urllib.request
+        try:
+            loop = asyncio.get_event_loop()
+            def fetch_ip():
+                req = urllib.request.Request(
+                    "https://api.ipify.org?format=json",
+                    headers={"User-Agent": "TradeBot/1.3.1"},
+                )
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    return json.loads(resp.read().decode("utf-8")).get("ip", "")
+            ip = await loop.run_in_executor(None, fetch_ip)
+            return {"ip": ip, "success": True}
+        except Exception as e:
+            return {"ip": "", "success": False, "error": str(e)}
+
     # === COMMERCIAL LICENSE ENDPOINTS ===
     @router.get("/license/status", dependencies=[Depends(verify_token)])
     async def get_license_status():
