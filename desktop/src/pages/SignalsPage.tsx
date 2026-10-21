@@ -6,6 +6,14 @@ import { wsClient } from "../services/websocket";
 import { formatDateTime } from "../utils/date";
 import type { SignalRecord } from "../types/api";
 
+const ELITE_TOP5_CHAT_IDS = [
+  -1002007658025, // THE WOLF (CRYPTO)®
+  -1001756316676, // Boom_Boom_Billionaires
+  -1002052872813, // CRYPTO LEOPARD'S
+  -1001552004524, // CRYPTO MONK
+  -1001370457350, // Crypto Neon
+];
+
 export const SignalsPage: React.FC = () => {
   const { addToast } = useApp();
   const [signals, setSignals] = useState<SignalRecord[]>([]);
@@ -18,7 +26,13 @@ export const SignalsPage: React.FC = () => {
     if (showLoading) setLoading(true);
     try {
       const data = await api.getSignals(stateFilter || undefined, symbolSearch || undefined);
-      const validData = (data || []).filter((s) => s.symbol && s.symbol !== "UNKNOWN" && s.symbol !== "None");
+      const validData = (data || []).filter(
+        (s) =>
+          s.symbol &&
+          s.symbol !== "UNKNOWN" &&
+          s.symbol !== "None" &&
+          (!s.chat_id || ELITE_TOP5_CHAT_IDS.includes(Number(s.chat_id)))
+      );
       setSignals(validData);
     } catch (err: any) {
       if (showLoading) {
@@ -160,6 +174,7 @@ export const SignalsPage: React.FC = () => {
           <thead>
             <tr>
               <th>Thời gian</th>
+              <th>Nhóm Telegram</th>
               <th>Cặp giao dịch</th>
               <th>Hướng</th>
               <th>Vùng Entry</th>
@@ -172,7 +187,7 @@ export const SignalsPage: React.FC = () => {
           <tbody>
             {signals.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "30px" }}>
+                <td colSpan={9} style={{ textAlign: "center", color: "var(--text-muted)", padding: "30px" }}>
                   {loading ? "Đang tải dữ liệu..." : "Không tìm thấy tín hiệu nào phù hợp điều kiện lọc."}
                 </td>
               </tr>
@@ -181,6 +196,19 @@ export const SignalsPage: React.FC = () => {
                 <tr key={sig.signal_id}>
                   <td className="mono" style={{ fontSize: "12px", color: "var(--text-muted)" }}>
                     {formatDateTime(sig.created_at)}
+                  </td>
+                  <td>
+                    <span
+                      className="badge badge-read-only"
+                      style={{
+                        fontSize: "11px",
+                        background: "rgba(59, 130, 246, 0.12)",
+                        color: "#60a5fa",
+                        border: "1px solid rgba(59, 130, 246, 0.3)",
+                      }}
+                    >
+                      {(sig as any).channel_name || "Top 5 Tinh hoa"}
+                    </span>
                   </td>
                   <td className="mono" style={{ fontWeight: 600, color: "#fff" }}>
                     {sig.symbol}

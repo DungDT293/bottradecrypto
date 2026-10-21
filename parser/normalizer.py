@@ -43,6 +43,10 @@ def normalize_text(text: str) -> str:
     # Strip plain raw urls (http://... or https://...)
     text = re.sub(r"https?://\S+", "", text)
 
+    # Remove thousand separators in numbers e.g. 63,100 -> 63100, 2,440 -> 2440, 78,980 -> 78980
+    while re.search(r"\b(\d{1,3}),(\d{3})\b", text):
+        text = re.sub(r"\b(\d{1,3}),(\d{3})\b", r"\1\2", text)
+
     # Normalize multiple consecutive spaces on the same line (preserve newlines)
     lines = text.split("\n")
     cleaned_lines = [re.sub(r"[ \t]+", " ", line).strip() for line in lines]

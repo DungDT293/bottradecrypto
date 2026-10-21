@@ -8,6 +8,7 @@ export const HistoryPage: React.FC = () => {
   const [daysBack, setDaysBack] = useState<number>(7);
   const [pnlData, setPnlData] = useState<any | null>(null);
   const [trades, setTrades] = useState<any[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<string>("ALL");
   const [loading, setLoading] = useState(false);
 
   const fetchHistory = async () => {
@@ -33,6 +34,9 @@ export const HistoryPage: React.FC = () => {
   const tradesPnl = trades.reduce((acc, tr) => acc + (parseFloat(tr.realized_pnl) || 0), 0);
   const pnlFromApi = parseFloat(pnlData?.realized_pnl || "0");
   const effectiveRealizedPnl = pnlFromApi !== 0 ? pnlFromApi : tradesPnl;
+  const commVal = parseFloat(pnlData?.commission || "0");
+  const fundingVal = parseFloat(pnlData?.funding_fee || "0");
+  const netPnlVal = pnlData?.net_pnl != null ? parseFloat(pnlData.net_pnl) : (effectiveRealizedPnl - commVal + fundingVal);
 
   const closedFills = trades.filter((tr) => (parseFloat(tr.realized_pnl) || 0) !== 0);
   const winFills = trades.filter((tr) => (parseFloat(tr.realized_pnl) || 0) > 0);
@@ -42,6 +46,11 @@ export const HistoryPage: React.FC = () => {
   const effectiveWinRate = (pnlData && pnlData.win_rate_pct > 0)
     ? pnlData.win_rate_pct
     : (closedFills.length > 0 ? Math.round((winFills.length / closedFills.length) * 1000) / 10 : 0);
+
+  const uniqueChannels = Array.from(new Set(trades.map((tr) => tr.channel_name || "Thủ công / Khác")));
+  const filteredTrades = selectedChannel === "ALL"
+    ? trades
+    : trades.filter((tr) => (tr.channel_name || "Thủ công / Khác") === selectedChannel);
 
   return (
     <div>
@@ -79,16 +88,23 @@ export const HistoryPage: React.FC = () => {
           <div className={`card-value ${effectiveRealizedPnl >= 0 ? "text-success" : "text-danger"}`}>
             {effectiveRealizedPnl >= 0 ? `+$${effectiveRealizedPnl.toFixed(2)}` : `-$${Math.abs(effectiveRealizedPnl).toFixed(2)}`}
           </div>
+          <div className="card-subtitle">Chưa trừ phí hoa hồng & funding</div>
         </div>
 
         <div className="card">
-          <div className="card-title">Tổng số lượt khớp sàn (Fills)</div>
-          <div className="card-value">{trades.length}</div>
+          <div className="card-title">Net PnL (Lãi Ròng Thực Nhận)</div>
+          <div className={`card-value ${netPnlVal >= 0 ? "text-success" : "text-danger"}`}>
+            {netPnlVal >= 0 ? `+$${netPnlVal.toFixed(2)}` : `-$${Math.abs(netPnlVal).toFixed(2)}`}
+          </div>
+          <div className="card-subtitle">
+            Phí sàn: -${commVal.toFixed(2)} | Funding: {fundingVal >= 0 ? `+$${fundingVal.toFixed(2)}` : `-$${Math.abs(fundingVal).toFixed(2)}`}
+          </div>
         </div>
 
         <div className="card">
-          <div className="card-title">Vị thế đã đóng hoàn tất</div>
-          <div className="card-value">{effectiveClosedCount}</div>
+          <div className="card-title">Lượt khớp sàn & Vị thế đóng</div>
+          <div className="card-value">{trades.length} <span style={{ fontSize: "14px", fontWeight: 400, color: "var(--text-muted)" }}>/ {effectiveClosedCount} đóng</span></div>
+          <div className="card-subtitle">Khớp lệnh sàn Binance Futures</div>
         </div>
 
         <div className="card">
@@ -96,19 +112,39 @@ export const HistoryPage: React.FC = () => {
           <div className={`card-value ${effectiveWinRate >= 50 ? "text-success" : "text-danger"}`}>
             {effectiveWinRate}%
           </div>
+          <div className="card-subtitle">
+            Thắng {pnlData?.win_count ?? winFills.length} / {effectiveClosedCount} vị thế đã đóng
+          </div>
         </div>
       </div>
 
       {/* Trade Execution Fills Table */}
       <div className="table-container" style={{ marginBottom: "24px" }}>
-        <div className="table-header">
-          <div className="table-title">Lịch Sử Khớp Lệnh Sàn Binance Futures ({trades.length})</div>
+        <div className="table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="table-title">Lịch Sử Khớp Lệnh Sàn Binance Futures ({filteredTrades.length} / {trades.length})</div>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Lọc theo Nhóm:</span>
+            <select
+              className="form-input"
+              style={{ width: "auto", padding: "4px 10px", fontSize: "12px" }}
+              value={selectedChannel}
+              onChange={(e) => setSelectedChannel(e.target.value)}
+            >
+              <option value="ALL">Tất cả Nhóm ({trades.length})</option>
+              {uniqueChannels.map((ch) => (
+                <option key={ch} value={ch}>
+                  {ch} ({trades.filter((t) => (t.channel_name || "Thủ công / Khác") === ch).length})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <table>
           <thead>
             <tr>
               <th>Thời gian khớp</th>
               <th>Mã lệnh sàn (ID)</th>
+              <th>Nhóm Nguồn</th>
               <th>Cặp giao dịch</th>
               <th>Chiều</th>
               <th>Giá khớp</th>
@@ -118,17 +154,33 @@ export const HistoryPage: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {trades.length === 0 ? (
+            {filteredTrades.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                  {loading ? "Đang truy vấn lịch sử khớp lệnh từ Binance..." : "Chưa có giao dịch khớp lệnh nào."}
+                <td colSpan={9} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                  {loading ? "Đang truy vấn lịch sử khớp lệnh từ Binance..." : "Không có giao dịch khớp lệnh nào phù hợp bộ lọc."}
                 </td>
               </tr>
             ) : (
-              trades.map((tr) => (
+              filteredTrades.map((tr) => (
                 <tr key={tr.id}>
                   <td className="mono" style={{ fontSize: "12px" }}>{tr.time}</td>
                   <td className="mono" style={{ fontSize: "12px", color: "var(--text-muted)" }}>{tr.id}</td>
+                  <td>
+                    <span
+                      className={`badge ${
+                        tr.channel_name && tr.channel_name.includes("LEOPARD")
+                          ? "badge-success"
+                          : tr.channel_name && tr.channel_name.includes("Boom")
+                          ? "badge-info"
+                          : tr.channel_name && tr.channel_name.includes("WOLF")
+                          ? "badge-live"
+                          : "badge-read-only"
+                      }`}
+                      style={{ fontSize: "11px" }}
+                    >
+                      {tr.channel_name || "Thủ công / Khác"}
+                    </span>
+                  </td>
                   <td className="mono" style={{ fontWeight: 700, color: "#fff" }}>{tr.symbol}</td>
                   <td>
                     <span className={`badge ${tr.side.includes("BUY") || tr.side.includes("MUA") ? "badge-read-only" : "badge-live"}`}>

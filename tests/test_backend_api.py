@@ -299,7 +299,7 @@ def test_telegram_collect_history_ingestion_and_parsing(mock_app, monkeypatch):
 
     sample_msgs = [
         {
-            "chat_id": -1001234567,
+            "chat_id": -1002052872813,
             "message_id": 101,
             "sender_id": 999,
             "date": "2026-10-15T12:00:00",
@@ -308,7 +308,7 @@ def test_telegram_collect_history_ingestion_and_parsing(mock_app, monkeypatch):
             "raw_text": "Hello traders! Market looks good today.",
         },
         {
-            "chat_id": -1001234567,
+            "chat_id": -1002052872813,
             "message_id": 102,
             "sender_id": 999,
             "date": "2026-10-15T12:05:00",
@@ -317,7 +317,7 @@ def test_telegram_collect_history_ingestion_and_parsing(mock_app, monkeypatch):
             "raw_text": mock_raw_signal,
         },
         {
-            "chat_id": -1001234567,
+            "chat_id": -1002052872813,
             "message_id": 103,
             "sender_id": 999,
             "date": "2026-10-15T12:30:00",
@@ -334,7 +334,7 @@ def test_telegram_collect_history_ingestion_and_parsing(mock_app, monkeypatch):
     monkeypatch.setattr(TelegramService, "collect_history", mock_collect)
 
     # 1. Trigger history collection
-    payload = {"chat_id": -1001234567, "days": 7, "limit": 100}
+    payload = {"chat_id": -1002052872813, "days": 7, "limit": 100}
     resp = client.post("/telegram/collect-history", headers=headers, json=payload)
     assert resp.status_code == 200
     res_data = resp.json()

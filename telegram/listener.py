@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +16,7 @@ from parser.signal_parser import SignalParser
 from parser.update_parser import ChannelUpdateParser
 from parser.validator import SignalValidator
 from services.channel_analytics_service import KNOWN_CHANNELS
+from services.admin_evidence import classify_media_claim, detect_media_kind
 from storage.database import DatabaseManager, SignalRepository
 
 try:
@@ -68,6 +70,7 @@ class TelegramSignalListener:
         self.order_manager = order_manager
         self.position_manager = position_manager
         self.is_shadow = is_shadow
+        self._periodic_sync_task: Optional[asyncio.Task] = None
 
     def compute_fingerprint(self, text: str) -> str:
         cleaned = "".join(text.split()).lower()
@@ -93,8 +96,64 @@ class TelegramSignalListener:
         if edit_date and edit_date.tzinfo is None:
             edit_date = edit_date.replace(tzinfo=timezone.utc)
 
-        # 2. Normalize text first
+        # 2. Normalize text first; media claims never enter signal execution.
+        media_kind = detect_media_kind(event)
         normalized = normalize_text(raw_text)
+        if media_kind:
+            evidence = classify_media_claim(raw_text, media_kind)
+            event_time = (edit_date or orig_date or now_utc).replace(tzinfo=None)
+            version, is_valid_version, status_code = self.signal_repo.save_message_version(
+                chat_id=chat_id,
+                message_id=msg_id,
+                event_date=event_time,
+                received_at=datetime.utcnow(),
+                raw_text=raw_text,
+                normalized_text=normalized,
+                fingerprint=self.compute_fingerprint(normalized or f"media:{media_kind}"),
+                is_edit=is_edit,
+                reply_to_msg_id=reply_to_msg_id,
+            )
+            if status_code in ("DUPLICATE", "OUT_OF_ORDER"):
+                return
+            self.signal_repo.save_message(
+                chat_id=chat_id,
+                message_id=msg_id,
+                sender_id=getattr(event, "sender_id", None),
+                telegram_timestamp=(orig_date or now_utc).replace(tzinfo=None),
+                received_at=datetime.utcnow(),
+                raw_text=raw_text,
+                normalized_text=normalized,
+                fingerprint=self.compute_fingerprint(normalized or f"media:{media_kind}"),
+                edit_timestamp=edit_date.replace(tzinfo=None) if edit_date else None,
+            )
+            parent_signal_id = self.signal_repo.resolve_reply_parent(chat_id, reply_to_msg_id) if reply_to_msg_id else None
+            self.signal_repo.save_admin_evidence(
+                chat_id, msg_id, event_time, evidence,
+                sender_id=getattr(event, "sender_id", None),
+                parent_signal_id=parent_signal_id,
+            )
+            if parent_signal_id:
+                self.signal_repo.record_timeline_event(
+                    parent_signal_id,
+                    "ADMIN_MEDIA_CLAIM",
+                    evidence.detail,
+                    {"evidence_type": evidence.evidence_type, "verification_status": evidence.verification_status},
+                )
+            if event_bus:
+                try:
+                    asyncio.create_task(event_bus.publish("admin_evidence_recorded", {
+                        "chat_id": chat_id,
+                        "message_id": msg_id,
+                        "evidence_type": evidence.evidence_type,
+                        "exchange_claim": evidence.exchange_claim,
+                        "verification_status": evidence.verification_status,
+                        "is_trade_fill": False,
+                    }))
+                except Exception:
+                    pass
+            print(f"[CLAIM ONLY] Media message {msg_id}: {evidence.evidence_type}; no trade action")
+            return
+
         if not normalized:
             # Empty / deleted message content
             print(f"[THONG TIN] Tin nhan trong hoac da bi xoa. Msg ID: {msg_id}")
@@ -374,6 +433,11 @@ class TelegramSignalListener:
         status = parsed.validation_status
         if status == SignalState.REJECTED:
             print(f"[BI CHAN: {parsed.blocking_reason}]")
+            # Admin Format Shift Watchdog
+            has_explicit_dir = bool(re.search(r"\b(LONG|SHORT|BUY|SELL)\b", raw_text, re.IGNORECASE))
+            if has_explicit_dir and any(k in str(parsed.blocking_reason).lower() for k in ["take profit", "stop loss", "entry"]):
+                print(f"[CANH BAO CU PHAP ADMIN] Nhóm: {chat_id} (Msg #{msg_id}) | Symbol: {parsed.symbol_candidate} | Lý do: {parsed.blocking_reason}")
+                print(f"-> Khuyến nghị kiểm tra định dạng tin nhắn admin: {raw_text[:120].strip()}...")
             if self.is_shadow or self.config.mode == ExecutionMode.READ_ONLY:
                 print("\n" + "=" * 60)
                 print(f"[SHADOW MODE: TIN HIEU BI CHAN - REJECTED]")
@@ -569,10 +633,9 @@ class TelegramSignalListener:
                     current_price = Decimal(ticker.get("price", "0"))
 
                     entry_prices = [e[0] for e in validated.entries]
-                    min_entry = min(entry_prices)
-                    max_entry = max(entry_prices)
+                    zone_min, zone_max = validated.entry_range if validated.entry_range else (min(entry_prices), max(entry_prices))
 
-                    # Guard: Check market conditions, Breakout vs Pullback, and Anti-Chase Price Drift
+                    # Guard: Check market conditions, In-Zone Entry, and Anti-Chase Price Drift
                     if current_price > Decimal("0"):
                         tick = filters.tick_size if filters and filters.tick_size else Decimal("0.0001")
 
@@ -588,56 +651,61 @@ class TelegramSignalListener:
                                 self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, "Giá thị trường đã chạm TP1 trước khi đặt lệnh, không mua đuổi")
                                 return
 
-                            # 2. Breakout LONG vs Pullback LONG
-                            is_breakout_long = max_entry > current_price * Decimal("1.002")
-                            if is_breakout_long:
-                                # Breakout Order: Check distance to entry
-                                distance_to_entry = (max_entry - current_price) / current_price * 100
-                                if distance_to_entry > Decimal("15.0"):
-                                    print(f"[CHAN LENH: BREAKOUT QUA XA] Keo {validated.symbol} Entry ({max_entry}) cach gia thi truong ({current_price}) +{distance_to_entry:.1f}%.")
-                                    self.signal_repo.record_timeline_event(
-                                        validated.signal_id,
-                                        "PRICE_OUT_OF_BOUNDS",
-                                        f"Kèo Breakout quá xa thị trường hiện tại (+{distance_to_entry:.1f}% > 15%). Chặn vào lệnh để tránh lệch token/sàn.",
-                                    )
-                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, f"Breakout entry quá xa giá thị trường (+{distance_to_entry:.1f}%)")
-                                    return
-                                print(f"[PHAT HIEN LENH BREAKOUT BUY] Keo {validated.symbol}: Gia ({current_price}) < Entry ({max_entry}). Se dat STOP_MARKET cho breakout.")
-                            else:
-                                # Pullback / Limit Order: Check Stop Loss Breach
-                                if validated.stop_loss and current_price <= validated.stop_loss:
-                                    print(f"[CHAN LENH: GIA DA THUNG SL] Keo {validated.symbol} gia thi truong ({current_price}) da cham/thung SL ({validated.stop_loss}). Khong vao lenh.")
-                                    self.signal_repo.record_timeline_event(
-                                        validated.signal_id,
-                                        "PRICE_OUT_OF_BOUNDS",
-                                        f"Giá thị trường ({current_price}) đã chạm/thủng Stop Loss ({validated.stop_loss}). Chặn vào lệnh bảo vệ tài khoản.",
-                                    )
-                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, "Giá thị trường đã chạm hoặc thủng Stop Loss trước khi đặt lệnh")
-                                    return
+                            # 2. Stop Loss Breach Check
+                            if validated.stop_loss and current_price <= validated.stop_loss:
+                                print(f"[CHAN LENH: GIA DA THUNG SL] Keo {validated.symbol} gia thi truong ({current_price}) da cham/thung SL ({validated.stop_loss}). Khong vao lenh.")
+                                self.signal_repo.record_timeline_event(
+                                    validated.signal_id,
+                                    "PRICE_OUT_OF_BOUNDS",
+                                    f"Giá thị trường ({current_price}) đã chạm/thủng Stop Loss ({validated.stop_loss}). Chặn vào lệnh bảo vệ tài khoản.",
+                                )
+                                self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, "Giá thị trường đã chạm hoặc thủng Stop Loss trước khi đặt lệnh")
+                                return
 
-                                # Anti-Chase: Check if price has drifted > 1.0% above entry
-                                if current_price > max_entry * Decimal("1.010"):
-                                    drift_pct = (current_price - max_entry) / max_entry * 100
-                                    print(f"[CHAN LENH: ANTI-CHASE FOMO] Keo {validated.symbol} gia da tang qua Entry +{drift_pct:.2f}%. Khong mua duoi.")
+                            # 3. Entry Evaluation for LONG:
+                            # Case A: Market price is INSIDE entry range [zone_min, zone_max]
+                            if zone_min <= current_price <= zone_max:
+                                rounded_entry = (current_price // tick) * tick
+                                validated.entries = [(rounded_entry, Decimal("1.0"))]
+                                print(f"[KHỚP LỆNH TRONG VÙNG ENTRY] Giá thị trường {validated.symbol} ({current_price}) nằm trong khoảng Entry [{zone_min} - {zone_max}]. Khớp ngay tại {rounded_entry}!")
+                                self.signal_repo.record_timeline_event(
+                                    validated.signal_id,
+                                    "ENTRY_IN_ZONE_MATCH",
+                                    f"Giá thị trường ({current_price}) nằm trong khoảng Entry [{zone_min} - {zone_max}]. Khớp lệnh trực tiếp tại {rounded_entry}.",
+                                )
+
+                            # Case B: Market price is BELOW entry range (pullback discount, price < zone_min, price > SL)
+                            elif current_price < zone_min:
+                                rounded_entry = (current_price // tick) * tick
+                                validated.entries = [(rounded_entry, Decimal("1.0"))]
+                                print(f"[VÀO LỆNH GIÁ TỐT HƠN VÙNG ENTRY] Giá thị trường {validated.symbol} ({current_price}) < Vùng Entry [{zone_min} - {zone_max}]. Khớp ngay tại {rounded_entry}!")
+                                self.signal_repo.record_timeline_event(
+                                    validated.signal_id,
+                                    "DISCOUNTED_ENTRY_MATCH",
+                                    f"Giá thị trường ({current_price}) thấp hơn vùng Entry [{zone_min} - {zone_max}] (giá mua tốt hơn). Khớp ngay tại {rounded_entry}.",
+                                )
+
+                            # Case C: Market price is ABOVE entry range (price > zone_max)
+                            else:
+                                drift_pct = (current_price - zone_max) / zone_max * Decimal("100")
+                                if drift_pct > Decimal("1.0"):
+                                    print(f"[CHAN LENH: ANTI-CHASE FOMO] Keo {validated.symbol} gia ({current_price}) da tang qua Vung Entry ({zone_max}) +{drift_pct:.2f}%. Khong mua duoi.")
                                     self.signal_repo.record_timeline_event(
                                         validated.signal_id,
                                         "PRICE_DRIFT_EXCEEDED",
-                                        f"Giá thị trường ({current_price}) đã tăng quá Entry ({max_entry}) +{drift_pct:.2f}%. Chặn mua đuổi đỉnh.",
+                                        f"Giá thị trường ({current_price}) đã tăng quá vùng Entry [{zone_min} - {zone_max}] +{drift_pct:.2f}%. Chặn mua đuổi đỉnh.",
                                     )
-                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, f"Giá đã tăng quá Entry +{drift_pct:.2f}%, chặn mua đuổi")
+                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, f"Giá đã tăng quá vùng Entry +{drift_pct:.2f}%, chặn mua đuổi")
                                     return
-
-                                # Dynamic Immediate Entry: If price is at a slight dip (<= 1.5% below entry) and above SL
-                                if current_price <= max_entry and current_price > validated.stop_loss:
-                                    if (max_entry - current_price) / max_entry <= Decimal("0.015"):
-                                        rounded_entry = (current_price // tick) * tick
-                                        validated.entries = [(rounded_entry, Decimal("1.0"))]
-                                        print(f"[VÀO LỆNH NGAY] Giá thị trường {validated.symbol} ({current_price}) <= Entry admin ({max_entry}). Kích hoạt khớp ngay lập tức tại {rounded_entry}!")
-                                        self.signal_repo.record_timeline_event(
-                                            validated.signal_id,
-                                            "IMMEDIATE_MARKET_ENTRY",
-                                            f"Giá thị trường ({current_price}) <= Entry admin ({max_entry}). Kích hoạt khớp ngay lập tức tại {rounded_entry}.",
-                                        )
+                                else:
+                                    rounded_entry = (current_price // tick) * tick
+                                    validated.entries = [(rounded_entry, Decimal("1.0"))]
+                                    print(f"[VÀO LỆNH CẬN VÙNG ENTRY] Giá thị trường {validated.symbol} ({current_price}) sát trần Entry ({zone_max}) (+{drift_pct:.2f}% <= 1.0%). Khớp ngay tại {rounded_entry}!")
+                                    self.signal_repo.record_timeline_event(
+                                        validated.signal_id,
+                                        "NEAR_ENTRY_MATCH",
+                                        f"Giá thị trường ({current_price}) sát trần Entry [{zone_min} - {zone_max}] (+{drift_pct:.2f}%). Khớp tại {rounded_entry}.",
+                                    )
 
                         elif validated.side == PositionSide.SHORT:
                             # 1. TP1 Already Reached Check
@@ -651,56 +719,61 @@ class TelegramSignalListener:
                                 self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, "Giá thị trường đã chạm TP1 trước khi đặt lệnh, không bán đuổi")
                                 return
 
-                            # 2. Breakdown SHORT vs Pullback SHORT
-                            is_breakdown_short = min_entry < current_price * Decimal("0.998")
-                            if is_breakdown_short:
-                                # Breakdown Order: Check distance to entry
-                                distance_to_entry = (current_price - min_entry) / current_price * 100
-                                if distance_to_entry > Decimal("15.0"):
-                                    print(f"[CHAN LENH: BREAKDOWN QUA XA] Keo {validated.symbol} Entry ({min_entry}) cach gia thi truong ({current_price}) -{distance_to_entry:.1f}%.")
-                                    self.signal_repo.record_timeline_event(
-                                        validated.signal_id,
-                                        "PRICE_OUT_OF_BOUNDS",
-                                        f"Kèo Breakdown quá xa thị trường hiện tại (-{distance_to_entry:.1f}% > 15%). Chặn vào lệnh để tránh lệch token/sàn.",
-                                    )
-                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, f"Breakdown entry quá xa giá thị trường (-{distance_to_entry:.1f}%)")
-                                    return
-                                print(f"[PHAT HIEN LENH BREAKDOWN SELL] Keo {validated.symbol}: Gia ({current_price}) > Entry ({min_entry}). Se dat STOP_MARKET cho breakdown.")
-                            else:
-                                # Pullback / Limit Order: Check Stop Loss Breach
-                                if validated.stop_loss and current_price >= validated.stop_loss:
-                                    print(f"[CHAN LENH: GIA DA VUOT SL] Keo {validated.symbol} gia thi truong ({current_price}) da cham/vuot SL ({validated.stop_loss}). Khong vao lenh.")
-                                    self.signal_repo.record_timeline_event(
-                                        validated.signal_id,
-                                        "PRICE_OUT_OF_BOUNDS",
-                                        f"Giá thị trường ({current_price}) đã chạm/vượt Stop Loss ({validated.stop_loss}). Chặn vào lệnh bảo vệ tài khoản.",
-                                    )
-                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, "Giá thị trường đã chạm hoặc vượt Stop Loss trước khi đặt lệnh")
-                                    return
+                            # 2. Stop Loss Breach Check
+                            if validated.stop_loss and current_price >= validated.stop_loss:
+                                print(f"[CHAN LENH: GIA DA VUOT SL] Keo {validated.symbol} gia thi truong ({current_price}) da cham/vuot SL ({validated.stop_loss}). Khong vao lenh.")
+                                self.signal_repo.record_timeline_event(
+                                    validated.signal_id,
+                                    "PRICE_OUT_OF_BOUNDS",
+                                    f"Giá thị trường ({current_price}) đã chạm/vượt Stop Loss ({validated.stop_loss}). Chặn vào lệnh bảo vệ tài khoản.",
+                                )
+                                self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, "Giá thị trường đã chạm hoặc vượt Stop Loss trước khi đặt lệnh")
+                                return
 
-                                # Anti-Chase: Check if price has drifted > 1.0% below entry
-                                if current_price < min_entry * Decimal("0.990"):
-                                    drift_pct = (min_entry - current_price) / min_entry * 100
-                                    print(f"[CHAN LENH: ANTI-CHASE FOMO] Keo {validated.symbol} gia da giam qua Entry -{drift_pct:.2f}%. Khong ban duoi.")
+                            # 3. Entry Evaluation for SHORT:
+                            # Case A: Market price is INSIDE entry range [zone_min, zone_max]
+                            if zone_min <= current_price <= zone_max:
+                                rounded_entry = (current_price // tick) * tick
+                                validated.entries = [(rounded_entry, Decimal("1.0"))]
+                                print(f"[KHỚP LỆNH TRONG VÙNG ENTRY] Giá thị trường {validated.symbol} ({current_price}) nằm trong khoảng Entry [{zone_min} - {zone_max}]. Khớp SHORT ngay tại {rounded_entry}!")
+                                self.signal_repo.record_timeline_event(
+                                    validated.signal_id,
+                                    "ENTRY_IN_ZONE_MATCH",
+                                    f"Giá thị trường ({current_price}) nằm trong khoảng Entry [{zone_min} - {zone_max}]. Khớp lệnh SHORT trực tiếp tại {rounded_entry}.",
+                                )
+
+                            # Case B: Market price is ABOVE entry range (pump discount, price > zone_max, price < SL)
+                            elif current_price > zone_max:
+                                rounded_entry = (current_price // tick) * tick
+                                validated.entries = [(rounded_entry, Decimal("1.0"))]
+                                print(f"[VÀO LỆNH GIÁ TỐT HƠN VÙNG ENTRY] Giá thị trường {validated.symbol} ({current_price}) > Vùng Entry [{zone_min} - {zone_max}]. Khớp SHORT ngay tại {rounded_entry}!")
+                                self.signal_repo.record_timeline_event(
+                                    validated.signal_id,
+                                    "DISCOUNTED_ENTRY_MATCH",
+                                    f"Giá thị trường ({current_price}) cao hơn vùng Entry [{zone_min} - {zone_max}] (giá bán tốt hơn). Khớp SHORT ngay tại {rounded_entry}.",
+                                )
+
+                            # Case C: Market price is BELOW entry range (price < zone_min)
+                            else:
+                                drift_pct = (zone_min - current_price) / zone_min * Decimal("100")
+                                if drift_pct > Decimal("1.0"):
+                                    print(f"[CHAN LENH: ANTI-CHASE FOMO] Keo {validated.symbol} gia ({current_price}) da giam qua Vung Entry ({zone_min}) -{drift_pct:.2f}%. Khong ban duoi.")
                                     self.signal_repo.record_timeline_event(
                                         validated.signal_id,
                                         "PRICE_DRIFT_EXCEEDED",
-                                        f"Giá thị trường ({current_price}) đã giảm quá Entry ({min_entry}) -{drift_pct:.2f}%. Chặn bán đuổi đáy.",
+                                        f"Giá thị trường ({current_price}) đã giảm quá vùng Entry [{zone_min} - {zone_max}] -{drift_pct:.2f}%. Chặn bán đuổi đáy.",
                                     )
-                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, f"Giá đã giảm quá Entry -{drift_pct:.2f}%, chặn bán đuổi")
+                                    self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, f"Giá đã giảm quá vùng Entry -{drift_pct:.2f}%, chặn bán đuổi")
                                     return
-
-                                # Dynamic Immediate Entry: If price is at a slight pump (<= 1.5% above entry) and below SL
-                                if current_price >= min_entry and current_price < validated.stop_loss:
-                                    if (current_price - min_entry) / min_entry <= Decimal("0.015"):
-                                        rounded_entry = (current_price // tick) * tick
-                                        validated.entries = [(rounded_entry, Decimal("1.0"))]
-                                        print(f"[VÀO LỆNH NGAY] Giá thị trường {validated.symbol} ({current_price}) >= Entry admin ({min_entry}). Kích hoạt khớp SHORT ngay lập tức tại {rounded_entry}!")
-                                        self.signal_repo.record_timeline_event(
-                                            validated.signal_id,
-                                            "IMMEDIATE_MARKET_ENTRY",
-                                            f"Giá thị trường ({current_price}) >= Entry admin ({min_entry}). Kích hoạt khớp SHORT ngay lập tức tại {rounded_entry}.",
-                                        )
+                                else:
+                                    rounded_entry = (current_price // tick) * tick
+                                    validated.entries = [(rounded_entry, Decimal("1.0"))]
+                                    print(f"[VÀO LỆNH CẬN VÙNG ENTRY] Giá thị trường {validated.symbol} ({current_price}) sát đáy Entry ({zone_min}) (-{drift_pct:.2f}% <= 1.0%). Khớp SHORT ngay tại {rounded_entry}!")
+                                    self.signal_repo.record_timeline_event(
+                                        validated.signal_id,
+                                        "NEAR_ENTRY_MATCH",
+                                        f"Giá thị trường ({current_price}) sát đáy Entry [{zone_min} - {zone_max}] (-{drift_pct:.2f}%). Khớp SHORT tại {rounded_entry}.",
+                                    )
 
                     try:
                         target_margin_mode = getattr(self.config.risk, "margin_mode", MarginMode.CROSSED)
@@ -796,25 +869,32 @@ class TelegramSignalListener:
         # Catch up recent messages (up to 15 minutes old) that arrived while bot was offline
         await self._startup_catchup_sync()
 
-        while True:
-            try:
-                await self.tg_client.run_until_disconnected()
-                if not self.tg_client.is_connected():
-                    print("[TELEGRAM] Mat ket noi. Dang ket noi lai sau 3 giay...")
-                    await asyncio.sleep(3)
-                    await self.tg_client.connect()
-                else:
-                    break
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                print(f"[TELEGRAM RECONNECT] {e}. Dang ket noi lai sau 5 giay...")
-                await asyncio.sleep(5)
+        # Start periodic background channel polling to always track admin edits and updates
+        self._periodic_sync_task = asyncio.create_task(self._periodic_channel_sync())
+
+        try:
+            while True:
                 try:
+                    await self.tg_client.run_until_disconnected()
                     if not self.tg_client.is_connected():
+                        print("[TELEGRAM] Mat ket noi. Dang ket noi lai sau 3 giay...")
+                        await asyncio.sleep(3)
                         await self.tg_client.connect()
-                except Exception:
-                    pass
+                    else:
+                        break
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    print(f"[TELEGRAM RECONNECT] {e}. Dang ket noi lai sau 5 giay...")
+                    await asyncio.sleep(5)
+                    try:
+                        if not self.tg_client.is_connected():
+                            await self.tg_client.connect()
+                    except Exception:
+                        pass
+        finally:
+            if self._periodic_sync_task and not self._periodic_sync_task.done():
+                self._periodic_sync_task.cancel()
 
     async def _evaluate_late_signal_viability(
         self,
@@ -871,8 +951,7 @@ class TelegramSignalListener:
                 return False, f"Không thể lấy giá thị trường thời gian thực của {symbol}."
 
             entry_prices = [e[0] for e in validated.entries]
-            min_entry = min(entry_prices)
-            max_entry = max(entry_prices)
+            zone_min, zone_max = validated.entry_range if validated.entry_range else (min(entry_prices), max(entry_prices))
             sl = validated.stop_loss
             tp1 = validated.take_profits[0][0] if validated.take_profits else None
 
@@ -883,13 +962,13 @@ class TelegramSignalListener:
                 # If price already hit TP1
                 if tp1 and curr_p >= tp1:
                     return False, f"Giá thị trường ({curr_p}) đã đạt/vượt TP1 ({tp1}). Không mua đuổi đỉnh."
-                # If price is within entry or within 0.8% above max entry
-                if curr_p > max_entry * Decimal("1.008"):
-                    return False, f"Giá thị trường ({curr_p}) đã tăng cao hơn vùng Entry ({max_entry}) > 0.8%. Bỏ qua."
+                # If price is higher than zone_max by more than 1.0%
+                if curr_p > zone_max * Decimal("1.010"):
+                    return False, f"Giá thị trường ({curr_p}) đã tăng cao hơn vùng Entry ({zone_max}) > 1.0%. Bỏ qua."
 
                 return True, (
                     f"Kèo {symbol} gửi trễ {int(age_seconds)}s nhưng thị giá ({curr_p}) vẫn nằm trong vùng Entry hợp lệ "
-                    f"[{min_entry} - {max_entry}], chưa chạm TP1 ({tp1}) và trên SL ({sl}). Đủ điều kiện khớp bổ sung."
+                    f"[{zone_min} - {zone_max}], chưa chạm TP1 ({tp1}) và trên SL ({sl}). Đủ điều kiện khớp bổ sung."
                 )
 
             elif side == PositionSide.SHORT:
@@ -899,13 +978,13 @@ class TelegramSignalListener:
                 # If price already hit TP1
                 if tp1 and curr_p <= tp1:
                     return False, f"Giá thị trường ({curr_p}) đã đạt/thấp hơn TP1 ({tp1}). Không bán đuổi đáy."
-                # If price is within entry or within 0.8% below min entry
-                if curr_p < min_entry * Decimal("0.992"):
-                    return False, f"Giá thị trường ({curr_p}) đã giảm thấp hơn vùng Entry ({min_entry}) > 0.8%. Bỏ qua."
+                # If price is lower than zone_min by more than 1.0%
+                if curr_p < zone_min * Decimal("0.990"):
+                    return False, f"Giá thị trường ({curr_p}) đã giảm thấp hơn vùng Entry ({zone_min}) > 1.0%. Bỏ qua."
 
                 return True, (
                     f"Kèo {symbol} gửi trễ {int(age_seconds)}s nhưng thị giá ({curr_p}) vẫn nằm trong vùng Entry hợp lệ "
-                    f"[{min_entry} - {max_entry}], chưa chạm TP1 ({tp1}) và dưới SL ({sl}). Đủ điều kiện khớp bổ sung."
+                    f"[{zone_min} - {zone_max}], chưa chạm TP1 ({tp1}) và dưới SL ({sl}). Đủ điều kiện khớp bổ sung."
                 )
         except Exception as ex_p:
             return False, f"Không thể xác minh thị giá {symbol} trên Binance ({ex_p}). Từ chối để bảo vệ vốn."
@@ -928,7 +1007,10 @@ class TelegramSignalListener:
                     msgs = await self.tg_client.get_messages(chat_id, limit=10)
                     # Process ascending: oldest first
                     for m in reversed(msgs):
-                        if not m or not getattr(m, "raw_text", None) or not m.raw_text.strip():
+                        if not m:
+                            continue
+                        media_kind = detect_media_kind(m)
+                        if not getattr(m, "raw_text", None) and not media_kind:
                             continue
                         msg_date = m.date.replace(tzinfo=None) if getattr(m, "date", None) else now_utc
                         age_minutes = (now_utc - msg_date).total_seconds() / 60.0
@@ -941,3 +1023,60 @@ class TelegramSignalListener:
             print(f"[STARTUP SYNC] Hoàn tất rà soát bù tin nhắn khởi động.")
         except Exception:
             pass
+
+    async def _periodic_channel_sync(self):
+        """
+        Periodically polls allowed channels every 60 seconds to catch:
+        1. Any missed messages during brief network hiccups/reconnects.
+        2. Silent admin edits (e.g. SL adjustments, TP modifications, signal cancellations).
+        """
+        while True:
+            try:
+                await asyncio.sleep(60)
+                if not self.tg_client or not self.tg_client.is_connected():
+                    continue
+
+                allowed = self.config.telegram.allowed_chat_ids or []
+                if not allowed:
+                    continue
+
+                for chat_id in allowed:
+                    try:
+                        msgs = await self.tg_client.get_messages(chat_id, limit=5)
+                        for m in reversed(msgs):
+                            if not m:
+                                continue
+                            media_kind = detect_media_kind(m)
+                            if not getattr(m, "raw_text", None) and not media_kind:
+                                continue
+
+                            with self.signal_repo.db.get_connection() as conn:
+                                row = conn.execute(
+                                    "SELECT raw_text, edit_timestamp FROM messages WHERE chat_id = ? AND message_id = ?",
+                                    (chat_id, m.id),
+                                ).fetchone()
+
+                            if not row:
+                                print(f"[PERIODIC SYNC] Phát hiện tin nhắn mới bị sót (Chat: {chat_id} | Msg #{m.id}). Đang tự động xử lý...")
+                                await self.handle_incoming_message(m, is_edit=False)
+                            else:
+                                stored_raw = row[0]
+                                stored_edit_ts = row[1]
+                                current_edit_date = getattr(m, "edit_date", None)
+                                is_text_changed = ((m.raw_text or "").strip() != (stored_raw or "").strip())
+                                is_new_edit = False
+                                if current_edit_date:
+                                    current_edit_iso = current_edit_date.replace(tzinfo=None).isoformat()
+                                    if not stored_edit_ts or current_edit_iso > stored_edit_ts:
+                                        is_new_edit = True
+
+                                if is_text_changed or is_new_edit:
+                                    print(f"[PERIODIC SYNC] Phát hiện admin chỉnh sửa tin nhắn (Chat: {chat_id} | Msg #{m.id}). Đang đồng bộ cập nhật...")
+                                    await self.handle_incoming_message(m, is_edit=True)
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(10)
+

@@ -50,6 +50,11 @@ logs/
 .coverage
 htmlcov/
 
+# AI Assistants & Audits
+.antigravity/
+.claude/
+audit_output/
+
 # IDE / OS / Temp
 .idea/
 .vscode/

@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import signal
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
@@ -125,16 +125,17 @@ def create_api_router(
             trading_svc._listener = listener
             trading_svc.set_engine_status(EngineStatus.RUNNING_LISTEN)
 
+            mode_title = "TIỀN THẬT (LIVE)" if config.mode.value == "LIVE" else "DEMO / TESTNET"
             print("\n" + "=" * 60)
-            print("[TELEGRAM BOT TRADE DEMO] DA KHOI DONG THANH CONG!")
-            print(f"- Mode: {config.mode.value} (Dat lenh truc tiep tren Binance Demo)")
-            print(f"- So luong kenh theo doi: {len(config.telegram.allowed_chat_ids)} nhom")
+            print(f"[TELEGRAM BOT EXECUTOR] DA KHOI DONG THANH CONG ({mode_title})!")
+            print(f"- Mode: {config.mode.value}")
+            print(f"- So luong kenh tinh hoa theo doi: {len(config.telegram.allowed_chat_ids)} nhom")
             print("=" * 60 + "\n")
 
             alert_svc.add_alert(
                 AlertLevel.INFO,
-                "Bot Trade Demo Đã Sẵn Sàng",
-                f"Đang giám sát {len(config.telegram.allowed_chat_ids)} nhóm ghim đã duyệt và sẵn sàng vào lệnh trên Binance ({config.mode.value}).",
+                f"Bot Giao Dịch Đã Sẵn Sàng ({mode_title})",
+                f"Đang giám sát {len(config.telegram.allowed_chat_ids)} nhóm Tinh hoa đã duyệt và sẵn sàng vào lệnh trên Binance ({config.mode.value}).",
                 "BOT_ENGINE",
             )
             await event_bus.publish("backend_status_changed", {"mode": config.mode.value, "engine": "RUNNING_LISTEN"})
@@ -345,6 +346,17 @@ def create_api_router(
 
             for m in sorted_msgs:
                 raw_text = m.get("raw_text") or ""
+                has_media = bool(m.get("media_kind") or m.get("has_media") or m.get("photo"))
+                if has_media:
+                    from services.admin_evidence import classify_media_claim
+                    evidence = classify_media_claim(raw_text, str(m.get("media_kind") or "photo"))
+                    signal_repo.save_admin_evidence(
+                        m["chat_id"], m["message_id"],
+                        datetime.fromisoformat(m["date"]).replace(tzinfo=None) if m.get("date") else datetime.now(timezone.utc).replace(tzinfo=None),
+                        evidence,
+                        sender_id=m.get("sender_id"),
+                    )
+                    continue
                 if not raw_text.strip():
                     continue
 
@@ -756,12 +768,37 @@ def create_api_router(
             try:
                 client = BinanceFuturesClient(config)
                 raw_trades = await client._request("GET", "/fapi/v1/userTrades", params={"limit": limit}, signed=True)
+                
+                # Pre-fetch order -> signal -> chat_id mapping
+                order_channel_map = {}
+                try:
+                    with db.get_connection() as conn:
+                        c = conn.cursor()
+                        c.execute("""
+                            SELECT o.exchange_order_id, s.chat_id
+                            FROM orders o
+                            JOIN signals s ON o.signal_id = s.signal_id
+                            WHERE o.exchange_order_id IS NOT NULL
+                        """)
+                        for r in c.fetchall():
+                            if r[0]:
+                                order_channel_map[str(r[0])] = r[1]
+                except Exception:
+                    pass
+
+                from services.channel_analytics_service import KNOWN_CHANNELS
+
                 for tr in (raw_trades or []):
                     time_ms = tr.get("time") or 0
                     t_str = datetime.fromtimestamp(time_ms / 1000).strftime("%d/%m/%Y %H:%M:%S") if time_ms else "—"
                     pnl_val = float(tr.get("realizedPnl", 0))
+                    ord_id = str(tr.get("orderId", ""))
+                    chat_id = order_channel_map.get(ord_id)
+                    channel_name = KNOWN_CHANNELS.get(chat_id, "Thủ công / Khác") if chat_id else "Thủ công / Khác"
+
                     trades_list.append({
                         "id": str(tr.get("id")),
+                        "order_id": ord_id,
                         "symbol": str(tr.get("symbol")),
                         "side": "MUA (BUY)" if str(tr.get("side")).upper() == "BUY" else "BÁN (SELL)",
                         "price": str(tr.get("price")),
@@ -769,6 +806,8 @@ def create_api_router(
                         "commission": f"{float(tr.get('commission', 0)):.4f} {tr.get('commissionAsset', 'USDT')}",
                         "realized_pnl": pnl_val,
                         "time": t_str,
+                        "channel_name": channel_name,
+                        "chat_id": chat_id,
                     })
                 await client.close()
             except Exception:
@@ -932,18 +971,27 @@ def create_api_router(
             try:
                 client = BinanceFuturesClient(config)
                 raw_trades = await client._request("GET", "/fapi/v1/userTrades", params={"limit": 200}, signed=True)
-                if raw_trades:
-                    realized = sum(float(tr.get("realizedPnl", 0)) for tr in raw_trades)
-                    commissions = sum(float(tr.get("commission", 0)) for tr in raw_trades)
-                    closed = [tr for tr in raw_trades if float(tr.get("realizedPnl", 0)) != 0]
+                funding_fee = 0.0
+                try:
+                    income_records = await client._request("GET", "/fapi/v1/income", params={"incomeType": "FUNDING_FEE", "limit": 100}, signed=True)
+                    funding_fee = sum(float(inc.get("income", 0)) for inc in (income_records or []))
+                except Exception:
+                    pass
+
+                if raw_trades or funding_fee != 0.0:
+                    realized = sum(float(tr.get("realizedPnl", 0)) for tr in (raw_trades or []))
+                    commissions = sum(float(tr.get("commission", 0)) for tr in (raw_trades or []))
+                    closed = [tr for tr in (raw_trades or []) if float(tr.get("realizedPnl", 0)) != 0]
                     wins = [tr for tr in closed if float(tr.get("realizedPnl", 0)) > 0]
                     win_rate = round(len(wins) / len(closed) * 100, 1) if closed else 0.0
+                    net_pnl = realized - commissions + funding_fee
                     summary["realized_pnl"] = f"{realized:.2f}"
                     summary["commission"] = f"{commissions:.2f}"
-                    summary["net_pnl"] = f"{(realized - commissions):.2f}"
+                    summary["funding_fee"] = f"{funding_fee:.2f}"
+                    summary["net_pnl"] = f"{net_pnl:.2f}"
                     summary["gross_realized_pnl"] = realized
                     summary["fees_paid"] = commissions
-                    summary["net_realized_pnl"] = realized - commissions
+                    summary["net_realized_pnl"] = net_pnl
                     summary["total_closed_trades"] = len(closed)
                     summary["win_count"] = len(wins)
                     summary["loss_count"] = len(closed) - len(wins)

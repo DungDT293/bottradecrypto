@@ -137,6 +137,25 @@ class DatabaseManager:
                 message TEXT NOT NULL,
                 payload_json TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS admin_evidence (
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                event_timestamp TEXT NOT NULL,
+                evidence_type TEXT NOT NULL,
+                media_kind TEXT NOT NULL,
+                exchange_claim TEXT,
+                confidence TEXT NOT NULL,
+                verification_status TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                is_trade_fill INTEGER NOT NULL DEFAULT 0,
+                has_referral_promotion INTEGER NOT NULL DEFAULT 0,
+                caption_has_result_markers INTEGER NOT NULL DEFAULT 0,
+                sender_id INTEGER,
+                parent_signal_id TEXT,
+                detail TEXT NOT NULL,
+                PRIMARY KEY (chat_id, message_id)
+            );
             """)
 
 
@@ -182,6 +201,35 @@ class SignalRepository:
         with self.db.get_connection() as conn:
             row = conn.execute("SELECT 1 FROM messages WHERE chat_id = ? AND message_id = ?", (chat_id, message_id)).fetchone()
             return row is not None
+
+    def save_admin_evidence(self, chat_id: int, message_id: int, event_timestamp: datetime, evidence: Any, sender_id: Optional[int] = None, parent_signal_id: Optional[str] = None) -> None:
+        with self.db.get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO admin_evidence
+                (chat_id, message_id, event_timestamp, evidence_type, media_kind, exchange_claim,
+                 confidence, verification_status, outcome, is_trade_fill, has_referral_promotion,
+                 caption_has_result_markers, sender_id, parent_signal_id, detail)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    chat_id, message_id, event_timestamp.isoformat(), evidence.evidence_type,
+                    evidence.media_kind, evidence.exchange_claim, evidence.confidence,
+                    evidence.verification_status, evidence.outcome, int(evidence.is_trade_fill),
+                    int(evidence.has_referral_promotion), int(evidence.caption_has_result_markers),
+                    sender_id, parent_signal_id, evidence.detail,
+                ),
+            )
+
+    def get_admin_evidence(self, chat_id: Optional[int] = None, message_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        with self.db.get_connection() as conn:
+            if chat_id is not None and message_id is not None:
+                rows = conn.execute("SELECT * FROM admin_evidence WHERE chat_id = ? AND message_id = ?", (chat_id, message_id)).fetchall()
+            elif chat_id is not None:
+                rows = conn.execute("SELECT * FROM admin_evidence WHERE chat_id = ? ORDER BY event_timestamp", (chat_id,)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM admin_evidence ORDER BY event_timestamp").fetchall()
+            return [dict(row) for row in rows]
 
     def save_signal(self, signal: ParsedSignal) -> None:
         import json

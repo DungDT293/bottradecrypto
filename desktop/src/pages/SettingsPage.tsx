@@ -12,11 +12,11 @@ export const SettingsPage: React.FC = () => {
     live_trading_enabled: false,
     risk_per_signal_pct: 1.5,
     max_daily_loss_pct: 5.0,
-    max_leverage: 50,
+    max_leverage: 25,
     margin_mode: "ISOLATED",
     entry_range_policy: "BEST_PRICE",
-    multi_tp_default_weight_mode: "CUSTOM_TP1_RATIO",
-    tp1_target_weight_pct: 60,
+    multi_tp_default_weight_mode: "FIXED_35_35_30",
+    tp1_target_weight_pct: 35,
     breakeven_after_tp1: true,
     sl_buffer_pct: 1.0,
   });
@@ -98,10 +98,11 @@ export const SettingsPage: React.FC = () => {
   };
 
   // Dynamic TP calculation
-  const tp1 = Math.min(90, Math.max(10, settings.tp1_target_weight_pct ?? 60));
+  const isFixed353530 = settings.multi_tp_default_weight_mode === "FIXED_35_35_30";
+  const tp1 = isFixed353530 ? 35 : Math.min(90, Math.max(10, settings.tp1_target_weight_pct ?? 35));
   const remainder = Math.max(0, 100 - tp1);
-  const tp2 = Math.round(remainder * 0.65 * 10) / 10;
-  const tp3 = Math.round((remainder - tp2) * 10) / 10;
+  const tp2 = isFixed353530 ? 35 : Math.round(remainder * 0.65 * 10) / 10;
+  const tp3 = isFixed353530 ? 30 : Math.round((remainder - tp2) * 10) / 10;
 
   return (
     <div>
@@ -285,8 +286,16 @@ export const SettingsPage: React.FC = () => {
               <select
                 className="form-input"
                 value={settings.multi_tp_default_weight_mode}
-                onChange={(e) => setSettings({ ...settings, multi_tp_default_weight_mode: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === "FIXED_35_35_30") {
+                    setSettings({ ...settings, multi_tp_default_weight_mode: val, tp1_target_weight_pct: 35 });
+                  } else {
+                    setSettings({ ...settings, multi_tp_default_weight_mode: val });
+                  }
+                }}
               >
+                <option value="FIXED_35_35_30">CHUẨN BẢO VỆ VỐN: TP1 35% - TP2 35% - TP3 30% (Khuyến nghị)</option>
                 <option value="CUSTOM_TP1_RATIO">CUSTOM_TP1 (Tùy chỉnh TP1 - Tự động tính TP2 & TP3 thông minh)</option>
                 <option value="EQUAL_SPLIT">EQUAL_SPLIT (Chia đều khối lượng cho tất cả các TP)</option>
                 <option value="FRONT_LOADED_50_30_20">FRONT_LOADED_50_30_20 (Cố định: TP1 50%, TP2 30%, TP3 20%)</option>

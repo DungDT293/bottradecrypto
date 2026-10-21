@@ -17,6 +17,14 @@ import type {
   ChannelLeaderboardResponse,
 } from "../types/api";
 
+export const ELITE_TOP5_CHAT_IDS = [
+  -1002007658025, // THE WOLF (CRYPTO)®
+  -1001756316676, // Boom_Boom_Billionaires
+  -1002052872813, // CRYPTO LEOPARD'S
+  -1001552004524, // CRYPTO MONK
+  -1001370457350, // Crypto Neon
+];
+
 export const LeaderboardPage: React.FC = () => {
   const { snapshot, addToast } = useApp();
   const [loading, setLoading] = useState<boolean>(true);
@@ -60,8 +68,34 @@ export const LeaderboardPage: React.FC = () => {
         marginPct
       );
       if (res.success) {
-        setSummary(res.summary);
-        setChannels(res.channels);
+        const top5Channels = (res.channels || []).filter((c) =>
+          ELITE_TOP5_CHAT_IDS.includes(Number(c.chat_id))
+        );
+        const updatedSummary = res.summary
+          ? {
+              ...res.summary,
+              total_channels: top5Channels.length,
+              total_pinned_channels: top5Channels.length,
+              active_trading_channels: top5Channels.length,
+              total_signals_validated: top5Channels.reduce(
+                (acc, c) => acc + (c.validated_signals || 0),
+                0
+              ),
+              overall_win_rate_pct:
+                top5Channels.length > 0
+                  ? Math.round(
+                      (top5Channels.reduce(
+                        (acc, c) => acc + (c.performance?.win_rate_pct || 0),
+                        0
+                      ) /
+                        top5Channels.length) *
+                        10
+                    ) / 10
+                  : 0,
+            }
+          : null;
+        setSummary(updatedSummary);
+        setChannels(top5Channels);
       }
     } catch (err: any) {
       addToast(err?.user_message || err?.message || "Lỗi tải dữ liệu bảng xếp hạng", "error");
@@ -90,14 +124,16 @@ export const LeaderboardPage: React.FC = () => {
     }
   };
 
-  // Filtered channels list
-  const filteredChannels = channels.filter((ch) => {
-    const matchesSearch =
-      ch.channel_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      ch.chat_id.toString().includes(searchQuery);
-    const matchesTier = selectedTier === "ALL" || ch.tier === selectedTier;
-    return matchesSearch && matchesTier;
-  });
+  // Filtered channels list - Strictly Elite Top 5 Only
+  const filteredChannels = channels
+    .filter((ch) => ELITE_TOP5_CHAT_IDS.includes(Number(ch.chat_id)))
+    .filter((ch) => {
+      const matchesSearch =
+        ch.channel_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ch.chat_id.toString().includes(searchQuery);
+      const matchesTier = selectedTier === "ALL" || ch.tier === selectedTier;
+      return matchesSearch && matchesTier;
+    });
 
   return (
     <div className="page-content" style={{ padding: "24px", maxWidth: "1600px", margin: "0 auto" }}>
@@ -218,7 +254,7 @@ export const LeaderboardPage: React.FC = () => {
         <div className="card" style={{ padding: "18px", borderLeft: "4px solid #ef4444", background: "var(--bg-card)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <span style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", color: "var(--text-muted)", letterSpacing: "0.5px" }}>
-              ⚠️ Nhóm Cần Lưu Ý (Trong 8 Nhóm)
+              ⚠️ Nhóm Cần Lưu Ý (Trong {summary?.total_channels || summary?.total_pinned_channels || 18} Nhóm)
             </span>
             <span className="badge badge-error" style={{ fontSize: "11px", fontWeight: 700 }}>CẢNH BÁO</span>
           </div>
@@ -283,7 +319,7 @@ export const LeaderboardPage: React.FC = () => {
 
           {/* Tier Filter Buttons */}
           <div style={{ display: "flex", gap: "6px" }}>
-            {["ALL", "S", "A", "B", "C", "D"].map((tier) => (
+            {["ALL", "S", "A", "B", "C", "D", "BLOCKED"].map((tier) => (
               <button
                 key={tier}
                 onClick={() => setSelectedTier(tier)}
@@ -298,7 +334,7 @@ export const LeaderboardPage: React.FC = () => {
                   color: selectedTier === tier ? "#fff" : "var(--text-muted)",
                 }}
               >
-                {tier === "ALL" ? "Tất cả Tier" : `Tier ${tier}`}
+                {tier === "ALL" ? "Tất cả Tier" : tier === "BLOCKED" ? "Bị chặn" : `Tier ${tier}`}
               </button>
             ))}
           </div>
@@ -353,13 +389,19 @@ export const LeaderboardPage: React.FC = () => {
                   B: { bg: "rgba(234, 179, 8, 0.15)", color: "#eab308", border: "#eab308" },
                   C: { bg: "rgba(249, 115, 22, 0.15)", color: "#f97316", border: "#f97316" },
                   D: { bg: "rgba(239, 68, 68, 0.15)", color: "#ef4444", border: "#ef4444" },
+                  BLOCKED: { bg: "rgba(239, 68, 68, 0.25)", color: "#ef4444", border: "#ef4444" },
                 };
                 const tStyle = tierStyles[ch.tier] || tierStyles.D;
+                const isBlocked = ch.is_blacklisted || ch.tier === "BLOCKED";
 
                 return (
                   <tr
                     key={ch.chat_id}
-                    style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.15s" }}
+                    style={{
+                      borderBottom: "1px solid var(--border-color)",
+                      transition: "background 0.15s",
+                      opacity: isBlocked ? 0.65 : 1.0,
+                    }}
                     className="table-row-hover"
                   >
                     {/* Rank */}
@@ -367,9 +409,23 @@ export const LeaderboardPage: React.FC = () => {
 
                     {/* Name */}
                     <td style={{ padding: "14px 16px" }}>
-                      <div style={{ fontWeight: 600, color: "#fff", fontSize: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <div style={{ fontWeight: 600, color: isBlocked ? "#ef4444" : "#fff", fontSize: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
                         <span>{ch.channel_name}</span>
                         {ch.tier === "S" && <Flame size={14} color="#f59e0b" />}
+                        {isBlocked && (
+                          <span style={{
+                            background: "#ef4444",
+                            color: "#fff",
+                            fontSize: "10px",
+                            fontWeight: 800,
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.5px"
+                          }}>
+                            [ĐÃ TẮT / CHẶN]
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
                         ID: {ch.chat_id} • Tổng: {ch.total_messages.toLocaleString()} tin nhắn
@@ -390,7 +446,7 @@ export const LeaderboardPage: React.FC = () => {
                           border: `1px solid ${tStyle.border}`,
                         }}
                       >
-                        Tier {ch.tier}
+                        {ch.tier === "BLOCKED" ? "CHẶN" : `Tier ${ch.tier}`}
                       </span>
                     </td>
 

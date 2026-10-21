@@ -30,6 +30,8 @@ def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("35.0")) -> List[
         return [tp1_w, remainder]
 
     if tp_count == 3:
+        if tp1_w == Decimal("0.350"):
+            return [Decimal("0.350"), Decimal("0.350"), Decimal("0.300")]
         tp2_w = (remainder * Decimal("0.65")).quantize(Decimal("0.001"))
         tp3_w = remainder - tp2_w
         return [tp1_w, tp2_w, tp3_w]

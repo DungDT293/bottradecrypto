@@ -119,6 +119,7 @@ class SignalValidator:
 
         # 4. Resolve Range Entry Policy
         resolved_entries: List[Tuple[Decimal, Decimal]] = []
+        entry_range_val = (min(signal.entries), max(signal.entries)) if (signal.entry_mode == EntryMode.RANGE and len(signal.entries) >= 2) else None
         if signal.entry_mode == EntryMode.RANGE:
             range_policy = self.config.execution.entry_range_policy
             if source_override and source_override.allow_range_midpoint:
@@ -266,6 +267,7 @@ class SignalValidator:
             is_breakeven_after_tp1=is_be,
             risk_pct=self.config.risk.risk_per_signal_pct,
             metadata=signal.metadata,
+            entry_range=entry_range_val,
         )
 
         return signal, validated

@@ -70,10 +70,17 @@ class TradingService:
         state_filter: Optional[str] = None,
         symbol_search: Optional[str] = None,
         limit: int = 200,
+        only_allowed: bool = True,
     ) -> List[Dict[str, Any]]:
         with self.db.get_connection() as conn:
             query = "SELECT * FROM signals WHERE symbol IS NOT NULL AND symbol != '' AND symbol != 'UNKNOWN' AND symbol != 'None'"
             params: List[Any] = []
+
+            allowed_ids = getattr(self.config.telegram, "allowed_chat_ids", [])
+            if only_allowed and allowed_ids:
+                placeholders = ",".join("?" for _ in allowed_ids)
+                query += f" AND chat_id IN ({placeholders})"
+                params.extend(allowed_ids)
 
             if state_filter and state_filter != "ALL":
                 query += " AND state = ?"
@@ -87,7 +94,14 @@ class TradingService:
             params.append(limit)
 
             rows = conn.execute(query, params).fetchall()
-            return [self.signal_repo._format_signal_row(r) for r in rows]
+            from services.channel_analytics_service import KNOWN_CHANNELS
+            formatted = []
+            for r in rows:
+                item = self.signal_repo._format_signal_row(r)
+                if item:
+                    item["channel_name"] = KNOWN_CHANNELS.get(item.get("chat_id"), "Khác")
+                    formatted.append(item)
+            return formatted
 
     def get_signal_detail(self, signal_id: str) -> Optional[Dict[str, Any]]:
         sig = self.signal_repo.get_signal(signal_id)

@@ -107,10 +107,17 @@ class TelegramUserClient:
                 if msg.reply_to:
                     reply_id = getattr(msg.reply_to, "reply_to_msg_id", None)
 
+                media_kind = None
+                if getattr(msg, "photo", None) is not None:
+                    media_kind = "photo"
+                elif getattr(getattr(msg, "document", None), "mime_type", "").startswith("image/"):
+                    media_kind = "image_document"
+
                 msg_dict = {
                     "chat_id": chat_id,
                     "message_id": msg.id,
                     "sender_id": msg.sender_id,
+                    "media_kind": media_kind,
                     "date": msg.date.isoformat() if msg.date else None,
                     "edit_date": msg.edit_date.isoformat() if msg.edit_date else None,
                     "reply_to_msg_id": reply_id,

@@ -26,6 +26,14 @@ import { wsClient } from "../services/websocket";
 import { formatDateTime } from "../utils/date";
 import type { TelegramDialog, TelegramFolder, TelegramChannelMessage } from "../types/api";
 
+const ELITE_TOP5_CHAT_IDS = [
+  -1002007658025, // THE WOLF (CRYPTO)®
+  -1001756316676, // Boom_Boom_Billionaires
+  -1002052872813, // CRYPTO LEOPARD'S
+  -1001552004524, // CRYPTO MONK
+  -1001370457350, // Crypto Neon
+];
+
 export const GroupsPage: React.FC = () => {
   const { addToast } = useApp();
   const [dialogs, setDialogs] = useState<TelegramDialog[]>([]);
@@ -68,7 +76,9 @@ export const GroupsPage: React.FC = () => {
       const res = await api.getTelegramDialogs(forceRefresh);
       const loadedDialogs = res.dialogs || [];
       const loadedFolders = res.folders || [];
-      const loadedAllowed = res.allowed_chat_ids || [];
+      const loadedAllowed = (res.allowed_chat_ids || []).filter((id: number) =>
+        ELITE_TOP5_CHAT_IDS.includes(id)
+      );
 
       setDialogs(loadedDialogs);
       setFolders(loadedFolders);

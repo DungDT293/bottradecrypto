@@ -50,6 +50,8 @@ class RiskEngine:
         chat_id = getattr(signal.metadata, "chat_id", None) if hasattr(signal, "metadata") else None
         source_override = self.config.sources.get(chat_id) if chat_id else None
         margin_mult = Decimal(str(getattr(source_override, "margin_multiplier", 1.0))) if source_override else Decimal("1.0")
+        if margin_mult <= Decimal("0"):
+            raise RiskCheckError("Kenh thuoc Blacklist hoac co margin_multiplier = 0. Tu choi lenh ngay lap tuc de bao toan von.")
 
         # 1. Check max total open risk
         max_total_risk_amount = (self.config.risk.max_total_open_risk_pct / Decimal("100")) * current_equity

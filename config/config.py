@@ -9,17 +9,14 @@ from pydantic import BaseModel, Field
 from config.policy_defaults import ExecutionPolicyConfig, RiskPolicy, SourcePolicyOverride
 from core.enums import ExecutionMode
 
-DEFAULT_8_CHANNELS = [
-    -1001370457350,  # Crypto Neon
-    -1001895315984,  # Crypto spider 🕷️ scalper
-    -1002007658025,  # THE WOLF (CRYPTO)®
-    -1002052872813,  # CRYPTO LEOPARD'S
-    -1001590450482,  # THE CRYPTO TRADER
-    -1002266035358,  # THE MASTER (CRYPTO)
-    -1001161683441,  # Global Crypto Research
-    -1001652601224,  # Crypto World Updates
+DEFAULT_ELITE_CHANNELS = [
+    -1001754095061,  # Crypto Radar (Tier S - Pure Binance Futures, 81.8% Winrate)
+    -1001756316676,  # Boom_Boom_Billionaires (Tier S - Pure Binance Futures, 75.0% Winrate)
+    -1001370457350,  # Crypto Neon (Tier A - Fixed 10x Leverage, Binance coins only, 71.4% Winrate)
+    -1002052872813,  # CRYPTO LEOPARD'S (Tier A - Binance Futures coins only, 79.5% Winrate)
 ]
-DEFAULT_22_CHANNELS = DEFAULT_8_CHANNELS
+DEFAULT_8_CHANNELS = DEFAULT_ELITE_CHANNELS
+DEFAULT_22_CHANNELS = DEFAULT_ELITE_CHANNELS
 
 
 # Load local .env if present

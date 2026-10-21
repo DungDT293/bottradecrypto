@@ -164,7 +164,17 @@ class SignalParser:
 
     def _parse_symbol(self, text: str) -> Tuple[str, Optional[str], Optional[str]]:
         """Extract symbol raw and candidate. Strictly checks for USDT perpetual pair."""
-        # 1. Check for explicit slash first (e.g. BTC/USDT, $DEEP /USDT, Q/USD)
+        # 1. Check for explicit Trade/Pair/Coin slash (e.g. Trade: #ASTER/USDT, BTC/USDT, $DEEP /USDT, Q/USD)
+        m_trade = re.search(r"(?:Trade|PAIR|Coin)[\s\:\-]*#?([A-Za-z0-9]+)\s*\/\s*([A-Za-z0-9]+)", text, re.IGNORECASE)
+        if m_trade:
+            base = m_trade.group(1).upper()
+            quote = m_trade.group(2).upper()
+            raw = f"{base}/{quote}"
+            if quote == "USDT":
+                return raw, f"{base}USDT", None
+            else:
+                return raw, None, f"Quote asset '{quote}' khong phai USDT. Khong ho tro."
+
         m_slash = re.search(r"[$#]?([A-Za-z0-9]+)\s*\/\s*([A-Za-z0-9]+)", text)
         if m_slash:
             base = m_slash.group(1).upper()
@@ -192,6 +202,8 @@ class SignalParser:
         m_hash = re.search(r"#([A-Za-z0-9]{2,12})\s*(?:\|\s*)?(?:SHORT|LONG|BUY|SELL|\bSETUP\b)", text, re.IGNORECASE)
         if m_hash:
             base = m_hash.group(1).upper()
+            if base.endswith("STOCK") or base in ["CIEN", "NVDA", "TSLA", "AAPL", "MSTR", "CAT", "CVX", "SPY", "QQQ"]:
+                return f"{base}", None, f"Ma co phieu My / Stock '{base}' khong ho tro tren Binance Futures"
             if base not in ["FREE", "VIP", "LONG", "SHORT", "BUY", "SELL", "USDT", "SETUP", "TARGET", "STOP"]:
                 return f"{base}/USDT", f"{base}USDT", None
 
@@ -201,8 +213,8 @@ class SignalParser:
         """
         Parses direction and checks for contradictions (e.g. #SHORT in header but BUY : in entries).
         """
-        has_short_header = bool(re.search(r"(?:#SHORT|\bSHORT\b|Position:\s*SHORT|Direction\s*:\s*SHORT|\(SHORT\))", text, re.IGNORECASE))
-        has_long_header = bool(re.search(r"(?:#LONG|\bLONG\b|Position:\s*LONG|Direction\s*:\s*LONG|\(LONG\))", text, re.IGNORECASE))
+        has_short_header = bool(re.search(r"(?:#SHORT|\bSHORT\b|Position:\s*SHORT|Direction\s*:\s*SHORT|\(SHORT\)|SHORT\s*ZONE|SHORT\s*ENTRY)", text, re.IGNORECASE))
+        has_long_header = bool(re.search(r"(?:#LONG|\bLONG\b|Position:\s*LONG|Direction\s*:\s*LONG|\(LONG\)|LONG\s*ZONE|LONG\s*ENTRY)", text, re.IGNORECASE))
 
         # Check for explicit BUY/SELL in entry section
         has_buy_entry = bool(re.search(r"\bBUY\s*:\s*\n?\s*\d+\)", text, re.IGNORECASE))
@@ -227,14 +239,22 @@ class SignalParser:
     def _parse_leverage(self, text: str) -> Tuple[Optional[int], Optional[Tuple[int, int]]]:
         """Extract leverage single value or range (e.g., 20x to 50x, 50X-75X, 200X)."""
         # Range e.g. 20x to 50x, 25X TO 50X, 50X-75X, 5- 20X
-        m_range = re.search(r"(?:LEVERAGE|LEV|Leverage)[\s:-]*[A-Za-z]*\s*(\d+)\s*(?:x|X)?\s*(?:to|-|–)\s*(\d+)\s*(?:x|X|×)?", text, re.IGNORECASE)
+        m_range = re.search(r"(?:LEVERAGE|LEV|Leverage)[^\d\n]*?(\d+)\s*(?:x|X)?\s*(?:to|-|–)\s*(\d+)\s*(?:x|X|×)?", text, re.IGNORECASE)
         if m_range:
             low = int(m_range.group(1))
             high = int(m_range.group(2))
             return low, (low, high)  # Conservative: return low or range
 
-        # Single e.g. Leverage: 50X, LEV : 20X, Cross (200X), Cross 25×
-        m_single = re.search(r"(?:LEVERAGE|LEV|Leverage)[\s:-]*[A-Za-z]*\s*\(?(\d+)\s*(?:x|X|×)\)?", text, re.IGNORECASE)
+        # Inline range without keyword e.g. 5- 20X, 10-20x
+        m_inline_range = re.search(r"\b(\d{1,3})\s*(?:x|X)?\s*(?:to|-|–)\s*(\d{1,3})\s*(?:x|X|×)\b", text)
+        if m_inline_range:
+            low = int(m_inline_range.group(1))
+            high = int(m_inline_range.group(2))
+            if 1 <= low <= 125 and 1 <= high <= 125 and low < high:
+                return low, (low, high)
+
+        # Single e.g. Leverage: 50X, LEV : 20X, Cross (200X), Cross 25×, Leverage: Cross • 50X
+        m_single = re.search(r"(?:LEVERAGE|LEV|Leverage)[^\d\n]*?\(?(\d+)\s*(?:x|X|×)\)?", text, re.IGNORECASE)
         if m_single:
             val = int(m_single.group(1))
             return val, None
@@ -269,12 +289,36 @@ class SignalParser:
             except InvalidOperation:
                 pass
 
-        # Check Range pattern: "Entries: 0.8960 - 0.9160" or "Entry: $0.05030 -0.05134"
-        m_range = re.search(r"(?:Entries|Entry|ENTERY)[\s\w]*:\s*\$?([\d\.]+)\s*(?:-|–)\s*\$?([\d\.]+)", text, re.IGNORECASE)
+        # Check Range pattern:
+        # Handles:
+        # - "Entries: 0.8960 - 0.9160", "Entry: $0.05030 -0.05134"
+        # - "Entries:  - 0.118 - 0.114" (leading dash)
+        # - "Entry = [ 0.1336 TO 0.1333 ]" (brackets and TO)
+        # - "LONG ENTRY: 2440 : 2422" or "Entry: 63100 : 62700" (colon separator)
+        # - "Take Entries: 0.04685 - 0.0484", "LONG ZONE: 0.69 - 0.67"
+        m_range = re.search(
+            r"(?:Entries|Entry|ENTERY|Take Entries|LONG\s*ZONE|SHORT\s*ZONE|BUY\s*ZONE|SELL\s*ZONE|ZONE|LONG\s*ENTRY|SHORT\s*ENTRY|BUY\s*ENTRY|SELL\s*ENTRY)[\s\w]*[:\=]\s*\[?\s*-?\s*\$?([\d\.]+)\s*(?:-|–|TO|to|:)\s*\$?([\d\.]+)\s*\]?",
+            text,
+            re.IGNORECASE,
+        )
         if m_range:
             try:
                 p1 = Decimal(m_range.group(1))
                 p2 = Decimal(m_range.group(2))
+                return [p1, p2], EntryMode.RANGE, None, False
+            except InvalidOperation:
+                pass
+
+        # Check Entry Zone with diamond bullet or non-standard separator (Boom_Boom_Billionaires)
+        m_zone = re.search(
+            r"Entry\s*Zone\s*:[^\d\n]*?\$?([\d\.]+)[^\d\n]+?\$?([\d\.]+)",
+            text,
+            re.IGNORECASE,
+        )
+        if m_zone:
+            try:
+                p1 = Decimal(m_zone.group(1))
+                p2 = Decimal(m_zone.group(2))
                 return [p1, p2], EntryMode.RANGE, None, False
             except InvalidOperation:
                 pass
@@ -328,8 +372,12 @@ class SignalParser:
                     pass
 
         # Check Single entry:
-        # "Entry Targets: 0.048", "Entrys : 0.04800", "ENTRY ➜ 0.002075", "ENTERY PRICE: 0.02923", "Entry Price: 9.17", "Entry Zone: 0.1988", "BUY :\n 1) 1.674 - 100%"
-        m_single = re.search(r"(?:Entrys|Entry\s*Targets?|ENTRY\s*PRICE|ENTERY\s*PRICE|Entry\s*Price|ENTERY|Entry\s*Zone|Entry|BUY)\s*[:\-\>\u279c\u2794\s]*\n?\s*(?:\d+\)\s*|\d+\.(?!\d)\s*)?(?:[^\d\$\.]*)\s*\$?([\d\.]+)", text, re.IGNORECASE)
+        # "Entry Targets: 0.048", "Entrys : 0.04800", "ENTRY ➜ 0.002075", "ENTERY PRICE: 0.02923", "Entry Price: 9.17", "Entry Zone: 0.1988", "BUY :\n 1) 1.674 - 100%", "Entry: - 0.3299"
+        m_single = re.search(
+            r"(?:Entrys|Entry\s*Targets?|ENTRY\s*PRICE|ENTERY\s*PRICE|Entry\s*Price|ENTERY|Entry\s*Zone|Entry|Take Entries|BUY)\s*[:\=\-\>\u279c\u2794\s]*\n?\s*(?:\d+[\)\:]\s*|\d+\.(?!\d)\s*|\-\s*)?(?:[^\d\$\.]*)\s*\$?([\d\.]+)",
+            text,
+            re.IGNORECASE,
+        )
         if m_single:
             try:
                 p = Decimal(m_single.group(1))
@@ -343,11 +391,25 @@ class SignalParser:
         """
         Extract Stop Loss. Detects ambiguous representations such as '052506' (missing decimal point).
         """
-        # Match SL patterns across potential newlines and line bullet prefixes like '1) ⛔️ 2408'
-        # Crucial: bullet digits require whitespace (?:\b\d+[\)\.]\s+) so '0.9360' is not mistaken for bullet '0.'
-        # Look specifically for digits [0-9\.] to avoid matching words like 'is' or 'moved'
+        # 1. Check if line has a bullet number like '1) 0.018100' or '1) ⛔️ 0.3920' or '1. 0.018100'
+        # Crucial: use (?!\d) on dot so decimal prices like 0.018100 are not mistaken for a bullet '0.'
+        m_bullet = re.search(
+            r"\b(?:Stop-Loss|STOP LOSS|STOPLOSS|STOPP LOSS|Stop Loss|Stop Target|Stoploss|Stop|SL)\b[^\n]*\n+\s*(?:\d+[\)\:]|\d+\.(?!\d))\s*[^\d\$\n]*\$?([0-9\.]+)",
+            text,
+            re.IGNORECASE,
+        )
+        if m_bullet:
+            val_str = m_bullet.group(1).strip()
+            val_str = re.split(r"[\s\-]", val_str)[0]
+            try:
+                val = Decimal(val_str)
+                return val, None, False
+            except InvalidOperation:
+                return None, f"Stop Loss '{val_str}' khong hop le", False
+
+        # 2. Standard inline SL e.g. 'Stoploss 🔴Loss :- 0.1384', 'Stop loss :0.01814613', 'SL under 62k'
         m = re.search(
-            r"\b(?:Stop-Loss|STOP LOSS|STOPLOSS|STOPP LOSS|Stop Loss|Stop Target|Stoploss|Stop|SL)\b(?:\s*\([A-Za-z]+\))?[_\*]*\s*[:\-\>\s]*\n*(?:\s*\d+[\)\.]\s+)?(?:[^\w\s\$\.]*)\s*\$?([0-9\.]+)",
+            r"\b(?:Stop-Loss|STOP LOSS|STOPLOSS|STOPP LOSS|Stop Loss|Stop Target|Stoploss|Stop|SL)\b[^\d\$\n]*\$?([0-9\.]+[kK]?)",
             text,
             re.IGNORECASE,
         )
@@ -355,7 +417,6 @@ class SignalParser:
             return None, "Khong tim thay Stop Loss", False
 
         val_str = m.group(1).strip()
-        # Clean trailing text like "- 100%"
         val_str = re.split(r"[\s\-]", val_str)[0]
 
         # Check for ambiguous integer string without dot (e.g. Q/USD "052506")
@@ -363,7 +424,10 @@ class SignalParser:
             return None, f"Stop Loss '{val_str}' la so mo ho, thieu dau thap phan. Khong tu sua thanh 0.{val_str[1:]}", True
 
         try:
-            val = Decimal(val_str)
+            if val_str.lower().endswith("k"):
+                val = Decimal(val_str[:-1]) * Decimal("1000")
+            else:
+                val = Decimal(val_str)
             return val, None, False
         except InvalidOperation:
             return None, f"Stop Loss '{val_str}' khong hop le", False
@@ -377,9 +441,60 @@ class SignalParser:
         """
         tps: List[Decimal] = []
 
-        # 1. Hyphen-separated targets e.g. "TAKE- PROFIT\n\n0.002350-0.002250-0.002050"
+        # 1. Slash separated targets e.g. "Targets: $0.144/$0.156/$0.174"
+        m_slash = re.search(
+            r"(?:Targets?|Take[\s\-]*Profits?|Profit\s*Targets?)\s*[:\-\>\s]*((?:\$?[\d\.]+\s*\/\s*)+\$?[\d\.]+)",
+            text,
+            re.IGNORECASE,
+        )
+        if m_slash:
+            parts = re.split(r"\s*\/\s*", m_slash.group(1).strip())
+            for p in parts:
+                clean_p = p.replace("$", "").strip()
+                try:
+                    tps.append(Decimal(clean_p))
+                except InvalidOperation:
+                    pass
+            if tps:
+                return tps, None
+
+        # 2. Bracket separated targets e.g. "Take profit = [ 0.1313, 0.1296, 0.1280 ]"
+        m_bracket = re.search(
+            r"(?:Take[\s\-]*Profits?|Profit\s*Targets?|Targets?)\s*[:\=\-\>\s]*\[\s*([\d\.,\s]+)\s*\]",
+            text,
+            re.IGNORECASE,
+        )
+        if m_bracket:
+            for p in re.split(r"[, \t]+", m_bracket.group(1).strip()):
+                try:
+                    clean_p = p.replace("$", "").strip()
+                    if clean_p:
+                        tps.append(Decimal(clean_p))
+                except InvalidOperation:
+                    pass
+            if tps:
+                return tps, None
+
+        # 3. Comma / Arrow separated single line e.g. "Targets: $0.0985 → $0.0950 → $0.0910" or "Targets: 0.20780, 0.21390"
+        m_arrow = re.search(
+            r"(?:Targets?|Take[\s\-]*Profits?|Profit\s*Targets?)\s*[:\-\>\s]*((?:\$?[\d\.]+\s*(?:→|->|,)\s*)+\$?[\d\.]+)",
+            text,
+            re.IGNORECASE,
+        )
+        if m_arrow:
+            parts = re.split(r"\s*(?:→|->|,)\s*", m_arrow.group(1).strip())
+            for p in parts:
+                clean_p = p.replace("$", "").strip()
+                try:
+                    tps.append(Decimal(clean_p))
+                except InvalidOperation:
+                    pass
+            if tps:
+                return tps, None
+
+        # 4. Hyphen-separated targets e.g. "TAKE- PROFIT\n\n0.002350-0.002250-0.002050" or "0.04160-0.04000-0.03650"
         m_hyphen = re.search(
-            r"(?:TAKE-?\s*PROFITS?|Targets?)\s*[:\-\>\s]*\n*\s*([\d\.]+(?:\s*-\s*[\d\.]+)+)",
+            r"(?:TAKE-?\s*PROFITS?|Profit\s*Targets?|Targets?)\s*[:\-\>\s]*\n*\s*([\d\.]+(?:\s*-\s*[\d\.]+)+)",
             text,
             re.IGNORECASE,
         )
@@ -393,7 +508,7 @@ class SignalParser:
             if tps:
                 return tps, None
 
-        # 2. Comma or space separated targets e.g. "Targets: 🎯 0.8720, 0.8389, 0.7860" or "Targets: 0.20780 0.21390 0.22920"
+        # 5. Comma or space separated targets e.g. "Targets: 🎯 0.8720, 0.8389, 0.7860" or "Targets: 0.20780 0.21390 0.22920"
         m_comma = re.search(
             r"(?:Targets|TAKE PROFIT LEVELS|Take Profit Targets|Take-Profit Targets|TAKE PROFITS|Targets?)\s*:\s*[🎯\s]*((?:[\d\.]+\s*[, \t]+)+[\d\.]+)",
             text,
@@ -409,7 +524,7 @@ class SignalParser:
             if tps:
                 return tps, None
 
-        # 3. Line by line parsing with target-section tracking
+        # 6. Line by line parsing with target-section tracking
         lines = text.split("\n")
         in_target_section = False
 
@@ -419,29 +534,36 @@ class SignalParser:
                 continue
 
             # Check if this line marks the start of a target section
-            if re.search(r"\b(?:Targets|Take Profit|TAKE PROFIT LEVELS|TAKE PROFIT|TAKE PROFITS)\b", line_str, re.IGNORECASE) and not re.search(r"\b(?:Entry|Entries)\b", line_str, re.IGNORECASE):
-                # If the line has numbers (e.g. "TP1 0.02990"), parse directly, else enter section
-                if not re.search(r"[\d\.]+", line_str) or re.search(r"^[^0-9]*Targets?\s*:", line_str, re.IGNORECASE):
-                    in_target_section = True
-                    # If this same line has a number after colon, e.g. "TP1: 0.5230"
-                    m_inline = re.search(r"(?:TP\d*|Target\s*\d*)\s*[:\-\>\s]*\$?([\d\.]+)", line_str, re.IGNORECASE)
-                    if m_inline:
-                        try:
-                            val = Decimal(m_inline.group(1))
-                            if val not in tps:
-                                tps.append(val)
-                        except InvalidOperation:
-                            pass
-                    continue
+            if re.search(r"(?:TAKE-?\s*PROFITS?|PROFIT\s*TARGETS?|\bTARGETS?\b|\bTP\b)", line_str, re.IGNORECASE) and not re.search(r"(?:Stop|Entr|Buy|Sell|Trailing|Trigger|Management|Close)", line_str, re.IGNORECASE):
+                in_target_section = True
+                # Inline explicit TP e.g. "Target: $830", "TP1: 0.5230", "Target 2. $0.04920"
+                m_inline = re.search(r"(?:TP\d*|Target\s*\d*)\s*[\.\:\-\>\s]*\$?([\d\.]+)", line_str, re.IGNORECASE)
+                if m_inline:
+                    try:
+                        val = Decimal(m_inline.group(1))
+                        if val not in tps:
+                            tps.append(val)
+                    except InvalidOperation:
+                        pass
+                continue
 
-            # Check if line marks the end of a target section (Stop, SL, STOPLOSS, Leverage, Entry, etc.)
-            if re.search(r"(?:Stop|Stoploss|Stopp|SL|Leverage|LEV|Entry|Entries|ENTERY|BUY|SELL|Account|Published|Trailing|RISK|Admin)", line_str, re.IGNORECASE):
+            # Check if line marks the end of a target section
+            if re.search(r"(?:Stop|Stoploss|Stopp|SL|Leverage|LEV|Entry|Entries|ENTERY|BUY|SELL|Account|Published|Trailing|RISK|Admin|Contact|Management)", line_str, re.IGNORECASE):
                 in_target_section = False
                 continue
 
-            # Check for explicit TP line (e.g. "TP1: 0.5230", "TP: 55000", "Target 1 $0.04970", "Target 2. $0.04920", "① 🟢 TP1 ➜ 0.002120", "① 🟢 TP1 ➔ 8.860")
+            # Skip lines with Stop, Entry, Management keywords
+            if re.search(r"(?:Stop|Stoploss|Stopp|SL|Leverage|LEV|Entry|Entries|ENTERY|BUY|SELL|Account|Trailing|RISK|Admin|Contact|Management|Close)", line_str, re.IGNORECASE):
+                continue
+
+            # Check for explicit TP line anywhere in message
+            # Handles:
+            # - TP1: 0.5230, TP1 0.02990, TP: 55000
+            # - Target 1 $0.04970, Target 2. $0.04920, • Target 1: 0.02375
+            # - 1.🎯 0.08250, 1. 🎯 6907.18
+            # - ① 🟢 TP1 ➜ 0.002120
             m_explicit = re.search(
-                r"(?:TP\d*|Target\s*\d+)\s*[\.\:\-\>\u279c\u2794\s]*\$?([\d\.]+)",
+                r"(?:(?:TP\s*\d+|Target\s*\d+)\s*[\.\:\-\>\u279c\u2794\s]*|(?:TP|Target)\s*[:\-\>\u279c\u2794]+\s*|(?:•\s*)?Target\s*\d+\s*[:\-\>\s]*|^\s*\d+[\.\)]\s*[🎯]\s*)\$?([\d\.]+)",
                 line_str,
                 re.IGNORECASE,
             )
@@ -454,18 +576,30 @@ class SignalParser:
                 except InvalidOperation:
                     pass
 
-            # If inside a target section, match numbered lines or emoji numbered lines:
-            # 1️⃣ 0.04905, 1) 🔽2344, 🥇 0.02250, 1)🟥 1.653
-            # Use (?!\d) so bullet dot '1.' is matched, but decimal dot '0.02555' is not matched as a bullet
             if in_target_section:
-                m_sec = re.search(
-                    r"(?:\b\d+[\)\.](?!\d)|[0-9]+(?:[\uFE0F]?\u20E3)|[①②③④⑤⑥⑦⑧⑨⑩]|[🥇🥈🥉])\s*(?:[^\d\$\.]*)\s*\$?([\d\.]+k?)",
+                # Subcase 6a: Check hyphen-separated line inside section: "0.04160-0.04000-0.03650"
+                if re.search(r"^[\d\.]+(?:\s*-\s*[\d\.]+)+$", line_str):
+                    for p in re.split(r"\s*-\s*", line_str):
+                        try:
+                            v = Decimal(p.strip())
+                            if v not in tps:
+                                tps.append(v)
+                        except InvalidOperation:
+                            pass
+                    continue
+
+                # Subcase 6b: Check numbered, bulleted, or bare decimal line:
+                # Handles:
+                # - Bare numbers: "0.0153033", "2410"
+                # - Bullets: "1: 2410", "1) 0.0457", "➊ 0.08300", "① 0.0457", "1️⃣ 0.0457", "1. 0.0457", "➤ 0.08300", "• 0.08300"
+                m_bullet = re.search(
+                    r"(?:(?:\b\d+[\)\:\.](?!\d)|[0-9]+(?:[\uFE0F]?\u20E3)|[①-⑩]|[➊-➓]|[🥇🥈🥉]|[\-\•\➤\➔\➜\🎯\🧿])\s*)?\$?\s*(\d+(?:\.\d+)?k?)\s*$",
                     line_str,
                     re.IGNORECASE,
                 )
-                if m_sec:
+                if m_bullet:
+                    v_str = m_bullet.group(1).lower().strip()
                     try:
-                        v_str = m_sec.group(1).lower().strip()
                         if v_str.endswith("k"):
                             val = Decimal(v_str[:-1]) * Decimal("1000")
                         else:

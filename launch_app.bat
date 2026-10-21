@@ -37,6 +37,9 @@ if not exist "%APPDATA%\telegram_binance_signal_executor\data\telegram_user.sess
 )
 if exist "%LOCALAPPDATA%\telegram-binance-signal-executor" (
     copy /y "%~dp0config.yaml" "%LOCALAPPDATA%\telegram-binance-signal-executor\config.yaml" >nul 2>&1
+    if not exist "%LOCALAPPDATA%\telegram-binance-signal-executor\data" mkdir "%LOCALAPPDATA%\telegram-binance-signal-executor\data" >nul 2>&1
+    copy /y "%~dp0data\channel_winrates_6_months.json" "%LOCALAPPDATA%\telegram-binance-signal-executor\data\channel_winrates_6_months.json" >nul 2>&1
+    copy /y "%~dp0data\channel_winrates_6_months.json" "%APPDATA%\telegram_binance_signal_executor\data\channel_winrates_6_months.json" >nul 2>&1
     if exist "%~dp0dist\backend-x86_64-pc-windows-msvc.exe" (
         copy /y "%~dp0dist\backend-x86_64-pc-windows-msvc.exe" "%LOCALAPPDATA%\telegram-binance-signal-executor\backend-x86_64-pc-windows-msvc.exe" >nul 2>&1
         copy /y "%~dp0dist\backend-x86_64-pc-windows-msvc.exe" "%LOCALAPPDATA%\telegram-binance-signal-executor\backend.exe" >nul 2>&1

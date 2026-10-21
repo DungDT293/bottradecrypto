@@ -69,6 +69,7 @@ class ValidatedSignal(BaseModel):
     is_breakeven_after_tp1: bool
     risk_pct: Decimal
     metadata: SourceMetadata
+    entry_range: Optional[Tuple[Decimal, Decimal]] = None
 
 
 class Order(BaseModel):

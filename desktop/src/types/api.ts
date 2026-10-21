@@ -251,10 +251,11 @@ export interface ChannelLeaderboardItem {
   rank: number;
   chat_id: number;
   channel_name: string;
-  tier: "S" | "A" | "B" | "C" | "D";
+  tier: "S" | "A" | "B" | "C" | "D" | "BLOCKED" | string;
   verdict: string;
   verdict_color: "success" | "primary" | "warning" | "error";
   badge_desc: string;
+  is_blacklisted?: boolean;
   total_messages: number;
   total_signals: number;
   validated_signals: number;
@@ -284,6 +285,7 @@ export interface ChannelLeaderboardItem {
 }
 
 export interface ChannelLeaderboardSummary {
+  total_channels?: number;
   total_pinned_channels: number;
   active_trading_channels: number;
   total_signals_validated: number;

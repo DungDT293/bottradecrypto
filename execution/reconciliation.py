@@ -25,7 +25,7 @@ def build_validated_signal_from_row(row: Dict[str, Any], config: AppConfig) -> V
 
     entries = [(Decimal(str(e)), Decimal("1.0")) for e in entries_raw]
 
-    tp1_pct = float(getattr(config.execution, "tp1_target_weight_pct", Decimal("60.0")))
+    tp1_pct = float(getattr(config.execution, "tp1_target_weight_pct", Decimal("35.0")))
     tp_weights = calculate_tp_weights(len(tps_raw), tp1_pct)
     take_profits = []
     for i, p_str in enumerate(tps_raw):

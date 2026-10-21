@@ -22,8 +22,8 @@ export const OverviewPage: React.FC = () => {
       ? `$${parseFloat(String(marginBalance)).toFixed(2)} USDT`
       : "Chưa có dữ liệu";
 
-  const todayPnlVal = parseFloat(pnlToday?.realized_pnl || "0");
-  const pnl7dVal = parseFloat(pnl7d?.realized_pnl || "0");
+  const todayPnlVal = parseFloat(pnlToday?.net_pnl ?? pnlToday?.realized_pnl ?? "0");
+  const pnl7dVal = parseFloat(pnl7d?.net_pnl ?? pnl7d?.realized_pnl ?? "0");
 
   return (
     <div>

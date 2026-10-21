@@ -599,15 +599,9 @@ class TelegramService:
         existing_ids = {d["id"] for d in result_dialogs}
         known_names = {
             -1002052872813: "CRYPTO LEOPARD'S",
+            -1001756316676: "Boom_Boom_Billionaires",
             -1001370457350: "Crypto Neon",
-            -1001895315984: "Crypto spider 🕷️ scalper",
-            -1001590450482: "THE CRYPTO TRADER",
             -1002007658025: "THE WOLF (CRYPTO)®",
-            -1001161683441: "Global Crypto Research",
-            -1002266035358: "THE MASTER (CRYPTO)",
-            -1001652601224: "Crypto World Updates",
-            -1002191067035: "Crypto Hunters",
-            -1001656921849: "ESTR",
             -1001552004524: "CRYPTO MONK",
         }
         for allowed_id in (self.config.telegram.allowed_chat_ids or []):

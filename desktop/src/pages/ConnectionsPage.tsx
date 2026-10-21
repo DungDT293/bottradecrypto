@@ -48,6 +48,7 @@ export const ConnectionsPage: React.FC = () => {
   const [loginState, setLoginState] = useState<TelegramLoginState>("PHONE_INPUT");
   const [previousState, setPreviousState] = useState<TelegramLoginState | null>(null);
   const [inlineError, setInlineError] = useState<InlineError | null>(null);
+  const [connectionRetries, setConnectionRetries] = useState<number>(0);
 
   // Login credentials / session fields
   const [phone, setPhone] = useState("");
@@ -89,9 +90,16 @@ export const ConnectionsPage: React.FC = () => {
   // Fetch status & profile
   const fetchStatusAndProfile = useCallback(async () => {
     if (!httpConnected && !snapshot) {
+      if (connectionRetries < 3) {
+        setTimeout(() => {
+          setConnectionRetries((prev) => prev + 1);
+        }, 600);
+        return;
+      }
       setLoginState("BACKEND_UNAVAILABLE");
       return;
     }
+    setConnectionRetries(0);
 
     try {
       const [credStatus, profile, bnCreds] = await Promise.all([
