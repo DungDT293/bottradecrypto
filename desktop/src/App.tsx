@@ -3,7 +3,6 @@ import { AppProvider, useApp } from "./context/AppContext";
 import { Sidebar } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { ToastContainer } from "./components/Toast";
-import { LicenseModal } from "./components/LicenseModal";
 
 import { OverviewPage } from "./pages/OverviewPage";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
@@ -62,7 +61,6 @@ const MainContent: React.FC = () => {
         </main>
       </div>
       <ToastContainer />
-      <LicenseModal />
     </div>
   );
 };
