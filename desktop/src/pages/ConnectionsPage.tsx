@@ -13,9 +13,11 @@ import {
   ExternalLink,
   Zap,
   Sparkles,
+  BookOpen,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
+import { ApiGuideModal } from "../components/ApiGuideModal";
 import type { TelegramProfile, TelegramCredentialsStatus, AutoJoinResponse } from "../types/api";
 
 export type TelegramLoginState =
@@ -100,6 +102,20 @@ export const ConnectionsPage: React.FC = () => {
     } finally {
       setAutoJoining(false);
     }
+  };
+
+  // API Guide Modal state
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
+  const [guideInitialTab, setGuideInitialTab] = useState<"telegram" | "binance">("binance");
+
+  const openTelegramGuide = () => {
+    setGuideInitialTab("telegram");
+    setGuideModalOpen(true);
+  };
+
+  const openBinanceGuide = () => {
+    setGuideInitialTab("binance");
+    setGuideModalOpen(true);
   };
 
   // Cooldown countdown timer
@@ -575,6 +591,23 @@ export const ConnectionsPage: React.FC = () => {
               <span style={{ fontSize: "16px", fontWeight: 600, color: "#fff" }}>Tài khoản Telegram</span>
               <button
                 className="btn btn-secondary btn-sm"
+                onClick={openTelegramGuide}
+                title="Xem hướng dẫn lấy Telegram API và đăng nhập"
+                style={{
+                  padding: "2px 8px",
+                  fontSize: "11px",
+                  color: "#38bdf8",
+                  borderColor: "rgba(56, 189, 248, 0.4)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <BookOpen size={12} />
+                <span>Hướng dẫn</span>
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
                 onClick={() => setShowApiConfig(!showApiConfig)}
                 title="Cấu hình API credentials Telegram"
                 style={{ padding: "2px 8px", fontSize: "11px" }}
@@ -867,6 +900,36 @@ export const ConnectionsPage: React.FC = () => {
             </div>
           )}
 
+          {/* Quick Help Banner for Telegram Login */}
+          {loginState !== "AUTHORIZED" && (
+            <div
+              style={{
+                marginTop: "14px",
+                padding: "10px 14px",
+                borderRadius: "6px",
+                background: "rgba(56, 189, 248, 0.08)",
+                border: "1px dashed rgba(56, 189, 248, 0.35)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+                fontSize: "12px",
+              }}
+            >
+              <span style={{ color: "#7dd3fc" }}>
+                💡 Người dùng mới? Bấm xem cách lấy Telegram API ID/Hash và mã đăng nhập.
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={openTelegramGuide}
+                style={{ whiteSpace: "nowrap", fontSize: "11px", padding: "3px 8px", color: "#38bdf8" }}
+              >
+                Xem hướng dẫn
+              </button>
+            </div>
+          )}
+
           {/* STATE: PHONE_INPUT */}
           {loginState === "PHONE_INPUT" && (
             <div style={{ marginTop: "16px" }}>
@@ -1124,12 +1187,60 @@ export const ConnectionsPage: React.FC = () => {
         {/* ========================================================= */}
         <div className="card">
           <div className="card-title">
-            <span style={{ fontSize: "16px", fontWeight: 600, color: "#fff" }}>Sàn Binance Futures</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "16px", fontWeight: 600, color: "#fff" }}>Sàn Binance Futures</span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={openBinanceGuide}
+                title="Xem hướng dẫn tạo & phân quyền API Binance an toàn 100%"
+                style={{
+                  padding: "2px 8px",
+                  fontSize: "11px",
+                  color: "#f3ba2f",
+                  borderColor: "rgba(243, 186, 47, 0.4)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <ShieldCheck size={12} />
+                <span>Hướng dẫn API</span>
+              </button>
+            </div>
             {(account?.connected || account?.is_connected) ? (
               <span className="badge badge-read-only">ĐÃ KẾT NỐI</span>
             ) : (
               <span className="badge badge-shadow">CHƯA LIÊN KẾT</span>
             )}
+          </div>
+
+          {/* Security Guarantee Callout Banner */}
+          <div
+            style={{
+              marginTop: "14px",
+              padding: "10px 14px",
+              borderRadius: "6px",
+              background: "linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.5) 100%)",
+              border: "1px solid rgba(16, 185, 129, 0.3)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "10px",
+            }}
+          >
+            <div style={{ fontSize: "12px", color: "var(--text-secondary)", lineHeight: "1.4" }}>
+              <strong style={{ color: "#34d399" }}>🛡️ Bảo mật vốn 100%:</strong> Chỉ bật quyền{" "}
+              <strong style={{ color: "#34d399" }}>Enable Futures</strong>. Tuyệt đối{" "}
+              <strong style={{ color: "#f87171" }}>KHÔNG bật Enable Withdrawals (Rút tiền)</strong>.
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={openBinanceGuide}
+              style={{ whiteSpace: "nowrap", fontSize: "11px", padding: "3px 8px", color: "#f3ba2f" }}
+            >
+              Xem chi tiết
+            </button>
           </div>
 
           <div style={{ marginTop: "16px" }}>
@@ -1421,6 +1532,13 @@ export const ConnectionsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Interactive API Setup & Safety Guide Modal */}
+      <ApiGuideModal
+        isOpen={guideModalOpen}
+        initialTab={guideInitialTab}
+        onClose={() => setGuideModalOpen(false)}
+      />
     </div>
   );
 };
