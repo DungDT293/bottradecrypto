@@ -7,7 +7,12 @@ $installRoot = Join-Path $env:RUNNER_TEMP 'tbce-install'
 New-Item -ItemType Directory -Force $installRoot | Out-Null
 
 # Silent install into runner-owned location. Installer must not receive secrets.
-Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$installRoot" -Wait -NoNewWindow
+$installerProcess = Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$installRoot" -PassThru -NoNewWindow
+if (-not $installerProcess.WaitForExit(120000)) {
+  Stop-Process -Id $installerProcess.Id -Force -ErrorAction SilentlyContinue
+  throw 'Installer timed out after 120 seconds'
+}
+if ($installerProcess.ExitCode -ne 0) { throw "Installer exited with code $($installerProcess.ExitCode)" }
 $app = Get-ChildItem -Path $installRoot -Filter '*.exe' -Recurse | Where-Object { $_.Name -notmatch 'unins' } | Select-Object -First 1
 if (-not $app) { throw 'Installed application executable not found' }
 
@@ -38,5 +43,11 @@ try {
 }
 
 $uninstaller = Get-ChildItem -Path $installRoot -Filter 'unins*.exe' -Recurse | Select-Object -First 1
-if ($uninstaller) { Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT', '/NORESTART' -Wait -NoNewWindow }
+if ($uninstaller) {
+  $uninstallProcess = Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT', '/NORESTART' -PassThru -NoNewWindow
+  if (-not $uninstallProcess.WaitForExit(120000)) {
+    Stop-Process -Id $uninstallProcess.Id -Force -ErrorAction SilentlyContinue
+    throw 'Uninstaller timed out after 120 seconds'
+  }
+}
 Write-Host 'Windows installer smoke passed'
