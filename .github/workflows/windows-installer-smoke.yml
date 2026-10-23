@@ -47,7 +47,12 @@ jobs:
 
       - name: Prepare sanitized packaged config
         shell: pwsh
-        run: Copy-Item config.example.yaml desktop/src-tauri/config.yaml -Force
+        run: |
+          Copy-Item config.example.yaml desktop/src-tauri/config.yaml -Force
+          $path = 'desktop/src-tauri/tauri.conf.json'
+          $cfg = Get-Content -Raw $path | ConvertFrom-Json
+          $cfg.bundle.resources = @('config.yaml')
+          $cfg | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 $path
 
       - name: Build Windows installer
         working-directory: desktop
