@@ -14,12 +14,20 @@ if (-not $app) { throw 'Installed application executable not found' }
 $env:TBCE_ALLOW_BROWSER_HANDSHAKE = '0'
 $process = Start-Process -FilePath $app.FullName -WorkingDirectory $installRoot -PassThru
 try {
-  Start-Sleep -Seconds 5
-  if ($process.HasExited) { throw "Application exited during startup: $($process.ExitCode)" }
-
   $appData = Join-Path $env:APPDATA 'telegram_binance_signal_executor'
   $config = Join-Path $appData 'config.yaml'
-  if (-not (Test-Path $config)) { throw 'Runtime config was not created' }
+  $deadline = (Get-Date).AddSeconds(30)
+  while (-not (Test-Path $config) -and (Get-Date) -lt $deadline) {
+    if ($process.HasExited) { throw "Application exited during startup: $($process.ExitCode)" }
+    Start-Sleep -Milliseconds 500
+  }
+  if (-not (Test-Path $config)) {
+    Write-Host "Install root: $installRoot"
+    Write-Host "AppData root: $appData"
+    Get-ChildItem -Path $installRoot -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+    throw 'Runtime config was not created'
+  }
+  if ($process.HasExited) { throw "Application exited during startup: $($process.ExitCode)" }
   $configText = Get-Content -Raw $config
   if ($configText -match 'mode:\s*LIVE|live_trading_enabled:\s*true|BINANCE_.*(KEY|SECRET)=\S+') {
     throw 'Unsafe LIVE mode or credential material found in installed runtime config'
