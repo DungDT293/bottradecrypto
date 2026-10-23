@@ -45,6 +45,10 @@ jobs:
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/backend-x86_64-pc-windows-msvc.exe desktop/src-tauri/binaries/backend-x86_64-pc-windows-msvc.exe -Force
 
+      - name: Prepare sanitized packaged config
+        shell: pwsh
+        run: Copy-Item config.example.yaml desktop/src-tauri/config.yaml -Force
+
       - name: Build Windows installer
         working-directory: desktop
         run: cargo tauri build --bundles nsis
