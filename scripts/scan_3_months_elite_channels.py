@@ -33,7 +33,9 @@ cutoff_3m = now_utc - timedelta(days=90)
 print(f"Scanning 3 months from {cutoff_3m.strftime('%Y-%m-%d')} to {now_utc.strftime('%Y-%m-%d')}...")
 
 async def main():
-    client = TelegramClient("data/telegram_user", 28680296, "927e2da6e7d0ec3d97a79d11cc794e46")
+    if not config.telegram.api_id or not config.telegram.api_hash:
+        raise RuntimeError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in local .env")
+    client = TelegramClient("data/telegram_user", config.telegram.api_id, config.telegram.api_hash)
     await client.connect()
     if not await client.is_user_authorized():
         print("Telegram not authorized!")

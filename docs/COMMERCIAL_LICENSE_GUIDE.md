@@ -1,4 +1,4 @@
-# HƯỚNG DẪN THƯƠNG MẠI HÓA & PHÁT HÀNH TRỰC TIẾP (COMMERCIAL RELEASE v1.3.1)
+# HƯỚNG DẪN THƯƠNG MẠI HÓA & PHÁT HÀNH TRỰC TIẾP (COMMERCIAL RELEASE v1.3.3)
 
 Tài liệu này hướng dẫn mô hình thương mại hóa trực tiếp không cần server quản lý bản quyền: **Phân phối bộ cài độc lập — Người dùng tự kết nối Telegram & Binance — 1-Click Tham Gia 5 Nhóm Tinh Hoa — Tự Động Giao Dịch 24/7**.
 
@@ -34,6 +34,18 @@ flowchart TD
     5. **Crypto Neon** (`-1001370457350`)
   - Đồng thời tự động kích hoạt whitelist giám sát tín hiệu cho 5 kênh này. Người dùng không phải tìm link hay bấm vào từng kênh.
 
+### 1.1. Cơ Chế Chống FloodWait / Khóa Tài Khoản & Cấu Hình Link Từ Xa (Remote Dynamic JSON)
+1. **Độ trễ ngẫu nhiên an toàn (`8 - 15 giây`):**
+   - Giữa mỗi lần join từng kênh mới, bot tự động chèn độ trễ ngẫu nhiên `asyncio.sleep(random.uniform(8.0, 15.0))` nhằm mô phỏng hành vi người thật, bảo vệ tuyệt đối tài khoản Telegram của người dùng khỏi các bộ lọc spam tự động của Telegram MTProto (`FloodWaitError`, `PEER_FLOOD`).
+2. **Thanh tiến trình thời gian thực (Real-time Progress Bar):**
+   - Trên giao diện Connections và Groups hiển thị Progress Bar động:
+     `"Đang tham gia kênh 1/5 (THE WOLF)... vui lòng chờ 12s để bảo vệ tài khoản Telegram"`.
+   - Giúp người dùng nắm rõ tiến độ, an tâm chờ đợi mà không bấm lại liên tục.
+3. **Cấu hình link từ xa chống đứt gãy link Private (Remote Dynamic JSON):**
+   - Toàn bộ danh sách kênh và link mời được lưu tại `config/elite_channels.json` và hỗ trợ nạp động từ xa qua GitHub Gist / GitHub Raw / Cloudflare Pages (thông qua trường `remote_channels_url` trong `config.yaml` hoặc biến môi trường `TELEGRAM_REMOTE_CHANNELS_URL`).
+   - Bot tự động ưu tiên fetch link mới nhất từ Cloud $\rightarrow$ Lưu cache cục bộ `data/remote_elite_channels_cache.json` $\rightarrow$ Tự động fallback về file nội bộ nếu offline.
+   - **Lợi ích thực chiến:** Khi admin các nhóm Telegram đổi link private mới, người vận hành chỉ cần cập nhật file JSON trên Cloud, toàn bộ app người dùng khắp nơi sẽ tự động lấy link mới nhất mà **không cần build lại file `.exe`**.
+
 ### Bước 2: Nhập API Binance & Bật Live Trading
 - Người dùng nhập `API Key` & `Secret Key` tài khoản Binance của họ (Chỉ cần cấp quyền Futures Trading, không cho rút tiền).
 - Bật công tắc **Giao dịch Live**.
@@ -50,7 +62,7 @@ flowchart TD
 File cài đặt Windows chuẩn thương mại đã sẵn sàng để gửi cho khách hàng:
 
 - **Đường dẫn file cài đặt:**
-  `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.3.1_x64-setup.exe`
+  `telegram-binance-signal-executor_1.3.3_x64-setup.exe` (hoặc `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_1.3.3_x64-setup.exe`)
 - **Dung lượng:** `101.1 MB`
 - **Tương thích:** Windows 10, Windows 11 (64-bit).
 - **Cài đặt:** Khách hàng chỉ cần tải file `.exe`, nhấp đúp và nhấn `Next -> Install -> Finish` là ứng dụng tự khởi động cùng khay hệ thống (System Tray).

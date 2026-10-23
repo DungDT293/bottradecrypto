@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 
 from config.policy_defaults import calculate_tp_weights, SourcePolicyOverride
-from config.config import load_config
+from config.config import AppConfig
 from core.enums import PositionSide, MarginMode
 from core.models import ParsedSignal, SourceMetadata, ValidatedSignal
 from core.exceptions import RiskCheckError
@@ -26,7 +26,13 @@ def test_take_profit_35_35_30_exact_split():
 
 def test_tiered_margin_5pct_vs_2_5pct_and_blacklist():
     """Quy tắc 1: Phân tầng vốn: Elite (5% Margin, 2.5% Risk) vs Secondary (2.5% Margin, 1.25% Risk) vs Blacklist (0%)."""
-    cfg = load_config("config.yaml")
+    cfg = AppConfig()
+    cfg.risk.default_leverage = 20
+    cfg.risk.max_leverage = 25
+    cfg.sources = {
+        -1001756316676: SourcePolicyOverride(chat_id=-1001756316676, name="Elite", margin_multiplier=Decimal("1.0")),
+        -1001781413045: SourcePolicyOverride(chat_id=-1001781413045, name="Secondary", margin_multiplier=Decimal("0.5")),
+    }
     risk_engine = RiskEngine(cfg)
     equity = Decimal("100.0")  # 100 USDT
 
@@ -137,7 +143,9 @@ def test_tiered_margin_5pct_vs_2_5pct_and_blacklist():
 
 def test_safe_leverage_clamp_invariants():
     """Quy tắc 3: Safe Leverage = min(25, floor(0.75 / SL_Distance_Pct))."""
-    cfg = load_config("config.yaml")
+    cfg = AppConfig()
+    cfg.risk.default_leverage = 20
+    cfg.risk.max_leverage = 25
     validator = SignalValidator(cfg)
 
     meta = SourceMetadata(

@@ -6,16 +6,8 @@ use std::io::Write;
 
 #[cfg(target_os = "windows")]
 fn kill_stale_backends() {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let _ = std::process::Command::new("taskkill")
-        .args(&["/F", "/IM", "backend.exe", "/T"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    let _ = std::process::Command::new("taskkill")
-        .args(&["/F", "/IM", "backend-x86_64-pc-windows-msvc.exe", "/T"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    // Stale-process cleanup is owned by tracked child PID in app_lib.
+    // Never kill unrelated processes by executable image name.
 }
 
 #[cfg(target_os = "windows")]

@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 from decimal import Decimal
-from config.config import load_config
+from config.config import AppConfig
 from core.enums import MarginMode, PositionSide, SignalState
 from core.models import SourceMetadata, ParsedSignal
 from config.policy_defaults import SourcePolicyOverride
@@ -10,7 +10,17 @@ from risk.risk_engine import RiskEngine
 
 @pytest.fixture
 def test_setup():
-    cfg = load_config("config.yaml")
+    cfg = AppConfig()
+    cfg.mode = "LIVE"
+    cfg.live_trading_enabled = True
+    cfg.risk.default_leverage = 20
+    cfg.risk.max_leverage = 25
+    cfg.sources = {
+        -1001756316676: SourcePolicyOverride(chat_id=-1001756316676, name="Elite", margin_multiplier=Decimal("1.0")),
+        -1001895315984: SourcePolicyOverride(chat_id=-1001895315984, name="Secondary", margin_multiplier=Decimal("0.5")),
+        -1001781413045: SourcePolicyOverride(chat_id=-1001781413045, name="Secondary", margin_multiplier=Decimal("0.5")),
+        -1002266035358: SourcePolicyOverride(chat_id=-1002266035358, name="Secondary", margin_multiplier=Decimal("0.5")),
+    }
     validator = SignalValidator(cfg)
     risk_engine = RiskEngine(cfg)
     now = datetime.utcnow()

@@ -166,3 +166,34 @@ def test_vip_result_boasting_classified_as_update():
     assert u_type2 == UpdateType.COMMENTARY
 
 
+def test_single_letter_symbol_crypto_leopard_q(parser, validator):
+    raw = """#Q    /USDT (SHORT) 🔽🔽
+
+⌛LEVERAGE : 20X TO 75X
+
+📊 Short BELOW (0.1465)(0.1480)
+
+🪙 TARGETS 
+
+🥇  0.1400
+
+🥈  0.1300
+
+🥉 0.1150
+
+  ⚠️ STOPLOSS : 0.1550
+
+💥Use only 1%margin of your total portfolio❤️😘😇"""
+    parsed = parser.parse(raw, make_meta())
+    assert parsed.symbol_candidate == "QUSDT"
+    assert parsed.side == PositionSide.SHORT
+    assert parsed.stop_loss == Decimal("0.1550")
+    assert len(parsed.take_profits) == 3
+
+    _, validated = validator.validate_and_resolve(parsed)
+    assert validated is not None
+    assert validated.symbol == "QUSDT"
+    assert validated.side == PositionSide.SHORT
+
+
+

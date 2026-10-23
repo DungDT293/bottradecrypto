@@ -62,5 +62,20 @@ class SignalStateMachine:
                 f"Cac trang thai hop le: {[s.value for s in allowed]}"
             )
 
-        self.repo.update_signal_state(signal_id, target_state, reason)
+        existing = self.repo.get_signal(signal_id)
+        if not existing:
+            raise InvalidStateTransitionError(f"Khong tim thay tin hieu '{signal_id}'.")
+        persisted_state = SignalState(existing["state"])
+        if persisted_state != current_state:
+            raise InvalidStateTransitionError(
+                f"Trang thai hien tai cua tin hieu '{signal_id}' la '{persisted_state.value}', "
+                f"khong phai '{current_state.value}'."
+            )
+
+        self.repo.update_signal_state(
+            signal_id,
+            target_state,
+            reason,
+            expected_current_state=current_state,
+        )
 

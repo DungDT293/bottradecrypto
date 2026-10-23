@@ -64,3 +64,41 @@ def test_media_signal_caption_never_creates_signal(tmp_path):
 def test_photo_detection_without_download():
     assert detect_media_kind(PhotoEvent()) == "photo"
     assert detect_media_kind(PhotoEvent(photo=False)) is None
+
+
+def test_media_signal_with_chart_successfully_creates_signal(tmp_path):
+    db = DatabaseManager(str(tmp_path / "chart_signal.db"))
+    config = load_config()
+    config.telegram.allowed_chat_ids = [1000]
+    listener = TelegramSignalListener(config, None, db)
+
+    pytest.importorskip("pytest_asyncio")
+    import asyncio
+    wolf_chart_signal = """👍THE WOLF SCALPER👍
+
+🚀 SHORT: $ARIA/USDT
+LEVERAGE: 20x
+
+✔️ENTRY PRICE: 0.06220
+✔️ 2nd ENTRY: 0.06310
+——————
+☄️TAKE- PROFIT
+
+0.06070-0.05800-0.05500
+
+STOP LOSS:  0.06560
+
+CLICK TO JOIN BITUNIX
+#WE_STAND_WITH_PALESTINE 🇵🇸
+"""
+    asyncio.run(listener.handle_incoming_message(PhotoEvent(wolf_chart_signal)))
+
+    repo = SignalRepository(db)
+    sig = repo.get_signal_by_message(1000, 77)
+    assert sig is not None
+    assert sig["symbol"] == "ARIAUSDT"
+    assert sig["side"] == "SHORT"
+    assert sig["state"] == "VALIDATED"
+    evidence_rows = repo.get_admin_evidence(1000, 77)
+    assert len(evidence_rows) == 1
+    assert evidence_rows[0]["media_kind"] == "photo"

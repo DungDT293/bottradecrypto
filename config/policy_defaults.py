@@ -9,9 +9,10 @@ def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("35.0")) -> List[
     Calculates weights for multi-TP signals based on configurable TP1 ratio.
     - If 1 TP: [Decimal("1.0")]
     - If 2 TPs: [tp1_w, 1.0 - tp1_w]
-    - If 3 TPs: Remainder is split front-loaded (65% to TP2, 35% to TP3 since TP3 is rarely hit):
-        TP2 = remainder * 0.65
-        TP3 = remainder - TP2
+    - If 3 TPs:
+        - If tp1_w == 0.200: [0.200, 0.400, 0.400] (Chuẩn tối ưu lợi nhuận & khóa lãi nấc)
+        - If tp1_w == 0.350: [0.350, 0.350, 0.300] (Chuẩn bảo vệ vốn cao)
+        - Otherwise remainder is split 50/50 between TP2 and TP3
     - If >= 4 TPs: Remainder is distributed with geometric decay.
     Guarantees sum(weights) == Decimal("1.0").
     """
@@ -30,6 +31,8 @@ def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("35.0")) -> List[
         return [tp1_w, remainder]
 
     if tp_count == 3:
+        if tp1_w == Decimal("0.200"):
+            return [Decimal("0.200"), Decimal("0.400"), Decimal("0.400")]
         if tp1_w == Decimal("0.350"):
             return [Decimal("0.350"), Decimal("0.350"), Decimal("0.300")]
         tp2_w = (remainder * Decimal("0.65")).quantize(Decimal("0.001"))
@@ -53,7 +56,7 @@ class RiskPolicy(BaseModel):
     risk_per_signal_pct: Decimal = Decimal("2.5")
     max_total_open_risk_pct: Decimal = Decimal("10.0")
     max_daily_loss_pct: Decimal = Decimal("10.0")
-    max_active_signals: int = 4
+    max_active_signals: int = 15
     default_leverage: int = 20
     max_leverage: int = 25
     margin_mode: MarginMode = MarginMode.CROSSED
@@ -80,9 +83,9 @@ class RiskPolicy(BaseModel):
 
 class ExecutionPolicyConfig(BaseModel):
     multi_entry_default_weight_mode: MultiEntryWeightMode = MultiEntryWeightMode.EQUAL_QUANTITY
-    entry_range_policy: EntryRangePolicy = EntryRangePolicy.BEST_PRICE
-    multi_tp_default_weight_mode: MultiTPWeightMode = MultiTPWeightMode.CUSTOM_TP1_RATIO
-    tp1_target_weight_pct: Decimal = Decimal("35.0")
+    entry_range_policy: EntryRangePolicy = EntryRangePolicy.SPLIT_2_LIMITS
+    multi_tp_default_weight_mode: MultiTPWeightMode = MultiTPWeightMode.FIXED_20_40_40
+    tp1_target_weight_pct: Decimal = Decimal("20.0")
     breakeven_trigger_tp_index: int = 1
     breakeven_offset_pct: Decimal = Decimal("0.05")
     min_sl_distance_pct: Decimal = Decimal("0.2")
@@ -128,6 +131,7 @@ class SourcePolicyOverride(BaseModel):
     name: str
     allow_multi_entry_equal_split: bool = False
     allow_range_midpoint: bool = False
+    allow_range_split_limits: bool = False
     allow_tp_equal_split: bool = False
     allow_below_pattern: bool = False
     allow_buy_as_short_exception: bool = False  # e.g. for channel ATOM if user approved

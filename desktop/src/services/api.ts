@@ -18,6 +18,11 @@ import type {
   TelegramChannelMessagesResponse,
   LicenseInfo,
   AutoJoinResponse,
+  AIStatusResponse,
+  AISetup,
+  AIConfigPayload,
+  PnLSummary,
+  TradeRecord,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -148,6 +153,16 @@ export const api = {
     body: JSON.stringify(data),
   }),
   getBinanceStatus: () => request<BinanceAccountSnapshot>("/binance/status"),
+  removeBinanceCredentials: (target: "testnet" | "live" | "all") =>
+    request<{
+      has_testnet_credentials: boolean;
+      testnet_api_key_masked: string | null;
+      has_live_credentials: boolean;
+      live_api_key_masked: string | null;
+      mode: string;
+    }>(`/binance/credentials/remove?target=${target}`, {
+      method: "POST",
+    }),
   testBinanceConnection: (targetMode?: string) =>
     request<{ success: boolean; message?: string; error?: string; equity?: number; base_url?: string; target_mode?: string }>(
       `/binance/test-connection${targetMode ? `?target_mode=${targetMode}` : ""}`,
@@ -184,10 +199,14 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ entry_enabled: enabled }),
   }),
-  getTradeHistory: (limit = 100) => request<any[]>(`/trading/trades?limit=${limit}`),
+  getTradeHistory: (limit = 100, daysBack = 0) => {
+    const params = new URLSearchParams({ limit: String(limit), days_back: String(daysBack) });
+    return request<TradeRecord[]>(`/trading/trades?${params.toString()}`);
+  },
 
   // 6. Statistics
-  getPnL: (days_back = 0) => request<any>(`/stats/pnl?days_back=${days_back}`),
+  getPnL: (daysBack = 0) => request<PnLSummary>(`/stats/pnl?days_back=${encodeURIComponent(daysBack)}`),
+  syncPnL: () => request<{ success: boolean; message: string; details?: any }>("/stats/sync", { method: "POST" }),
   getTelemetry: () => request<any>("/stats/telemetry"),
 
   // 7. Alerts
@@ -241,4 +260,36 @@ export const api = {
     method: "POST",
   }),
   getPublicIp: () => request<{ ip: string; success: boolean }>("/system/public-ip"),
+
+  // 12. Gemini Autonomous AI & Quant Trader
+  getAIStatus: () => request<AIStatusResponse>("/ai/status"),
+  updateAIConfig: (cfg: AIConfigPayload) => request<{
+    success: boolean;
+    enabled: boolean;
+    has_gemini_key: boolean;
+    gemini_key_masked: string | null;
+    scan_interval_minutes: number;
+    min_confidence: number;
+    watchlist: string[];
+  }>("/ai/config", {
+    method: "POST",
+    body: JSON.stringify(cfg),
+  }),
+  scanAIMarket: () => request<{
+    success: boolean;
+    count: number;
+    setups: AISetup[];
+    timestamp: string;
+    message?: string;
+  }>("/ai/scan-now", {
+    method: "POST",
+  }),
+  executeAISetup: (setup: AISetup) => request<{
+    success: boolean;
+    result?: any;
+    reason?: string;
+  }>("/ai/execute-setup", {
+    method: "POST",
+    body: JSON.stringify({ setup }),
+  }),
 };

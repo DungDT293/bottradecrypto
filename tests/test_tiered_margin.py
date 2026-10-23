@@ -1,13 +1,20 @@
 import pytest
 from datetime import datetime
 from decimal import Decimal
-from config.config import load_config
+from config.config import AppConfig
+from config.policy_defaults import SourcePolicyOverride
 from core.enums import MarginMode, OrderSide, OrderType, PositionSide
 from core.models import SourceMetadata, ValidatedSignal
 from risk.risk_engine import RiskEngine
 
 def test_tiered_margin_elite_vs_secondary():
-    cfg = load_config("config.yaml")
+    cfg = AppConfig()
+    cfg.risk.default_leverage = 20
+    cfg.risk.max_leverage = 25
+    cfg.sources = {
+        -1001756316676: SourcePolicyOverride(chat_id=-1001756316676, name="Elite", margin_multiplier=Decimal("1.0")),
+        -1001895315984: SourcePolicyOverride(chat_id=-1001895315984, name="Secondary", margin_multiplier=Decimal("0.5")),
+    }
     engine = RiskEngine(cfg)
     equity = Decimal("82.70")
     now = datetime.utcnow()

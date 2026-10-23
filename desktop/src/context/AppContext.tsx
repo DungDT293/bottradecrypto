@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import type { AppSnapshot, AlertRecord } from "../types/api";
 import { api } from "../services/api";
 import { wsClient } from "../services/websocket";
@@ -50,6 +50,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const snapshotRequestId = useRef(0);
 
   const addToast = useCallback((text: string, type: "success" | "error" | "info" | "warning" = "info") => {
     setToasts((prev) => {
@@ -70,23 +71,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const refreshSnapshot = useCallback(async () => {
+    const requestId = ++snapshotRequestId.current;
     try {
       const data = await api.getSnapshot();
+      if (requestId !== snapshotRequestId.current) return;
       setSnapshot(data);
       setHttpConnected(true);
       setError(null);
       setLastSyncTime(new Date().toLocaleTimeString("vi-VN"));
     } catch (err: any) {
+      if (requestId !== snapshotRequestId.current) return;
       // Light health check fallback to distinguish between network failure and server issue
       try {
         await api.getHealth();
-        setHttpConnected(true);
+        if (requestId === snapshotRequestId.current) setHttpConnected(true);
       } catch {
-        setHttpConnected(false);
+        if (requestId === snapshotRequestId.current) setHttpConnected(false);
       }
-      setError(err?.user_message || err?.message || "Không thể kết nối với dịch vụ backend.");
+      if (requestId === snapshotRequestId.current) {
+        setError(err?.user_message || err?.message || "Không thể kết nối với dịch vụ backend.");
+      }
     } finally {
-      setLoading(false);
+      if (requestId === snapshotRequestId.current) setLoading(false);
     }
   }, []);
 

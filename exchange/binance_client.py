@@ -1,16 +1,29 @@
 import asyncio
 import hashlib
 import hmac
+import json
 import time
 import urllib.parse
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 import aiohttp
 
-from config.config import AppConfig
+from config.config import AppConfig, exchange_writes_enabled, is_safe_testnet_url
 from core.enums import ExecutionMode, MarginMode, OrderSide, OrderType, PositionSide
 from core.exceptions import AccountStateBlockedError, ExchangeAdapterError
 from exchange.exchange_info import SymbolFilterInfo, parse_symbol_info
+
+
+
+def _format_decimal(val: Any) -> str:
+    """Formats decimal or numeric value without scientific notation (e.g. 1e-8 -> 0.00000001)."""
+    if val is None:
+        return ""
+    if isinstance(val, Decimal):
+        return f"{val:f}"
+    if isinstance(val, (float, int)):
+        return f"{Decimal(str(val)):f}"
+    return str(val)
 
 
 class BinanceFuturesClient:
@@ -37,6 +50,8 @@ class BinanceFuturesClient:
         self.config = config
         self._session = session
         self._own_session = False
+        self._exchange_info_cache: Optional[List[Dict[str, Any]]] = None
+        self._exchange_info_cached_at: float = 0.0
 
     @classmethod
     def is_rate_limited(cls) -> bool:
@@ -110,8 +125,7 @@ class BinanceFuturesClient:
                     server_time = int(data["serverTime"])
                     rtt_ms = int((time.monotonic() - start_req) * 1000)
                     local_now_ms = int(time.time() * 1000)
-                    estimated_server_now = server_time + (rtt_ms // 2)
-                    offset = estimated_server_now - local_now_ms
+                    offset = server_time - local_now_ms
                     BinanceFuturesClient._time_offset_ms = offset
                     BinanceFuturesClient._last_time_sync = time.time()
                     print(f"[BINANCE TIME SYNC] Dong bo thanh cong gio Binance: offset = {offset:+d}ms (RTT = {rtt_ms}ms)")
@@ -142,6 +156,14 @@ class BinanceFuturesClient:
         signed: bool = False,
         _retry_count: int = 0,
     ) -> Dict[str, Any]:
+        if method.upper() in {"POST", "PUT", "DELETE"}:
+            if not exchange_writes_enabled(self.config):
+                raise ExchangeAdapterError(
+                    f"Exchange write blocked in {self.config.mode.value} mode"
+                )
+            if self.config.mode == ExecutionMode.TESTNET and not is_safe_testnet_url(self.config):
+                raise ExchangeAdapterError("Unsafe Binance testnet URL; exchange write blocked")
+
         # Circuit Breaker: Do NOT send requests if currently banned by Binance
         now_ms = int(time.time() * 1000)
         if now_ms < BinanceFuturesClient._banned_until_ms:
@@ -235,6 +257,10 @@ class BinanceFuturesClient:
                     raise ExchangeAdapterError(f"Binance API Error {code}: {msg}")
                 return data
         except (asyncio.TimeoutError, TimeoutError):
+            if _retry_count < 2:
+                print(f"[BINANCE RETRY] Mang Binance bi delay timeout. Dang thu lai lan {_retry_count + 1}...")
+                await asyncio.sleep(0.5)
+                return await self._request(method, endpoint, params, signed=signed, _retry_count=_retry_count + 1)
             raise ExchangeAdapterError(f"Hết thời gian chờ phản hồi từ Binance ({self.config.binance.request_timeout_seconds}s Timeout)")
         except aiohttp.ClientError as e:
             raise ExchangeAdapterError(f"Loi ket noi mang den Binance: {str(e)}")
@@ -245,12 +271,27 @@ class BinanceFuturesClient:
             raise ExchangeAdapterError(f"Loi ket noi Binance ({type(e).__name__}): {err_text}")
 
     # 1. Exchange Info & Filters
+    async def get_exchange_symbols(self, *, trading_only: bool = True) -> set[str]:
+        """Return symbols currently published by Binance Futures exchangeInfo."""
+        now = time.monotonic()
+        if self._exchange_info_cache is None or now - self._exchange_info_cached_at >= 3600:
+            data = await self._request("GET", "/fapi/v1/exchangeInfo")
+            self._exchange_info_cache = list(data.get("symbols", []))
+            self._exchange_info_cached_at = now
+        return {
+            str(item.get("symbol"))
+            for item in self._exchange_info_cache
+            if item.get("symbol") and (not trading_only or item.get("status") == "TRADING")
+        }
+
     async def get_symbol_filter(self, symbol: str) -> SymbolFilterInfo:
         if symbol in BinanceFuturesClient._symbol_filter_cache:
             return BinanceFuturesClient._symbol_filter_cache[symbol]
 
         data = await self._request("GET", "/fapi/v1/exchangeInfo")
-        for sym_data in data.get("symbols", []):
+        self._exchange_info_cache = list(data.get("symbols", []))
+        self._exchange_info_cached_at = time.monotonic()
+        for sym_data in self._exchange_info_cache:
             s_name = sym_data.get("symbol")
             if s_name:
                 try:
@@ -419,10 +460,10 @@ class BinanceFuturesClient:
             "symbol": symbol,
             "side": side.value,
             "type": order_type.value,
-            "quantity": str(quantity),
+            "quantity": _format_decimal(quantity),
         }
         if price:
-            params["price"] = str(price)
+            params["price"] = _format_decimal(price)
             params["timeInForce"] = "GTC"
         if client_order_id:
             params["newClientOrderId"] = client_order_id
@@ -449,7 +490,7 @@ class BinanceFuturesClient:
             "symbol": symbol,
             "side": side.value,
             "type": order_type.value,
-            "triggerPrice": str(trigger_price),
+            "triggerPrice": _format_decimal(trigger_price),
             "workingType": working_type,
         }
         if close_position:
@@ -460,7 +501,7 @@ class BinanceFuturesClient:
             else:
                 params["reduceOnly"] = "false"
             if quantity:
-                params["quantity"] = str(quantity)
+                params["quantity"] = _format_decimal(quantity)
 
         if client_algo_id:
             params["clientAlgoId"] = client_algo_id
@@ -492,8 +533,97 @@ class BinanceFuturesClient:
         params = {"symbol": symbol} if symbol else None
         return await self._request("GET", "/fapi/v1/openAlgoOrders", params=params, signed=True)
 
-    async def get_user_trades(self, symbol: str, limit: int = 50) -> List[Dict[str, Any]]:
-        return await self._request("GET", "/fapi/v1/userTrades", params={"symbol": symbol, "limit": limit}, signed=True)
+    async def create_user_data_listen_key(self) -> str:
+        if not self.api_key:
+            raise ExchangeAdapterError("API Key chua duoc cau hinh")
+        data = await self._request("POST", "/fapi/v1/listenKey", params={}, signed=False)
+        listen_key = str(data.get("listenKey") or "").strip()
+        if not listen_key:
+            raise ExchangeAdapterError("Binance khong tra ve listenKey")
+        return listen_key
+
+    async def keepalive_user_data_listen_key(self, listen_key: str) -> None:
+        if not listen_key:
+            raise ValueError("listenKey is required")
+        await self._request("PUT", "/fapi/v1/listenKey", params={"listenKey": listen_key}, signed=False)
+
+    async def delete_user_data_listen_key(self, listen_key: str) -> None:
+        if listen_key:
+            await self._request("DELETE", "/fapi/v1/listenKey", params={"listenKey": listen_key}, signed=False)
+
+    async def get_user_trades(
+        self,
+        symbol: str,
+        limit: int = 50,
+        start_time_ms: Optional[int] = None,
+        end_time_ms: Optional[int] = None,
+        from_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        if not symbol:
+            raise ValueError("Binance userTrades requires symbol")
+        params: Dict[str, Any] = {"symbol": symbol, "limit": min(max(limit, 1), 1000)}
+        if start_time_ms is not None:
+            params["startTime"] = int(start_time_ms)
+        if end_time_ms is not None:
+            params["endTime"] = int(end_time_ms)
+        if from_id is not None:
+            params["fromId"] = int(from_id)
+        return await self._request("GET", "/fapi/v1/userTrades", params=params, signed=True)
+
+    async def get_user_trades_window(
+        self,
+        symbol: str,
+        start_time_ms: int,
+        end_time_ms: int,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """Fetch bounded symbol trades with deterministic pagination and dedupe."""
+        if end_time_ms <= start_time_ms:
+            return []
+        results: List[Dict[str, Any]] = []
+        seen = set()
+        from_id: Optional[int] = None
+        page_size = min(max(limit, 1), 1000)
+        for _ in range(100):
+            page = await self.get_user_trades(
+                symbol,
+                limit=page_size,
+                start_time_ms=start_time_ms,
+                end_time_ms=end_time_ms,
+                from_id=from_id,
+            )
+            if not page:
+                break
+            for trade in page:
+                trade_id = trade.get("id") or trade.get("tradeId")
+                key = str(trade_id) if trade_id is not None else json.dumps(trade, sort_keys=True, default=str)
+                if key not in seen:
+                    seen.add(key)
+                    results.append(trade)
+            numeric_ids = [int(t.get("id")) for t in page if str(t.get("id", "")).isdigit()]
+            if len(page) < page_size or not numeric_ids:
+                break
+            next_id = max(numeric_ids) + 1
+            if from_id is not None and next_id <= from_id:
+                break
+            from_id = next_id
+        return sorted(results, key=lambda item: int(item.get("time", 0)))
+
+    async def get_income_history(
+        self,
+        income_type: Optional[str] = None,
+        start_time_ms: Optional[int] = None,
+        end_time_ms: Optional[int] = None,
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        params: Dict[str, Any] = {"limit": min(max(limit, 1), 1000)}
+        if income_type:
+            params["incomeType"] = income_type
+        if start_time_ms is not None:
+            params["startTime"] = int(start_time_ms)
+        if end_time_ms is not None:
+            params["endTime"] = int(end_time_ms)
+        return await self._request("GET", "/fapi/v1/income", params=params, signed=True)
 
     async def cancel_standard_order(self, symbol: str, client_order_id: str) -> Dict[str, Any]:
         return await self._request(
@@ -505,10 +635,10 @@ class BinanceFuturesClient:
 
     async def cancel_algo_order(self, symbol: str, algo_id: Optional[str] = None, client_algo_id: Optional[str] = None) -> Dict[str, Any]:
         params: Dict[str, Any] = {"symbol": symbol}
-        if client_algo_id:
+        if algo_id:
+            params["algoId"] = int(algo_id) if str(algo_id).isdigit() else algo_id
+        elif client_algo_id:
             params["clientAlgoId"] = client_algo_id
-        elif algo_id:
-            params["algoId"] = algo_id
         return await self._request("DELETE", self.config.binance.algo_order_endpoint, params=params, signed=True)
 
     async def cancel_all_orders(self, symbol: str) -> Dict[str, Any]:

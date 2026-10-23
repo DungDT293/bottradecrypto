@@ -47,6 +47,39 @@ def test_calculate_tp_weights_clamping():
     assert w_high[0] == Decimal("0.900")
 
 
+def test_calculate_tp_weights_20_40_40():
+    w = calculate_tp_weights(3, Decimal("20.0"))
+    assert w == [Decimal("0.200"), Decimal("0.400"), Decimal("0.400")]
+    assert sum(w) == Decimal("1.000")
+
+
+def test_validator_with_fixed_20_40_40():
+    config = load_config()
+    config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_20_40_40
+
+    validator = SignalValidator(config)
+    meta = SourceMetadata(chat_id=12345, message_id=1, telegram_timestamp=datetime.utcnow())
+    parsed = ParsedSignal(
+        signal_id="sig_tp_20_40_40",
+        metadata=meta,
+        symbol_raw="BTC/USDT",
+        symbol_candidate="BTCUSDT",
+        side=PositionSide.LONG,
+        entries=[Decimal("60000")],
+        stop_loss=Decimal("58000"),
+        take_profits=[Decimal("62000"), Decimal("64000"), Decimal("68000")],
+        validation_status=SignalState.PARSED,
+    )
+
+    _, validated = validator.validate_and_resolve(parsed)
+    assert validated is not None
+    assert len(validated.take_profits) == 3
+    assert validated.take_profits[0][1] == Decimal("0.200")
+    assert validated.take_profits[1][1] == Decimal("0.400")
+    assert validated.take_profits[2][1] == Decimal("0.400")
+    assert validated.is_breakeven_after_tp1 is True
+
+
 def test_validator_with_custom_tp1_ratio():
     config = load_config()
     config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.CUSTOM_TP1_RATIO

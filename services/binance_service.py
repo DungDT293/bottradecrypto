@@ -81,60 +81,44 @@ class BinanceService:
         live_api_key: Optional[str] = None,
         live_api_secret: Optional[str] = None,
     ) -> Dict[str, Any]:
-        import os
+        # Credentials stay in process/secret-store layer; never persist plaintext .env/YAML.
         if testnet_api_key is not None:
             self.config.binance.testnet_api_key = testnet_api_key.strip()
-            os.environ["BINANCE_TESTNET_API_KEY"] = testnet_api_key.strip()
         if testnet_api_secret is not None:
             self.config.binance.testnet_api_secret = testnet_api_secret.strip()
-            os.environ["BINANCE_TESTNET_API_SECRET"] = testnet_api_secret.strip()
         if live_api_key is not None:
             self.config.binance.live_api_key = live_api_key.strip()
-            os.environ["BINANCE_LIVE_API_KEY"] = live_api_key.strip()
         if live_api_secret is not None:
             self.config.binance.live_api_secret = live_api_secret.strip()
-            os.environ["BINANCE_LIVE_API_SECRET"] = live_api_secret.strip()
 
-        env_file = ".env"
-        lines = []
-        if os.path.exists(env_file):
-            with open(env_file, "r", encoding="utf-8") as f:
-                lines = f.readlines()
+        return self.get_credentials_status()
 
-        keys_map = {
-            "BINANCE_TESTNET_API_KEY": self.config.binance.testnet_api_key,
-            "BINANCE_TESTNET_API_SECRET": self.config.binance.testnet_api_secret,
-            "BINANCE_LIVE_API_KEY": self.config.binance.live_api_key,
-            "BINANCE_LIVE_API_SECRET": self.config.binance.live_api_secret,
-        }
+    def remove_credentials(self, target: str = "all") -> Dict[str, Any]:
 
-        found_keys = set()
-        new_lines = []
-        for line in lines:
-            updated = False
-            for k, val in keys_map.items():
-                if val is not None and (line.startswith(f"{k}=") or line.startswith(f"#{k}=")):
-                    new_lines.append(f"{k}={val}\n")
-                    found_keys.add(k)
-                    updated = True
-                    break
-            if not updated:
-                new_lines.append(line)
+        if target in ("testnet", "all"):
+            self.config.binance.testnet_api_key = None
+            self.config.binance.testnet_api_secret = None
+            # Secret store cleanup is handled by the credential provider; no plaintext env mutation.
 
-        for k, val in keys_map.items():
-            if val is not None and k not in found_keys:
-                new_lines.append(f"{k}={val}\n")
+        if target in ("live", "all"):
+            self.config.binance.live_api_key = None
+            self.config.binance.live_api_secret = None
+            # Secret store cleanup is handled by the credential provider; no plaintext env mutation.
+            if self.config.mode.value == "LIVE":
+                self.config.mode = ExecutionMode.TESTNET
 
-        with open(env_file, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
-
+        self._cached_snapshot = BinanceAccountSnapshot(
+            connected=False,
+            is_connected=False,
+            mode=self.config.mode.value,
+            error_message="Chưa cấu hình API Key.",
+        )
         return self.get_credentials_status()
 
     def has_credentials(self) -> bool:
         if self.config.mode == ExecutionMode.LIVE:
             return bool(self.config.binance.live_api_key and self.config.binance.live_api_secret)
-        else:
-            return bool(self.config.binance.testnet_api_key and self.config.binance.testnet_api_secret)
+        return bool(self.config.binance.testnet_api_key and self.config.binance.testnet_api_secret)
 
     async def test_connection(self, target_mode: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -263,8 +247,32 @@ class BinanceService:
                 # 4. Open positions
                 pos_risk = await client.get_open_positions()
 
-                # 5. Open orders
+                # 5. Open orders (Standard Limit/Market)
                 open_orders = await client._request("GET", "/fapi/v1/openOrders", signed=True)
+                if not isinstance(open_orders, list):
+                    open_orders = []
+
+                # 6. Open Algo / Conditional orders (Stop Loss)
+                try:
+                    open_algos = await client.get_open_algo_orders()
+                    if isinstance(open_algos, list):
+                        for a in open_algos:
+                            open_orders.append({
+                                "orderId": a.get("algoId"),
+                                "clientOrderId": a.get("clientAlgoId", ""),
+                                "symbol": a.get("symbol"),
+                                "side": a.get("side"),
+                                "type": f"{a.get('orderType', 'STOP_MARKET')} (ALGO)",
+                                "price": a.get("triggerPrice") or a.get("price", "0"),
+                                "origQty": a.get("quantity", "0"),
+                                "executedQty": a.get("actualQty", "0"),
+                                "status": a.get("algoStatus", "NEW"),
+                                "time": a.get("createTime"),
+                                "is_algo": True,
+                                "reduceOnly": a.get("reduceOnly", True),
+                            })
+                except Exception:
+                    pass
 
                 self._cached_snapshot = BinanceAccountSnapshot(
                     is_connected=True,
@@ -285,7 +293,10 @@ class BinanceService:
                     active_orders=open_orders,
                     last_sync=datetime.utcnow().isoformat(),
                     last_sync_utc=datetime.utcnow().isoformat(),
-                    can_trade=True,
+                    can_trade=(
+                        self.config.mode == ExecutionMode.TESTNET
+                        or (self.config.mode == ExecutionMode.LIVE and self.config.live_trading_enabled)
+                    ),
                     base_url=base_url,
                     error_message=None,
                 )

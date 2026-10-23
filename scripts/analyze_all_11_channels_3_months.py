@@ -69,7 +69,10 @@ def load_db_messages() -> Dict[int, List[Dict[str, Any]]]:
 
 async def fetch_latest_telegram_messages(existing_msgs: Dict[int, List[Dict[str, Any]]]):
     print("Checking for today's newest messages via Telethon...")
-    client = TelegramClient("data/telegram_user", 28680296, "927e2da6e7d0ec3d97a79d11cc794e46")
+    cfg = load_config()
+    if not cfg.telegram.api_id or not cfg.telegram.api_hash:
+        raise RuntimeError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in local .env")
+    client = TelegramClient("data/telegram_user", cfg.telegram.api_id, cfg.telegram.api_hash)
     await client.connect()
     if not await client.is_user_authorized():
         print("Telegram client not authorized!")

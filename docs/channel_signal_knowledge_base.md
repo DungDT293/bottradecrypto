@@ -103,26 +103,25 @@ flowchart TD
 
 ---
 
-## 4. QUY TẮC QUẢN LÝ VỐN & THIẾT LẬP AN TOÀN
+## 4. QUY TẮC QUẢN LÝ VỐN & THIẾT LẬP AN TOÀN (PHIÊN BẢN v1.3.3)
 
-1. **Chế độ Ký quỹ (Margin Mode):** Bắt buộc **ISOLATED** (Cô lập ký quỹ cho từng lệnh). Nghiêm cấm dùng Cross Margin để tránh rủi ro quét sạch tài khoản khi có biến động bất ngờ.
-2. **Tỷ lệ Rủi ro mỗi Lệnh (Risk Per Signal):** **1.5% tổng số dư tài khoản**.
-   $$\text{Kích thước Lệnh (Notional)} = \frac{\text{Số dư} \times 1.5\%}{\text{Khoảng cách SL (\%)}}$$
+1. **Chế độ Ký quỹ (Margin Mode):** Mặc định **CROSSED** kèm khống chế ký quỹ nghiêm ngặt theo phần trăm tài khoản (`target_margin_pct = 5.0%`). Hỗ trợ ISOLATED nếu người dùng cấu hình riêng.
+2. **Ký quỹ mục tiêu mỗi Lệnh (Target Margin):** **5.0% tổng số dư tài khoản** cho 5 nhóm tinh hoa (2.5% cho các nhóm phụ), giữ lại tối thiểu 75% - 80% vốn tiền mặt dự phòng.
 3. **Đòn bẩy (Leverage):**
-   - **Mặc định toàn hệ thống:** 20x (Tối đa 50x cho các lệnh có SL chặt < 1%).
-   - **Riêng Crypto Neon:** Cố định **10x** để phù hợp biên độ SL 5%.
-4. **Chiến lược Chốt Lời (Take Profit):**
-   - **TP1 (Chốt 60% vị thế):** Đạt lợi nhuận ban đầu.
-   - **TP2 (Chốt 25% vị thế):** Mở rộng lợi nhuận.
-   - **TP3 (Chốt 15% vị thế):** Giữ vị thế theo xu hướng dài (Runner).
-5. **Cơ chế Dời Lỗ Hòa Vốn (Breakeven Trailing):** Ngay khi **TP1 khớp**, bot tự động gửi lệnh Algo Stop Market dời mức cắt lỗ của toàn bộ phần vị thế còn lại về đúng điểm giá Entry (cộng thêm 0.05% phí sàn). Sau thời điểm này, vị thế nắm chắc 100% không thể lỗ.
+   - **Mặc định toàn hệ thống:** 20x (Trần tối đa 25x).
+   - **Kẹp đòn bẩy an toàn (Safe Leverage Clamp):** $\text{Safe Leverage} = \min(25, \lfloor 0.75 / \text{Khoảng cách SL} \rfloor)$, đảm bảo điểm cắt lỗ luôn cách xa điểm thanh lý tối thiểu 25% - 50%, triệt tiêu 100% rủi ro cháy tài khoản.
+4. **Chiến lược Chốt Lời (Take Profit - 35/35/30):**
+   - **TP1 (Chốt 35% vị thế):** Đút túi một phần lãi + trả phí sàn, kích hoạt dời SL về hòa vốn.
+   - **TP2 (Chốt 35% vị thế):** Trọng tâm tạo dòng tiền dương lớn.
+   - **TP3 (Chốt 30% vị thế):** Moonbag gồng sóng dài mà không chịu bất kỳ rủi ro nào.
+   - **Cơ chế gộp số dư coin lẻ (Anti-Dust):** Toàn bộ coin lẻ sau phép chia làm tròn được dồn trọn vẹn vào mốc TP cuối cùng.
+5. **Cơ chế Dời Lỗ Hòa Vốn (Kèo Bất Tử - Breakeven Trailing):** Ngay khi **TP1 khớp**, bot tự động gửi lệnh Algo Stop Market dời mức cắt lỗ của toàn bộ phần vị thế còn lại về đúng điểm giá Entry (cộng thêm 0.05% phí sàn và đệm an toàn 0.1% tick size). Sau thời điểm này, vị thế nắm chắc 100% không thể lỗ.
 
 ---
 
 ## 5. HƯỚNG DẪN VẬN HÀNH & GIÁM SÁT
 
-- **Khởi động Giao diện:** Chạy file `launch_app.bat` hoặc mở `desktop/src-tauri/target/release/app.exe`.
-- **Chế độ Testnet:** Mặc định `mode: TESTNET` với API key sàn cấp để theo dõi và tích lũy dữ liệu thực tế.
-- **Xem Dữ liệu Phân loại Chi tiết:** File JSON lưu trữ kết quả phân loại 6 tháng tại `data/all_9_channels_6_months_classified.json`.
-- **Kiểm thử Hệ thống:** Chạy `pytest tests/ -v` (76/76 bài test tự động bảo đảm chuẩn mực mã nguồn).
+- **Khởi động Giao diện:** Chạy file `launch_app.bat` hoặc cài đặt qua file `telegram-binance-signal-executor_1.3.3_x64-setup.exe`.
+- **Chế độ Live/Testnet:** Chuyển đổi linh hoạt trong mục Cài đặt.
+- **Kiểm thử Toàn diện:** Chạy `pytest tests/ -v` (120/120 bài test tự động bảo đảm 100% chuẩn mực mã nguồn).
 

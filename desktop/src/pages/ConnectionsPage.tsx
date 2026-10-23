@@ -17,7 +17,9 @@ import {
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
+import { wsClient } from "../services/websocket";
 import { ApiGuideModal } from "../components/ApiGuideModal";
+import { AITraderCard } from "../components/AITraderCard";
 import type { TelegramProfile, TelegramCredentialsStatus, AutoJoinResponse } from "../types/api";
 
 export type TelegramLoginState =
@@ -71,11 +73,6 @@ export const ConnectionsPage: React.FC = () => {
     live_api_key_masked: string | null;
     mode: string;
   } | null>(null);
-  const [showBinanceConfig, setShowBinanceConfig] = useState(false);
-  const [testnetKey, setTestnetKey] = useState("");
-  const [testnetSecret, setTestnetSecret] = useState("");
-  const [savingBinanceCreds, setSavingBinanceCreds] = useState(false);
-
   // Binance Live state
   const [showLiveBinanceConfig, setShowLiveBinanceConfig] = useState(false);
   const [liveKey, setLiveKey] = useState("");
@@ -85,9 +82,34 @@ export const ConnectionsPage: React.FC = () => {
   // Auto-Join 5 Elite Channels state
   const [autoJoining, setAutoJoining] = useState(false);
   const [autoJoinResult, setAutoJoinResult] = useState<AutoJoinResponse | null>(null);
+  const [joinProgress, setJoinProgress] = useState<{
+    current: number;
+    total: number;
+    channel_name: string;
+    delay_seconds: number;
+    message: string;
+    status: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const unsub = wsClient.subscribe((event) => {
+      if (event.event_type === "task_progress" && event.payload?.task === "AUTO_JOIN_ELITE") {
+        setJoinProgress({
+          current: event.payload.current,
+          total: event.payload.total,
+          channel_name: event.payload.channel_name,
+          delay_seconds: event.payload.delay_seconds,
+          message: event.payload.message,
+          status: event.payload.status,
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
 
   const handleAutoJoinElite = async () => {
     setAutoJoining(true);
+    setJoinProgress(null);
     try {
       const res = await api.autoJoinEliteChannels();
       setAutoJoinResult(res);
@@ -101,6 +123,7 @@ export const ConnectionsPage: React.FC = () => {
       addToast(msg, "error");
     } finally {
       setAutoJoining(false);
+      setJoinProgress(null);
     }
   };
 
@@ -157,8 +180,8 @@ export const ConnectionsPage: React.FC = () => {
 
       if (bnCreds) {
         setBinanceCredStatus(bnCreds);
-        if (!bnCreds.has_testnet_credentials) {
-          setShowBinanceConfig(true);
+        if (!bnCreds.has_live_credentials) {
+          setShowLiveBinanceConfig(true);
         }
       }
 
@@ -462,31 +485,6 @@ export const ConnectionsPage: React.FC = () => {
     setInlineError(null);
   };
 
-  // Binance actions
-  const handleSaveBinanceCredentials = async () => {
-    if (!testnetKey.trim() || !testnetSecret.trim()) {
-      addToast("Vui lòng điền đầy đủ API Key và Secret Key của Testnet", "warning");
-      return;
-    }
-    setSavingBinanceCreds(true);
-    try {
-      const res = await api.updateBinanceCredentials({
-        testnet_api_key: testnetKey.trim(),
-        testnet_api_secret: testnetSecret.trim(),
-      });
-      setBinanceCredStatus(res);
-      addToast("Đã lưu khóa Binance Testnet API vào hệ thống!", "success");
-      setTestnetKey("");
-      setTestnetSecret("");
-      setShowBinanceConfig(false);
-      await handleTestBinance();
-    } catch (err: any) {
-      addToast(err?.message || "Lỗi khi lưu API Key Binance", "error");
-    } finally {
-      setSavingBinanceCreds(false);
-    }
-  };
-
   const handleSaveLiveBinanceCredentials = async () => {
     if (!liveKey.trim() || !liveSecret.trim()) {
       addToast("Vui lòng điền đầy đủ API Key và Secret Key của Binance Live", "warning");
@@ -511,17 +509,23 @@ export const ConnectionsPage: React.FC = () => {
     }
   };
 
-  const handleTestTestnetBinance = async () => {
+  const handleRemoveBinanceCredentials = async (target: "testnet" | "live") => {
+    const targetName = target === "live" ? "Live (Tài khoản thật)" : "Testnet (Demo)";
+    if (!window.confirm(`Bạn có chắc chắn muốn gỡ bỏ hoàn toàn khóa API Binance ${targetName} khỏi hệ thống không?`)) {
+      return;
+    }
     setBinanceLoading(true);
     try {
-      const res = await api.testBinanceConnection("TESTNET");
-      if (res.success) {
-        addToast(`Kết nối Testnet thành công! Số dư ví Demo: $${parseFloat(String(res.equity || 0)).toFixed(2)} USDT`, "success");
-      } else {
-        addToast(`Kiểm tra Testnet: ${res.error || res.message || "Thất bại"}`, "warning");
-      }
+      let res;
+      res = await api.updateBinanceCredentials({ live_api_key: "", live_api_secret: "" });
+      setBinanceCredStatus(res);
+      setLiveKey("");
+      setLiveSecret("");
+      setShowLiveBinanceConfig(false);
+      await refreshSnapshot();
+      addToast(`Đã gỡ bỏ khóa API Binance ${targetName} thành công.`, "success");
     } catch (err: any) {
-      addToast(err?.response?.user_message || err?.message || "Lỗi kiểm tra Testnet.", "error");
+      addToast(err?.message || `Lỗi khi gỡ bỏ API Key ${targetName}`, "error");
     } finally {
       setBinanceLoading(false);
     }
@@ -581,11 +585,32 @@ export const ConnectionsPage: React.FC = () => {
 
   return (
     <div>
-      <div style={{ marginBottom: "20px" }}>
-        <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#fff" }}>Quản lý Kết nối</h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
-          Cấu hình phiên làm việc Telegram MTProto và liên kết API sàn Binance USD-M Futures.
-        </p>
+      <div style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: "10px" }}>
+        <div>
+          <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#fff" }}>Quản lý Kết nối</h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
+            Liên kết Telegram MTProto, API Binance USD-M Futures (Tiền Thật) và Trí tuệ Nhân tạo Google Gemini AI.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <a
+            href="#gemini-section"
+            className="btn btn-primary btn-sm"
+            style={{
+              textDecoration: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "linear-gradient(135deg, #7c3aed 0%, #2563eb 100%)",
+              border: "none",
+              color: "#fff",
+              fontWeight: 600,
+            }}
+          >
+            <Sparkles size={13} />
+            <span>Kết Nối Gemini AI (Phía Dưới)</span>
+          </a>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
@@ -859,6 +884,58 @@ export const ConnectionsPage: React.FC = () => {
                     )}
                   </button>
                 </div>
+
+                {/* Progress Bar for Auto-Joining */}
+                {autoJoining && (
+                  <div
+                    style={{
+                      marginTop: "14px",
+                      padding: "12px 14px",
+                      background: "rgba(5, 150, 105, 0.12)",
+                      border: "1px solid rgba(16, 185, 129, 0.3)",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: "12px",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: "#34d399", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <RefreshCw size={13} className="spin" />
+                        {joinProgress?.message || "Đang kết nối và chuẩn bị tham gia nhóm..."}
+                      </span>
+                      <span style={{ fontWeight: 700, color: "#fff", fontSize: "11px" }}>
+                        {joinProgress ? `${joinProgress.current}/${joinProgress.total}` : "1/5"}
+                      </span>
+                    </div>
+
+                    {/* Progress Track */}
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "6px",
+                        background: "rgba(255, 255, 255, 0.1)",
+                        borderRadius: "3px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${joinProgress ? Math.min(100, Math.max(10, (joinProgress.current / joinProgress.total) * 100)) : 15}%`,
+                          background: "linear-gradient(90deg, #10b981 0%, #34d399 100%)",
+                          borderRadius: "3px",
+                          transition: "width 0.4s ease-in-out",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Results breakdown if triggered */}
                 {autoJoinResult && (
@@ -1283,127 +1360,11 @@ export const ConnectionsPage: React.FC = () => {
           <div style={{ marginTop: "16px" }}>
             <div style={{ marginBottom: "14px", fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                Endpoint: <code className="mono">{account?.base_url || (snapshot?.mode === "LIVE" ? "https://fapi.binance.com" : "https://demo-fapi.binance.com")}</code>
+                Endpoint: <code className="mono">https://fapi.binance.com</code>
               </div>
-              <span className={`badge ${snapshot?.mode === "LIVE" ? "badge-live" : "badge-shadow"}`} style={{ fontSize: "11px" }}>
-                Chế độ: {snapshot?.mode || "TESTNET"}
+              <span className="badge badge-live" style={{ fontSize: "11px" }}>
+                Chế độ: LIVE (TIỀN THẬT)
               </span>
-            </div>
-
-            {snapshot?.mode === "TESTNET" && binanceCredStatus?.has_live_credentials && (
-              <div style={{
-                background: "rgba(234, 179, 8, 0.1)",
-                border: "1px solid rgba(234, 179, 8, 0.3)",
-                borderRadius: "6px",
-                padding: "8px 12px",
-                marginBottom: "14px",
-                fontSize: "12px",
-                color: "#fde047",
-              }}>
-                💡 Bạn đã lưu Khóa Live thật. Để bot giao dịch tài khoản thật ($100), hãy chuyển sang <strong>LIVE</strong> trong trang <strong>Cài đặt</strong>.
-              </div>
-            )}
-
-            {/* Cấu hình API Key */}
-            <div style={{
-              background: "var(--bg-input)",
-              padding: "14px",
-              borderRadius: "8px",
-              marginBottom: "16px",
-              border: "1px solid var(--border-color)",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#fff", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Key size={14} color="#f3ba2f" />
-                    <span>Khóa API Testnet</span>
-                  </div>
-                  <div style={{ fontSize: "12px", marginTop: "2px" }}>
-                    {binanceCredStatus === null ? (
-                      <span style={{ color: "var(--text-muted)" }}>Đang tải cấu hình...</span>
-                    ) : binanceCredStatus.has_testnet_credentials ? (
-                      <span style={{ color: "#22c55e" }}>
-                        Đã cấu hình: <code className="mono">{binanceCredStatus.testnet_api_key_masked}</code>
-                      </span>
-                    ) : (
-                      <span style={{ color: "#eab308" }}>Chưa có API Key Testnet</span>
-                    )}
-                  </div>
-
-                </div>
-                <div style={{ display: "flex", gap: "6px" }}>
-                  {binanceCredStatus?.has_testnet_credentials && (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      style={{ padding: "5px 10px", fontSize: "11px", color: "#60a5fa", borderColor: "rgba(96, 165, 250, 0.4)" }}
-                      onClick={handleTestTestnetBinance}
-                      disabled={binanceLoading}
-                      title="Kiểm tra kết nối và số dư ví Testnet Demo"
-                    >
-                      Thử Testnet
-                    </button>
-                  )}
-                  <button
-                    className="btn btn-secondary"
-                    style={{ padding: "5px 12px", fontSize: "12px" }}
-                    onClick={() => setShowBinanceConfig(!showBinanceConfig)}
-                  >
-                    {showBinanceConfig ? "Ẩn" : binanceCredStatus?.has_testnet_credentials ? "Đổi khóa" : "Cấu hình"}
-                  </button>
-                </div>
-              </div>
-
-
-              {showBinanceConfig && (
-                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                  <div>
-                    <label style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                      BINANCE_TESTNET_API_KEY
-                    </label>
-                    <input
-                      type="text"
-                      className="input"
-                      style={{ width: "100%", fontSize: "12px" }}
-                      placeholder="Dán API Key từ testnet.binancefuture.com..."
-                      value={testnetKey}
-                      onChange={(e) => setTestnetKey(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                      BINANCE_TESTNET_API_SECRET
-                    </label>
-                    <input
-                      type="password"
-                      className="input"
-                      style={{ width: "100%", fontSize: "12px" }}
-                      placeholder="Dán API Secret Key..."
-                      value={testnetSecret}
-                      onChange={(e) => setTestnetSecret(e.target.value)}
-                    />
-                  </div>
-
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>
-                    <a
-                      href="https://testnet.binancefuture.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: "12px", color: "#60a5fa", display: "flex", alignItems: "center", gap: "4px", textDecoration: "none" }}
-                    >
-                      <ExternalLink size={12} />
-                      <span>Lấy API Key Testnet miễn phí</span>
-                    </a>
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleSaveBinanceCredentials}
-                      disabled={savingBinanceCreds || !testnetKey.trim() || !testnetSecret.trim()}
-                      style={{ padding: "6px 14px", fontSize: "12px" }}
-                    >
-                      {savingBinanceCreds ? "Đang lưu..." : "Lưu & Kiểm tra kết nối"}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Cấu hình Live API Key (Tiền thật) */}
@@ -1417,8 +1378,8 @@ export const ConnectionsPage: React.FC = () => {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: "13px", fontWeight: 600, color: "#fff", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Key size={14} color="#ef4444" />
-                    <span>Khóa API Live (Tài khoản thật Binance)</span>
+                    <Key size={14} color="#f59e0b" />
+                    <span>Khóa API Binance Futures (Tài khoản thật)</span>
                   </div>
                   <div style={{ fontSize: "12px", marginTop: "2px" }}>
                     {binanceCredStatus === null ? (
@@ -1435,15 +1396,26 @@ export const ConnectionsPage: React.FC = () => {
                 </div>
                 <div style={{ display: "flex", gap: "6px" }}>
                   {binanceCredStatus?.has_live_credentials && (
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      style={{ padding: "5px 10px", fontSize: "11px", color: "#22c55e", borderColor: "rgba(34, 197, 94, 0.4)" }}
-                      onClick={handleTestLiveBinance}
-                      disabled={binanceLoading}
-                      title="Kiểm tra kết nối và số dư ví Live Futures thật"
-                    >
-                      Thử Live API
-                    </button>
+                    <>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: "5px 10px", fontSize: "11px", color: "#22c55e", borderColor: "rgba(34, 197, 94, 0.4)" }}
+                        onClick={handleTestLiveBinance}
+                        disabled={binanceLoading}
+                        title="Kiểm tra kết nối và số dư ví Live Futures thật"
+                      >
+                        Thử Live API
+                      </button>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: "5px 10px", fontSize: "11px", color: "#f87171", borderColor: "rgba(248, 113, 113, 0.4)" }}
+                        onClick={() => handleRemoveBinanceCredentials("live")}
+                        disabled={binanceLoading}
+                        title="Gỡ bỏ hoàn toàn API Key Live khỏi máy"
+                      >
+                        Gỡ Key
+                      </button>
+                    </>
                   )}
                   <button
                     className="btn btn-secondary"
@@ -1569,6 +1541,9 @@ export const ConnectionsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Autonomous AI Quant Trader Card */}
+      <AITraderCard />
 
       {/* Interactive API Setup & Safety Guide Modal */}
       <ApiGuideModal

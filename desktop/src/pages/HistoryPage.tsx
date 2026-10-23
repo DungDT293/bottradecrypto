@@ -1,29 +1,44 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Calendar, RefreshCw } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
+import type { PnLSummary, TradeRecord } from "../types/api";
+
+const toFiniteNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const formatPnl = (value: number | null): string => {
+  if (value === null) return "Chưa có dữ liệu";
+  return `${value >= 0 ? "+$" : "-$"}${Math.abs(value).toFixed(2)}`;
+};
 
 export const HistoryPage: React.FC = () => {
   const { addToast } = useApp();
-  const [daysBack, setDaysBack] = useState<number>(7);
-  const [pnlData, setPnlData] = useState<any | null>(null);
-  const [trades, setTrades] = useState<any[]>([]);
+  const [daysBack, setDaysBack] = useState<number>(6);
+  const [pnlData, setPnlData] = useState<PnLSummary | null>(null);
+  const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<string>("ALL");
   const [loading, setLoading] = useState(false);
+  const requestId = useRef(0);
 
   const fetchHistory = async () => {
+    const currentRequestId = ++requestId.current;
     setLoading(true);
     try {
       const [pnl, tradeList] = await Promise.all([
         api.getPnL(daysBack),
-        api.getTradeHistory(100),
+        api.getTradeHistory(100, daysBack),
       ]);
+      if (currentRequestId !== requestId.current) return;
       setPnlData(pnl);
       setTrades(tradeList || []);
     } catch (err: any) {
-      addToast("Lỗi tải lịch sử giao dịch.", "error");
+      if (currentRequestId === requestId.current) addToast("Lỗi tải lịch sử giao dịch.", "error");
     } finally {
-      setLoading(false);
+      if (currentRequestId === requestId.current) setLoading(false);
     }
   };
 
@@ -31,19 +46,22 @@ export const HistoryPage: React.FC = () => {
     fetchHistory();
   }, [daysBack]);
 
-  const tradesPnl = trades.reduce((acc, tr) => acc + (parseFloat(tr.realized_pnl) || 0), 0);
-  const pnlFromApi = parseFloat(pnlData?.realized_pnl || "0");
-  const effectiveRealizedPnl = pnlFromApi !== 0 ? pnlFromApi : tradesPnl;
-  const commVal = parseFloat(pnlData?.commission || "0");
-  const fundingVal = parseFloat(pnlData?.funding_fee || "0");
-  const netPnlVal = pnlData?.net_pnl != null ? parseFloat(pnlData.net_pnl) : (effectiveRealizedPnl - commVal + fundingVal);
+  const realizedPnl = toFiniteNumber(pnlData?.realized_pnl);
+  const commission = toFiniteNumber(pnlData?.commission);
+  const funding = toFiniteNumber(pnlData?.funding_fee);
+  const netPnl = toFiniteNumber(pnlData?.net_pnl);
+  const effectiveRealizedPnl = realizedPnl ?? 0;
+  const commVal = commission ?? 0;
+  const fundingVal = funding ?? 0;
+  const netPnlVal = netPnl ?? (realizedPnl === null ? null : effectiveRealizedPnl - commVal + fundingVal);
 
-  const closedFills = trades.filter((tr) => (parseFloat(tr.realized_pnl) || 0) !== 0);
-  const winFills = trades.filter((tr) => (parseFloat(tr.realized_pnl) || 0) > 0);
-  const effectiveClosedCount = (pnlData?.total_closed_trades && pnlData.total_closed_trades > 0)
+  const tradePnls = trades.map((trade) => toFiniteNumber(trade.realized_pnl));
+  const closedFills = tradePnls.filter((pnl): pnl is number => pnl !== null && pnl !== 0);
+  const winFills = closedFills.filter((pnl) => pnl > 0);
+  const effectiveClosedCount = pnlData?.has_data
     ? pnlData.total_closed_trades
     : closedFills.length;
-  const effectiveWinRate = (pnlData && pnlData.win_rate_pct > 0)
+  const effectiveWinRate = pnlData?.has_data
     ? pnlData.win_rate_pct
     : (closedFills.length > 0 ? Math.round((winFills.length / closedFills.length) * 1000) / 10 : 0);
 
@@ -85,16 +103,16 @@ export const HistoryPage: React.FC = () => {
       <div className="card-grid">
         <div className="card">
           <div className="card-title">Realized PnL ({daysBack === 0 ? "Hôm nay" : `${daysBack + 1} ngày`})</div>
-          <div className={`card-value ${effectiveRealizedPnl >= 0 ? "text-success" : "text-danger"}`}>
-            {effectiveRealizedPnl >= 0 ? `+$${effectiveRealizedPnl.toFixed(2)}` : `-$${Math.abs(effectiveRealizedPnl).toFixed(2)}`}
+          <div className={`card-value ${realizedPnl === null ? "text-muted" : realizedPnl >= 0 ? "text-success" : "text-danger"}`}>
+            {formatPnl(realizedPnl)}
           </div>
           <div className="card-subtitle">Chưa trừ phí hoa hồng & funding</div>
         </div>
 
         <div className="card">
           <div className="card-title">Net PnL (Lãi Ròng Thực Nhận)</div>
-          <div className={`card-value ${netPnlVal >= 0 ? "text-success" : "text-danger"}`}>
-            {netPnlVal >= 0 ? `+$${netPnlVal.toFixed(2)}` : `-$${Math.abs(netPnlVal).toFixed(2)}`}
+          <div className={`card-value ${netPnlVal === null ? "text-muted" : netPnlVal >= 0 ? "text-success" : "text-danger"}`}>
+            {netPnlVal === null ? "Chưa có dữ liệu" : formatPnl(netPnlVal)}
           </div>
           <div className="card-subtitle">
             Phí sàn: -${commVal.toFixed(2)} | Funding: {fundingVal >= 0 ? `+$${fundingVal.toFixed(2)}` : `-$${Math.abs(fundingVal).toFixed(2)}`}
@@ -190,8 +208,8 @@ export const HistoryPage: React.FC = () => {
                   <td className="mono" style={{ fontWeight: 600 }}>{tr.price}</td>
                   <td className="mono">{tr.qty}</td>
                   <td className="mono" style={{ fontSize: "12px", color: "var(--text-muted)" }}>{tr.commission}</td>
-                  <td className={`mono ${tr.realized_pnl > 0 ? "text-success" : tr.realized_pnl < 0 ? "text-danger" : "text-muted"}`} style={{ fontWeight: 700 }}>
-                    {tr.realized_pnl > 0 ? `+${tr.realized_pnl.toFixed(2)}` : tr.realized_pnl < 0 ? tr.realized_pnl.toFixed(2) : "0.00"} USDT
+                  <td className={`mono ${toFiniteNumber(tr.realized_pnl) === null ? "text-muted" : toFiniteNumber(tr.realized_pnl)! > 0 ? "text-success" : toFiniteNumber(tr.realized_pnl)! < 0 ? "text-danger" : "text-muted"}`} style={{ fontWeight: 700 }}>
+                    {toFiniteNumber(tr.realized_pnl) === null ? "—" : `${toFiniteNumber(tr.realized_pnl)! >= 0 ? "+" : ""}${toFiniteNumber(tr.realized_pnl)!.toFixed(2)} USDT`}
                   </td>
                 </tr>
               ))

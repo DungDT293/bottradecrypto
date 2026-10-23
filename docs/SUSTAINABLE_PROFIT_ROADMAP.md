@@ -87,12 +87,12 @@ Chất lượng các kênh Telegram biến động theo chu kỳ. Một admin c�
 ### Trụ cột 3: Trailing Take-Profit (Khóa lãi & Gồng lãi đa tầng)
 
 #### Vấn đề:
-Hiện tại bot chốt lời cố định: TP1 chốt 60%, TP2 chốt 25%, TP3 chốt 15%. Khi thị trường có sóng tăng vọt (như QUSDT tăng từ 0.121 lên 0.136 và còn bay tiếp), nếu bán hết ở TP3 thì sẽ bỏ lỡ những siêu sóng 50% - 100%.
+Quy chuẩn chốt lời của bot theo tỷ lệ vàng: TP1 chốt 35% (đút túi một phần lãi và lập tức dời SL về Breakeven Kèo Bất Tử), TP2 chốt 35% (trọng tâm tạo dòng tiền dương lớn), TP3 chốt 30% (moonbag gồng trọn con sóng dài). Khi thị trường có sóng tăng vọt cực đại, nếu bán hết ở TP3 thì sẽ bỏ lỡ những siêu sóng 50% - 100%.
 
 #### Giải pháp kỹ thuật:
 - Sau khi giá đã cán mốc **TP1** và **TP2**:
   - Không bán hết phần còn lại ở TP3 bằng lệnh Limit cố định.
-  - Chuyển 25% khối lượng cuối cùng sang cơ chế **Trailing Stop (Kéo dừng lỗ bám theo giá)**.
+  - Chuyển 30% khối lượng cuối cùng sang cơ chế **Trailing Stop (Kéo dừng lỗ bám theo giá)**.
   - Mỗi khi giá tạo đỉnh mới cao hơn 2%, SL kéo theo sau đỉnh 1.5%.
   - Giúp vừa bảo toàn được 80% lợi nhuận chắc chắn, vừa mở rộng tiềm năng ăn trọn con sóng dài của thị trường.
 

@@ -16,6 +16,8 @@ class DatabaseManager:
     """
 
     def __init__(self, db_path: str = "./data/trading_state.db"):
+        if db_path == ":memory:":
+            raise ValueError("DatabaseManager requires a file-backed SQLite path")
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -31,6 +33,7 @@ class DatabaseManager:
 
     def _init_db(self) -> None:
         with self.get_connection() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
             conn.executescript("""
             CREATE TABLE IF NOT EXISTS messages (
                 chat_id INTEGER NOT NULL,
@@ -127,7 +130,10 @@ class DatabaseManager:
                 net_pnl TEXT NOT NULL,
                 deposits_withdrawals TEXT NOT NULL,
                 trading_halted INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                win_count INTEGER DEFAULT 0,
+                loss_count INTEGER DEFAULT 0,
+                total_trades INTEGER DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS audit_logs (
@@ -156,7 +162,148 @@ class DatabaseManager:
                 detail TEXT NOT NULL,
                 PRIMARY KEY (chat_id, message_id)
             );
+
+            CREATE TABLE IF NOT EXISTS ledger_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_key TEXT NOT NULL UNIQUE,
+                account_scope TEXT NOT NULL,
+                execution_mode TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                ingested_at TEXT NOT NULL,
+                asset TEXT NOT NULL DEFAULT 'USDT',
+                symbol TEXT,
+                signal_id TEXT,
+                client_order_id TEXT,
+                exchange_order_id TEXT,
+                exchange_trade_id TEXT,
+                income_type TEXT,
+                quantity TEXT,
+                price TEXT,
+                amount TEXT NOT NULL,
+                raw_payload_json TEXT NOT NULL,
+                FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_ledger_scope_time
+                ON ledger_events(account_scope, execution_mode, occurred_at);
+            CREATE INDEX IF NOT EXISTS ix_ledger_signal_time
+                ON ledger_events(signal_id, occurred_at);
             """)
+
+            # Existing installs may contain multiple parser rows for one Telegram message.
+            # Keep newest lifecycle row, repoint orders, then enforce canonical identity.
+            duplicate_groups = conn.execute(
+                """
+                SELECT chat_id, message_id
+                FROM signals
+                GROUP BY chat_id, message_id
+                HAVING COUNT(*) > 1
+                """
+            ).fetchall()
+            for group in duplicate_groups:
+                rows = conn.execute(
+                    """
+                    SELECT rowid, signal_id
+                    FROM signals
+                    WHERE chat_id = ? AND message_id = ?
+                    ORDER BY CASE state
+                        WHEN 'OPEN_PROTECTED' THEN 6
+                        WHEN 'PARTIALLY_FILLED' THEN 5
+                        WHEN 'ENTRY_PENDING' THEN 4
+                        WHEN 'EXITING' THEN 3
+                        WHEN 'ERROR' THEN 2
+                        WHEN 'CLOSED' THEN 1
+                        ELSE 0
+                    END DESC, updated_at DESC, rowid DESC
+                    """,
+                    (group["chat_id"], group["message_id"]),
+                ).fetchall()
+                keep_signal_id = rows[0]["signal_id"]
+                for duplicate in rows[1:]:
+                    conn.execute(
+                        "UPDATE orders SET signal_id = ? WHERE signal_id = ?",
+                        (keep_signal_id, duplicate["signal_id"]),
+                    )
+                    conn.execute("DELETE FROM signals WHERE rowid = ?", (duplicate["rowid"],))
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_signals_chat_message ON signals(chat_id, message_id)"
+            )
+            cols = [c[1] for c in conn.execute("PRAGMA table_info(daily_pnl)").fetchall()]
+            if "win_count" not in cols:
+                conn.execute("ALTER TABLE daily_pnl ADD COLUMN win_count INTEGER DEFAULT 0")
+            if "loss_count" not in cols:
+                conn.execute("ALTER TABLE daily_pnl ADD COLUMN loss_count INTEGER DEFAULT 0")
+            if "total_trades" not in cols:
+                conn.execute("ALTER TABLE daily_pnl ADD COLUMN total_trades INTEGER DEFAULT 0")
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (1, datetime.utcnow().isoformat()),
+            )
+
+    def integrity_report(self) -> Dict[str, Any]:
+        with self.get_connection() as conn:
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            foreign_keys = [dict(row) for row in conn.execute("PRAGMA foreign_key_check").fetchall()]
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            migration = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0
+            return {"integrity": integrity, "foreign_keys": foreign_keys, "user_version": version, "migration_version": migration}
+
+    def backup_to(self, destination: str) -> None:
+        Path(destination).parent.mkdir(parents=True, exist_ok=True)
+        source = self.get_connection()
+        target = sqlite3.connect(destination)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+
+
+class LedgerRepository:
+    def __init__(self, db: DatabaseManager):
+        self.db = db
+
+    def append_event(self, event: Dict[str, Any]) -> bool:
+        """Append immutable exchange/cash event; duplicate keys are idempotent."""
+        required = ("event_key", "account_scope", "execution_mode", "event_type", "source", "occurred_at", "amount", "raw_payload_json")
+        missing = [key for key in required if not event.get(key)]
+        if missing:
+            raise ValueError(f"Ledger event missing fields: {', '.join(missing)}")
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO ledger_events
+                (event_key, account_scope, execution_mode, event_type, source, occurred_at, ingested_at,
+                 asset, symbol, signal_id, client_order_id, exchange_order_id, exchange_trade_id,
+                 income_type, quantity, price, amount, raw_payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_key) DO NOTHING
+                """,
+                (
+                    event["event_key"], event["account_scope"], event["execution_mode"], event["event_type"],
+                    event["source"], event["occurred_at"], event.get("ingested_at", datetime.utcnow().isoformat()),
+                    event.get("asset", "USDT"), event.get("symbol"), event.get("signal_id"),
+                    event.get("client_order_id"), event.get("exchange_order_id"), event.get("exchange_trade_id"),
+                    event.get("income_type"), event.get("quantity"), event.get("price"),
+                    str(Decimal(str(event["amount"]))), event["raw_payload_json"],
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def get_events(self, account_scope: str, execution_mode: str, start: Optional[str] = None, end: Optional[str] = None) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM ledger_events WHERE account_scope = ? AND execution_mode = ?"
+        params: List[Any] = [account_scope, execution_mode]
+        if start is not None:
+            query += " AND occurred_at >= ?"
+            params.append(start)
+        if end is not None:
+            query += " AND occurred_at < ?"
+            params.append(end)
+        query += " ORDER BY occurred_at ASC, event_id ASC"
+        with self.db.get_connection() as conn:
+            return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
 class SignalRepository:
@@ -179,9 +326,16 @@ class SignalRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO messages
+                INSERT INTO messages
                 (chat_id, message_id, sender_id, telegram_timestamp, received_at, edit_timestamp, raw_text, normalized_text, fingerprint)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                    sender_id = excluded.sender_id,
+                    received_at = excluded.received_at,
+                    edit_timestamp = COALESCE(excluded.edit_timestamp, messages.edit_timestamp),
+                    raw_text = excluded.raw_text,
+                    normalized_text = excluded.normalized_text,
+                    fingerprint = excluded.fingerprint
                 """,
                 (
                     chat_id,
@@ -206,11 +360,25 @@ class SignalRepository:
         with self.db.get_connection() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO admin_evidence
+                INSERT INTO admin_evidence
                 (chat_id, message_id, event_timestamp, evidence_type, media_kind, exchange_claim,
                  confidence, verification_status, outcome, is_trade_fill, has_referral_promotion,
                  caption_has_result_markers, sender_id, parent_signal_id, detail)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                    event_timestamp = excluded.event_timestamp,
+                    evidence_type = excluded.evidence_type,
+                    media_kind = excluded.media_kind,
+                    exchange_claim = excluded.exchange_claim,
+                    confidence = excluded.confidence,
+                    verification_status = excluded.verification_status,
+                    outcome = excluded.outcome,
+                    is_trade_fill = excluded.is_trade_fill,
+                    has_referral_promotion = excluded.has_referral_promotion,
+                    caption_has_result_markers = excluded.caption_has_result_markers,
+                    sender_id = excluded.sender_id,
+                    parent_signal_id = excluded.parent_signal_id,
+                    detail = excluded.detail
                 """,
                 (
                     chat_id, message_id, event_timestamp.isoformat(), evidence.evidence_type,
@@ -238,12 +406,65 @@ class SignalRepository:
 
         now_str = datetime.utcnow().isoformat()
         with self.db.get_connection() as conn:
+            existing = conn.execute(
+                "SELECT signal_id, state, created_at FROM signals WHERE chat_id = ? AND message_id = ?",
+                (signal.metadata.chat_id, signal.metadata.message_id),
+            ).fetchone()
+            if existing and existing["signal_id"] != signal.signal_id:
+                signal.signal_id = existing["signal_id"]
+
             conn.execute(
                 """
-                INSERT OR REPLACE INTO signals
+                INSERT INTO signals
                 (signal_id, chat_id, message_id, symbol, side, state, entry_mode, entries_json, stop_loss, take_profits_json,
                  leverage, margin_mode, risk_pct, blocking_reason, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(signal_id) DO UPDATE SET
+                    chat_id = excluded.chat_id,
+                    message_id = excluded.message_id,
+                    symbol = excluded.symbol,
+                    side = excluded.side,
+                    state = CASE
+                        WHEN CASE signals.state
+                            WHEN 'RECEIVED' THEN 0
+                            WHEN 'PARSED' THEN 1
+                            WHEN 'NEEDS_POLICY' THEN 2
+                            WHEN 'NEEDS_REVIEW' THEN 2
+                            WHEN 'VALIDATED' THEN 3
+                            WHEN 'ENTRY_PENDING' THEN 4
+                            WHEN 'PARTIALLY_FILLED' THEN 5
+                            WHEN 'OPEN_PROTECTED' THEN 6
+                            WHEN 'EXITING' THEN 7
+                            WHEN 'REJECTED' THEN 8
+                            WHEN 'CLOSED' THEN 8
+                            WHEN 'ERROR' THEN 8
+                            ELSE -1
+                        END >= CASE excluded.state
+                            WHEN 'RECEIVED' THEN 0
+                            WHEN 'PARSED' THEN 1
+                            WHEN 'NEEDS_POLICY' THEN 2
+                            WHEN 'NEEDS_REVIEW' THEN 2
+                            WHEN 'VALIDATED' THEN 3
+                            WHEN 'ENTRY_PENDING' THEN 4
+                            WHEN 'PARTIALLY_FILLED' THEN 5
+                            WHEN 'OPEN_PROTECTED' THEN 6
+                            WHEN 'EXITING' THEN 7
+                            WHEN 'REJECTED' THEN 8
+                            WHEN 'CLOSED' THEN 8
+                            WHEN 'ERROR' THEN 8
+                            ELSE -1
+                        END THEN signals.state
+                        ELSE excluded.state
+                    END,
+                    entry_mode = excluded.entry_mode,
+                    entries_json = excluded.entries_json,
+                    stop_loss = excluded.stop_loss,
+                    take_profits_json = excluded.take_profits_json,
+                    leverage = excluded.leverage,
+                    margin_mode = excluded.margin_mode,
+                    risk_pct = excluded.risk_pct,
+                    blocking_reason = COALESCE(excluded.blocking_reason, signals.blocking_reason),
+                    updated_at = excluded.updated_at
                 """,
                 (
                     signal.signal_id,
@@ -260,18 +481,51 @@ class SignalRepository:
                     signal.margin_mode_requested.value if signal.margin_mode_requested else None,
                     None,
                     signal.blocking_reason,
-                    now_str,
+                    existing["created_at"] if existing else now_str,
                     now_str,
                 ),
             )
 
-    def update_signal_state(self, signal_id: str, new_state: SignalState, reason: Optional[str] = None) -> None:
+    def update_signal_state(
+        self,
+        signal_id: str,
+        new_state: SignalState,
+        reason: Optional[str] = None,
+        expected_current_state: Optional[SignalState] = None,
+    ) -> None:
         now_str = datetime.utcnow().isoformat()
         with self.db.get_connection() as conn:
-            conn.execute(
-                "UPDATE signals SET state = ?, blocking_reason = ?, updated_at = ? WHERE signal_id = ?",
-                (new_state.value, reason, now_str, signal_id),
+            row = conn.execute(
+                "SELECT state FROM signals WHERE signal_id = ?",
+                (signal_id,),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Signal not found: {signal_id}")
+            current_state = SignalState(row["state"])
+            if expected_current_state is not None and current_state != expected_current_state:
+                from storage.state_machine import InvalidStateTransitionError
+                raise InvalidStateTransitionError(
+                    f"Trang thai hien tai cua tin hieu '{signal_id}' da thay doi tu "
+                    f"'{expected_current_state.value}' sang '{current_state.value}'."
+                )
+            if current_state != new_state:
+                from storage.state_machine import InvalidStateTransitionError, SignalStateMachine
+                allowed = SignalStateMachine.ALLOWED_TRANSITIONS.get(current_state, set())
+                if new_state not in allowed:
+                    raise InvalidStateTransitionError(
+                        f"Khong the chuyen trang thai tin hieu tu '{current_state.value}' sang '{new_state.value}'. "
+                        f"Cac trang thai hop le: {[s.value for s in allowed]}"
+                    )
+            # Always compare-and-swap the state read above; stale writers must fail.
+            where = "signal_id = ? AND state = ?"
+            params = (new_state.value, reason, now_str, signal_id, current_state.value)
+            cursor = conn.execute(
+                f"UPDATE signals SET state = ?, blocking_reason = ?, updated_at = ? WHERE {where}",
+                params,
             )
+            if cursor.rowcount != 1:
+                from storage.state_machine import InvalidStateTransitionError
+                raise InvalidStateTransitionError(f"Trang thai tin hieu '{signal_id}' da thay doi trong luc cap nhat.")
 
     def _format_signal_row(self, row: Any) -> Optional[Dict[str, Any]]:
         if not row:
@@ -490,10 +744,33 @@ class OrderRepository:
         with self.db.get_connection() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO orders
+                INSERT INTO orders
                 (client_order_id, signal_id, symbol, side, order_type, price, quantity, trigger_price,
                  is_reduce_only, is_algo, exchange_order_id, status, filled_quantity, avg_fill_price, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(client_order_id) DO UPDATE SET
+                    signal_id = excluded.signal_id,
+                    symbol = excluded.symbol,
+                    side = excluded.side,
+                    order_type = excluded.order_type,
+                    price = excluded.price,
+                    quantity = excluded.quantity,
+                    trigger_price = excluded.trigger_price,
+                    is_reduce_only = excluded.is_reduce_only,
+                    is_algo = excluded.is_algo,
+                    exchange_order_id = COALESCE(excluded.exchange_order_id, orders.exchange_order_id),
+                    status = CASE
+                        WHEN orders.status = 'FILLED' THEN orders.status
+                        WHEN orders.status IN ('CANCELED', 'REJECTED', 'EXPIRED')
+                            AND excluded.status IN ('NEW', 'PARTIALLY_FILLED') THEN orders.status
+                        ELSE excluded.status
+                    END,
+                    filled_quantity = CASE
+                        WHEN CAST(excluded.filled_quantity AS NUMERIC) >= CAST(orders.filled_quantity AS NUMERIC)
+                        THEN excluded.filled_quantity ELSE orders.filled_quantity
+                    END,
+                    avg_fill_price = COALESCE(excluded.avg_fill_price, orders.avg_fill_price),
+                    updated_at = excluded.updated_at
                 """,
                 (
                     order.client_order_id,
@@ -521,10 +798,20 @@ class OrderRepository:
             conn.execute(
                 """
                 UPDATE orders
-                SET status = ?, filled_quantity = ?, avg_fill_price = ?, updated_at = ?
+                SET status = CASE
+                    WHEN status = 'FILLED' THEN 'FILLED'
+                    WHEN status IN ('CANCELED', 'REJECTED', 'EXPIRED') AND ? NOT IN ('CANCELED', 'REJECTED', 'EXPIRED') THEN status
+                    ELSE ?
+                END,
+                    filled_quantity = CASE
+                        WHEN CAST(filled_quantity AS REAL) > CAST(? AS REAL) THEN filled_quantity
+                        ELSE ?
+                    END,
+                    avg_fill_price = COALESCE(?, avg_fill_price),
+                    updated_at = ?
                 WHERE client_order_id = ?
                 """,
-                (status, str(filled_qty), str(avg_price) if avg_price else None, now_str, client_order_id),
+                (status, status, str(filled_qty), str(filled_qty), str(avg_price) if avg_price else None, now_str, client_order_id),
             )
 
     def get_orders_for_signal(self, signal_id: str) -> List[Order]:
@@ -565,6 +852,7 @@ class OrderRepository:
             )
 
     def cancel_open_orders_for_symbol(self, symbol: str) -> None:
+        """Legacy helper; callers must prefer signal-scoped cancellation."""
         now_str = datetime.utcnow().isoformat()
         with self.db.get_connection() as conn:
             conn.execute(
@@ -572,7 +860,9 @@ class OrderRepository:
                 UPDATE orders
                 SET status = 'CANCELED', updated_at = ?
                 WHERE symbol = ? AND status IN ('NEW', 'PARTIALLY_FILLED')
-                """,
+                  AND is_reduce_only = 0
+                """
+                ,
                 (now_str, symbol),
             )
 

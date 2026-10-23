@@ -17,6 +17,8 @@ telegram:
   session_name: "./data/telegram_user"
   # Danh sach chat_id duoc phep nhan tin hieu (dung lenh `list-chats` de lay id)
   allowed_chat_ids: []
+  # Sender IDs allowed to issue exchange-mutating admin updates
+  admin_sender_ids: []
   # Bo qua tin nhan cu hon N giay khi ket noi lai
   reconnect_max_backlog_seconds: 300
   # Bo qua tin co noi dung chua command / code / link doc hai

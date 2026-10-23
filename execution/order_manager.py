@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config.config import AppConfig
 from core.enums import OrderSide, OrderType, PositionSide, SignalState
@@ -39,6 +39,18 @@ class OrderManager:
         self.config = config
 
     async def submit_entries(
+        self,
+        signal: ValidatedSignal,
+        entry_sizes: List[Tuple[Decimal, Decimal]],
+        current_market_price: Optional[Decimal] = None,
+    ) -> List[Order]:
+        try:
+            return await self._submit_entries(signal, entry_sizes, current_market_price)
+        except Exception:
+            await self.cancel_pending_entries_for_signal(signal.signal_id, signal.symbol)
+            raise
+
+    async def _submit_entries(
         self,
         signal: ValidatedSignal,
         entry_sizes: List[Tuple[Decimal, Decimal]],
@@ -99,6 +111,8 @@ class OrderManager:
                         await asyncio.sleep(attempt * 0.4)
 
                 if not resp:
+                    await self.cancel_pending_entries_for_signal(signal.signal_id, signal.symbol)
+                    self.signal_repo.update_signal_state(signal.signal_id, SignalState.ERROR, "Không thể đặt toàn bộ lệnh Entry breakout")
                     raise last_err or ExchangeAdapterError(f"Khong the dat lenh Breakout {signal.symbol} sau 3 lan thu")
 
                 order.exchange_order_id = str(resp.get("algoId"))
@@ -137,6 +151,8 @@ class OrderManager:
                         await asyncio.sleep(attempt * 0.4)
 
                 if not resp:
+                    await self.cancel_pending_entries_for_signal(signal.signal_id, signal.symbol)
+                    self.signal_repo.update_signal_state(signal.signal_id, SignalState.ERROR, "Không thể đặt toàn bộ lệnh Entry")
                     raise last_err or ExchangeAdapterError(f"Khong the dat lenh {signal.symbol} sau 3 lan thu")
 
                 order.exchange_order_id = str(resp.get("orderId"))
@@ -158,7 +174,14 @@ class OrderManager:
         If SL placement fails, triggers FAIL-SAFE emergency close.
         """
         sl_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
-        sl_cid = f"sl_{signal.signal_id[:10]}_{uuid.uuid4().hex[:4]}"
+        sl_cid = f"sl_{signal.signal_id[:20]}_protected"
+
+        # Reuse current protection when it already covers this fill; retries must be idempotent.
+        existing_orders = self.order_repo.get_orders_for_signal(signal.signal_id)
+        for existing in existing_orders:
+            if existing.is_algo and existing.is_reduce_only and existing.status in ("NEW", "PARTIALLY_FILLED"):
+                if existing.quantity >= filled_qty and existing.trigger_price == signal.stop_loss:
+                    return existing
 
         sl_price = signal.stop_loss
         if hasattr(self.client, "get_symbol_filter"):
@@ -222,21 +245,41 @@ class OrderManager:
 
         # Place Take Profit Limit Orders (Reduce-Only) on Binance
         tp_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
+        symbol_filter = None
+        if hasattr(self.client, "get_symbol_filter"):
+            try:
+                symbol_filter = await self.client.get_symbol_filter(signal.symbol)
+            except Exception:
+                pass
+
+        total_tps = len(signal.take_profits)
+        accumulated_tp_qty = Decimal("0")
+        placed_tp_orders: List[Order] = []
+
         for idx, (tp_price, tp_weight) in enumerate(signal.take_profits):
-            tp_qty = filled_qty * tp_weight
-            if hasattr(self.client, "get_symbol_filter"):
-                try:
-                    f = await self.client.get_symbol_filter(signal.symbol)
-                    tp_qty = (tp_qty // f.step_size) * f.step_size
-                    tp_price = (tp_price // f.tick_size) * f.tick_size
-                    if tp_qty < f.min_qty:
+            is_last_tp = (idx == total_tps - 1)
+            if is_last_tp:
+                tp_qty = filled_qty - accumulated_tp_qty
+            else:
+                tp_qty = filled_qty * tp_weight
+
+            if symbol_filter:
+                f = symbol_filter
+                tp_qty = (tp_qty // f.step_size) * f.step_size
+                tp_price = (tp_price // f.tick_size) * f.tick_size
+                if tp_qty < f.min_qty:
+                    if is_last_tp and (filled_qty - accumulated_tp_qty) >= f.min_qty:
+                        residual = filled_qty - accumulated_tp_qty
+                        tp_qty = (residual // f.step_size) * f.step_size
+                    else:
                         continue
-                except Exception:
-                    pass
+
             if tp_qty <= Decimal("0"):
                 continue
 
-            tp_cid = f"tp_{signal.signal_id[:8]}_{idx+1}_{uuid.uuid4().hex[:4]}"
+            accumulated_tp_qty += tp_qty
+
+            tp_cid = f"tp_{signal.signal_id[:20]}_{idx+1}"
             tp_order = Order(
                 client_order_id=tp_cid,
                 signal_id=signal.signal_id,
@@ -262,9 +305,42 @@ class OrderManager:
                 )
                 tp_order.exchange_order_id = str(resp.get("orderId"))
                 self.order_repo.save_order(tp_order)
+                placed_tp_orders.append(tp_order)
             except Exception as e:
-                print(f"[CANH BAO] Khong the gui lenh TP{idx+1} ({tp_price}) len san: {e}")
+                tp_order.status = "REJECTED"
+                self.order_repo.save_order(tp_order)
+                for placed_tp in placed_tp_orders:
+                    try:
+                        await self.client.cancel_standard_order(signal.symbol, placed_tp.client_order_id)
+                        self.order_repo.update_order_fill(placed_tp.client_order_id, "CANCELED", placed_tp.filled_quantity, placed_tp.avg_fill_price)
+                    except Exception:
+                        pass
+                try:
+                    await self.client.cancel_algo_order(signal.symbol, client_algo_id=sl_order.client_order_id)
+                    self.order_repo.update_order_fill(sl_order.client_order_id, "CANCELED", sl_order.filled_quantity, sl_order.avg_fill_price)
+                except Exception:
+                    pass
+                await self.position_manager.execute_emergency_close(
+                    symbol=signal.symbol,
+                    quantity=filled_qty,
+                    side=signal.side,
+                    signal_id=signal.signal_id,
+                )
+                raise EmergencyCloseError(f"Khong the dat TP{idx+1} ({tp_price}); da huy bao ve va dong vi the: {e}")
 
+        if len(placed_tp_orders) != total_tps:
+            try:
+                await self.client.cancel_algo_order(signal.symbol, client_algo_id=sl_order.client_order_id)
+                self.order_repo.update_order_fill(sl_order.client_order_id, "CANCELED", sl_order.filled_quantity, sl_order.avg_fill_price)
+            except Exception:
+                pass
+            await self.position_manager.execute_emergency_close(
+                symbol=signal.symbol,
+                quantity=filled_qty,
+                side=signal.side,
+                signal_id=signal.signal_id,
+            )
+            raise EmergencyCloseError("TP coverage incomplete; da kich hoat fail-safe dong vi the")
         self.signal_repo.update_signal_state(signal.signal_id, SignalState.OPEN_PROTECTED)
         return sl_order
 
@@ -298,9 +374,6 @@ class OrderManager:
         2. Submits new BE Algo SL
         3. Once confirmed, cancels old SL
         """
-        # Cancel remaining pending entries
-        await self.cancel_pending_entries_for_signal(signal.signal_id, signal.symbol)
-
         # Calculate BE price including fee buffer
         fee_mult = self.config.risk.fee_buffer_pct / Decimal("100")
         if signal.side == PositionSide.LONG:
@@ -309,7 +382,7 @@ class OrderManager:
             be_price = avg_entry_price * (Decimal("1.0") - fee_mult)
 
         sl_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
-        new_sl_cid = f"be_{signal.signal_id[:10]}_{uuid.uuid4().hex[:4]}"
+        new_sl_cid = f"be_{signal.signal_id[:20]}"
 
         if hasattr(self.client, "get_symbol_filter"):
             try:
@@ -318,15 +391,15 @@ class OrderManager:
                 position_qty = (position_qty // f.step_size) * f.step_size
 
                 # Guard against Binance -2021: Never place a Stop Loss across current mark price!
-                # Setting SL 2 ticks away from market price causes instant unwanted market exit.
+                # Setting SL too close to market price causes instant unwanted market exit.
                 pos = await self.client.get_position(signal.symbol)
                 if pos and float(pos.get("markPrice", 0)) > 0:
                     current_mark = Decimal(str(pos.get("markPrice")))
-                    if signal.side == PositionSide.LONG and be_price >= current_mark:
-                        print(f"[HOAN DOI SL BREAKEVEN] Gia thi truong ({current_mark}) <= gia BE ({be_price}). Khong the doi SL cao hon gia thi truong. Giu nguyen SL cu.")
+                    if signal.side == PositionSide.LONG and be_price >= current_mark * Decimal("0.996"):
+                        print(f"[HOAN DOI SL BREAKEVEN] Gia thi truong ({current_mark}) qua sat/duoi gia BE ({be_price}). Khong the doi SL sat thi truong de tranh loi -2021 va tranh bi quet som. Giu nguyen SL cu.")
                         return None
-                    elif signal.side == PositionSide.SHORT and be_price <= current_mark:
-                        print(f"[HOAN DOI SL BREAKEVEN] Gia thi truong ({current_mark}) >= gia BE ({be_price}). Khong the doi SL thap hon gia thi truong. Giu nguyen SL cu.")
+                    elif signal.side == PositionSide.SHORT and be_price <= current_mark * Decimal("1.004"):
+                        print(f"[HOAN DOI SL BREAKEVEN] Gia thi truong ({current_mark}) qua sat/tren gia BE ({be_price}). Khong the doi SL sat thi truong de tranh loi -2021 va tranh bi quet som. Giu nguyen SL cu.")
                         return None
             except Exception:
                 pass
@@ -357,12 +430,82 @@ class OrderManager:
         new_sl.exchange_order_id = str(resp.get("algoId"))
         self.order_repo.save_order(new_sl)
 
-        # Cancel old SL if provided
-        if existing_sl_algo_id:
+        # Cancel remaining pending entries once BE SL is active
+        try:
+            await self.cancel_pending_entries_for_signal(signal.signal_id, signal.symbol)
+        except Exception:
+            pass
+
+        # Cancel old SL if provided; propagate failure so caller records a discrepancy.
+        if existing_sl_algo_id and existing_sl_algo_id != new_sl_cid:
+            await self.client.cancel_algo_order(signal.symbol, client_algo_id=existing_sl_algo_id)
+
+        return new_sl
+
+    async def move_sl_to_trailing_price(
+        self,
+        signal: ValidatedSignal,
+        position_qty: Decimal,
+        target_price: Decimal,
+        existing_sl_algo_id: Optional[str] = None,
+        label: str = "trail_tp1",
+    ) -> Optional[Order]:
+        """
+        Step-by-Step Trailing Stop Loss:
+        Locks in profit at target_price (e.g. TP1 price once TP2 is hit).
+        Submits new trailing Algo SL and cancels old BE/initial SL.
+        """
+        sl_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
+        new_sl_cid = f"{label}_{signal.signal_id[:20]}"
+        trail_price = target_price
+
+        if hasattr(self.client, "get_symbol_filter"):
             try:
-                await self.client.cancel_algo_order(signal.symbol, client_algo_id=existing_sl_algo_id)
+                f = await self.client.get_symbol_filter(signal.symbol)
+                trail_price = (trail_price // f.tick_size) * f.tick_size
+                position_qty = (position_qty // f.step_size) * f.step_size
+
+                pos = await self.client.get_position(signal.symbol)
+                if pos and float(pos.get("markPrice", 0)) > 0:
+                    current_mark = Decimal(str(pos.get("markPrice")))
+                    # Guard against Binance -2021: Never place SL on wrong side of market price!
+                    if signal.side == PositionSide.LONG and trail_price >= current_mark * Decimal("0.999"):
+                        print(f"[HOAN DOI TRAILING SL] Gia thi truong ({current_mark}) qua sat/duoi gia Trailing ({trail_price}). Giu nguyen SL cu.")
+                        return None
+                    elif signal.side == PositionSide.SHORT and trail_price <= current_mark * Decimal("1.001"):
+                        print(f"[HOAN DOI TRAILING SL] Gia thi truong ({current_mark}) qua sat/tren gia Trailing ({trail_price}). Giu nguyen SL cu.")
+                        return None
             except Exception:
                 pass
+
+        new_sl = Order(
+            client_order_id=new_sl_cid,
+            signal_id=signal.signal_id,
+            symbol=signal.symbol,
+            side=sl_side,
+            order_type=OrderType.STOP_MARKET,
+            trigger_price=trail_price,
+            quantity=position_qty,
+            is_reduce_only=True,
+            is_algo=True,
+            status="NEW",
+        )
+
+        resp = await self.client.create_algo_order(
+            symbol=signal.symbol,
+            side=sl_side,
+            order_type=OrderType.STOP_MARKET,
+            trigger_price=trail_price,
+            quantity=position_qty,
+            client_algo_id=new_sl_cid,
+            close_position=False,
+        )
+        new_sl.exchange_order_id = str(resp.get("algoId"))
+        self.order_repo.save_order(new_sl)
+
+        # Cancel old SL if provided; propagate failure so caller records a discrepancy.
+        if existing_sl_algo_id and existing_sl_algo_id != new_sl_cid:
+            await self.client.cancel_algo_order(signal.symbol, client_algo_id=existing_sl_algo_id)
 
         return new_sl
 

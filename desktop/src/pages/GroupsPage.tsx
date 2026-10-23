@@ -27,13 +27,6 @@ import { wsClient } from "../services/websocket";
 import { formatDateTime } from "../utils/date";
 import type { TelegramDialog, TelegramFolder, TelegramChannelMessage } from "../types/api";
 
-const ELITE_TOP5_CHAT_IDS = [
-  -1002007658025, // THE WOLF (CRYPTO)®
-  -1001756316676, // Boom_Boom_Billionaires
-  -1002052872813, // CRYPTO LEOPARD'S
-  -1001552004524, // CRYPTO MONK
-  -1001370457350, // Crypto Neon
-];
 
 export const GroupsPage: React.FC = () => {
   const { addToast } = useApp();
@@ -57,6 +50,14 @@ export const GroupsPage: React.FC = () => {
   // History collection state
   const [collectingChatId, setCollectingChatId] = useState<number | null>(null);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const [joinProgress, setJoinProgress] = useState<{
+    current: number;
+    total: number;
+    channel_name: string;
+    delay_seconds: number;
+    message: string;
+    status: string;
+  } | null>(null);
 
   // Channel Messages & Edit History state
   const [viewingChat, setViewingChat] = useState<{ id: number; title: string } | null>(null);
@@ -78,9 +79,7 @@ export const GroupsPage: React.FC = () => {
       const res = await api.getTelegramDialogs(forceRefresh);
       const loadedDialogs = res.dialogs || [];
       const loadedFolders = res.folders || [];
-      const loadedAllowed = (res.allowed_chat_ids || []).filter((id: number) =>
-        ELITE_TOP5_CHAT_IDS.includes(id)
-      );
+      const loadedAllowed = res.allowed_chat_ids || [];
 
       setDialogs(loadedDialogs);
       setFolders(loadedFolders);
@@ -98,11 +97,22 @@ export const GroupsPage: React.FC = () => {
 
     // Listen to progress events
     const unsub = wsClient.subscribe((event) => {
-      if (event.event_type === "task_progress" && event.payload?.task === "COLLECT_HISTORY") {
-        setProgress({
-          current: event.payload.current,
-          total: event.payload.total,
-        });
+      if (event.event_type === "task_progress") {
+        if (event.payload?.task === "COLLECT_HISTORY") {
+          setProgress({
+            current: event.payload.current,
+            total: event.payload.total,
+          });
+        } else if (event.payload?.task === "AUTO_JOIN_ELITE") {
+          setJoinProgress({
+            current: event.payload.current,
+            total: event.payload.total,
+            channel_name: event.payload.channel_name,
+            delay_seconds: event.payload.delay_seconds,
+            message: event.payload.message,
+            status: event.payload.status,
+          });
+        }
       }
     });
 
@@ -137,6 +147,7 @@ export const GroupsPage: React.FC = () => {
 
   const handleAutoJoinElite = async () => {
     setAutoJoining(true);
+    setJoinProgress(null);
     try {
       const res = await api.autoJoinEliteChannels();
       addToast(
@@ -149,6 +160,7 @@ export const GroupsPage: React.FC = () => {
       addToast(msg, "error");
     } finally {
       setAutoJoining(false);
+      setJoinProgress(null);
     }
   };
 
@@ -381,6 +393,51 @@ export const GroupsPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Auto-Join Progress Bar Banner */}
+      {autoJoining && (
+        <div
+          style={{
+            padding: "12px 16px",
+            background: "rgba(5, 150, 105, 0.12)",
+            border: "1px solid rgba(16, 185, 129, 0.35)",
+            borderRadius: "8px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
+            <span style={{ fontWeight: 600, color: "#34d399", display: "flex", alignItems: "center", gap: "8px" }}>
+              <RefreshCw size={14} className="spin" />
+              {joinProgress?.message || "Đang kết nối và chuẩn bị tham gia nhóm..."}
+            </span>
+            <span style={{ fontWeight: 700, color: "#fff", fontSize: "12px" }}>
+              {joinProgress ? `${joinProgress.current}/${joinProgress.total}` : "1/5"}
+            </span>
+          </div>
+
+          <div
+            style={{
+              width: "100%",
+              height: "6px",
+              background: "rgba(255, 255, 255, 0.1)",
+              borderRadius: "3px",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                width: `${joinProgress ? Math.min(100, Math.max(10, (joinProgress.current / joinProgress.total) * 100)) : 15}%`,
+                background: "linear-gradient(90deg, #10b981 0%, #34d399 100%)",
+                borderRadius: "3px",
+                transition: "width 0.4s ease-in-out",
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Unsaved changes notification banner */}
       {hasUnsavedChanges && (
@@ -1224,9 +1281,26 @@ export const GroupsPage: React.FC = () => {
                           </div>
 
                           {msg.blocking_reason && (
-                            <div style={{ fontSize: "11px", color: "#fca5a5", display: "flex", alignItems: "center", gap: "4px" }}>
-                              <AlertTriangle size={12} style={{ flexShrink: 0 }} />
-                              <span>Lý do bot từ chối / chặn: <strong>{msg.blocking_reason}</strong></span>
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: msg.state === "CLOSED" ? "#86efac" : "#fca5a5",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px",
+                              }}
+                            >
+                              {msg.state === "CLOSED" ? (
+                                <Check size={12} style={{ flexShrink: 0 }} />
+                              ) : (
+                                <AlertTriangle size={12} style={{ flexShrink: 0 }} />
+                              )}
+                              <span>
+                                {msg.state === "CLOSED"
+                                  ? "Trạng thái đóng lệnh:"
+                                  : "Lý do bot từ chối / chặn:"}{" "}
+                                <strong>{msg.blocking_reason}</strong>
+                              </span>
                             </div>
                           )}
                         </div>

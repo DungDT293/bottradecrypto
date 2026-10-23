@@ -1,4 +1,4 @@
-# DANH SÁCH CHÍNH SÁCH VÀ QUY TẮC XỬ LÝ (POLICY SPECIFICATIONS v1.3.1)
+# DANH SÁCH CHÍNH SÁCH VÀ QUY TẮC XỬ LÝ (POLICY SPECIFICATIONS v1.3.3)
 
 Hệ thống tuân thủ nguyên tắc cốt lõi: **Không tự đoán, không tự tiện sửa số, không giả định dữ liệu mơ hồ, triệt tiêu rủi ro thanh lý (Zero Liquidation)**.
 
@@ -38,8 +38,9 @@ Khi tín hiệu có nhiều mốc chốt lời Take Profit:
     - **Kèo 4 TP:** TP1: 35.0% | TP2: 33.2% | TP3: 19.9% | TP4: 11.9%
     - **Kèo 5 TP:** TP1: 35.0% | TP2: 29.9% | TP3: 17.9% | TP4: 10.8% | TP5: 6.4%
     - **Kèo 6 TP:** TP1: 35.0% | TP2: 28.2% | TP3: 16.9% | TP4: 10.1% | TP5: 6.1% | TP6: 3.7%
-- **Cơ chế chống tồn dư coin lẻ (Anti-Dust Protection):**
+- **Cơ chế chống tồn dư coin lẻ (Anti-Dust Protection & Remainder Preservation):**
   - Trước khi gửi lệnh Limit TP lên Binance, bot đối chiếu từng mốc với bộ lọc `LOT_SIZE` (minQty) và `MIN_NOTIONAL` của sàn.
+  - **Bảo toàn số dư khối lượng:** Mốc TP cuối cùng tự động tính bằng phần dư `filled_qty - sum(cac_tp_truoc)`, đảm bảo 100% khối lượng đã khớp đều được chốt lời trọn vẹn, triệt tiêu sự hao hụt do chia nguyên.
   - Nếu mốc TP cuối cùng có khối lượng quá nhỏ không đủ điều kiện sàn, bot tự động gộp khối lượng đó vào mốc TP liền kề trước đó.
 
 ---
@@ -52,7 +53,8 @@ Khi tín hiệu có nhiều mốc chốt lời Take Profit:
   2. Gửi lệnh `STOP_MARKET` mới với `reduceOnly=true` tại mức giá:
      $$\text{Breakeven Price} = \text{Entry} \pm (\text{Entry} \times 0.05\%)$$
      *(Dương cho lệnh Long, Âm cho lệnh Short để bù đắp toàn bộ phí taker 2 chiều).*
-  3. Sau khi lệnh SL mới được xác nhận trên server Binance, vị thế chính thức trở thành **Kèo Bất Tử** (Risk = 0, đảm bảo có lãi ròng).
+  3. **Đệm an toàn bước giá (0.1% tick_size):** Hệ thống tự động kiểm tra khoảng cách giữa giá Breakeven và giá Mark thị trường. Nếu giá thị trường quá sát, bot tạo khoảng đệm an toàn `0.1% tick_size` để triệt tiêu lỗi Binance `-2021: Order would immediately trigger`.
+  4. Sau khi lệnh SL mới được xác nhận trên server Binance, vị thế chính thức trở thành **Kèo Bất Tử** (Risk = 0, đảm bảo có lãi ròng).
 
 ---
 

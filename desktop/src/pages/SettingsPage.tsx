@@ -1,39 +1,62 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Save, ShieldCheck, Percent } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { CapitalRiskSimulator } from "../components/CapitalRiskSimulator";
 import type { AppSettings } from "../types/api";
 
+const DEFAULT_SETTINGS: AppSettings = {
+  mode: "READ_ONLY",
+  live_trading_enabled: false,
+  risk_per_signal_pct: 2.5,
+  max_daily_loss_pct: 10.0,
+  max_leverage: 25,
+  margin_mode: "CROSSED",
+  entry_range_policy: "SPLIT_2_LIMITS",
+  multi_tp_default_weight_mode: "FIXED_20_40_40",
+  tp1_target_weight_pct: 20,
+  breakeven_after_tp1: true,
+  sl_buffer_pct: 0.3,
+  max_active_signals: 15,
+};
+
+const finiteOr = (value: number | undefined, fallback: number | undefined): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : (fallback ?? 0);
+
+const normalizeSettings = (data: Partial<AppSettings>): AppSettings => ({
+  ...DEFAULT_SETTINGS,
+  ...data,
+  risk_per_signal_pct: finiteOr(data.risk_per_signal_pct, DEFAULT_SETTINGS.risk_per_signal_pct),
+  max_daily_loss_pct: finiteOr(data.max_daily_loss_pct, DEFAULT_SETTINGS.max_daily_loss_pct),
+  max_leverage: finiteOr(data.max_leverage, DEFAULT_SETTINGS.max_leverage),
+  tp1_target_weight_pct: finiteOr(data.tp1_target_weight_pct, DEFAULT_SETTINGS.tp1_target_weight_pct),
+  sl_buffer_pct: finiteOr(data.sl_buffer_pct, DEFAULT_SETTINGS.sl_buffer_pct),
+  max_active_signals: finiteOr(data.max_active_signals, DEFAULT_SETTINGS.max_active_signals),
+});
+
 export const SettingsPage: React.FC = () => {
-  const { addToast, refreshSnapshot } = useApp();
-  const [settings, setSettings] = useState<AppSettings>({
-    mode: "TESTNET",
-    live_trading_enabled: false,
-    risk_per_signal_pct: 1.5,
-    max_daily_loss_pct: 5.0,
-    max_leverage: 25,
-    margin_mode: "ISOLATED",
-    entry_range_policy: "BEST_PRICE",
-    multi_tp_default_weight_mode: "FIXED_35_35_30",
-    tp1_target_weight_pct: 35,
-    breakeven_after_tp1: true,
-    sl_buffer_pct: 1.0,
-  });
-  const [loading, setLoading] = useState(false);
+  const { addToast, refreshSnapshot, snapshot } = useApp();
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showLiveConfirmModal, setShowLiveConfirmModal] = useState(false);
+  const settingsRequestId = useRef(0);
   const [autostartEnabled, setAutostartEnabled] = useState(false);
 
   const fetchSettings = async () => {
+    const requestId = ++settingsRequestId.current;
     setLoading(true);
     try {
       const data = await api.getSettings();
-      setSettings(data);
+      if (requestId !== settingsRequestId.current) return;
+      setSettings(normalizeSettings(data));
+      setSettingsLoaded(true);
     } catch (err: any) {
-      addToast("Lỗi tải thông tin cài đặt.", "error");
+      if (requestId === settingsRequestId.current) addToast("Lỗi tải thông tin cài đặt.", "error");
     } finally {
-      setLoading(false);
+      if (requestId === settingsRequestId.current) setLoading(false);
     }
   };
 
@@ -98,11 +121,37 @@ export const SettingsPage: React.FC = () => {
   };
 
   // Dynamic TP calculation
-  const isFixed353530 = settings.multi_tp_default_weight_mode === "FIXED_35_35_30";
-  const tp1 = isFixed353530 ? 35 : Math.min(90, Math.max(10, settings.tp1_target_weight_pct ?? 35));
-  const remainder = Math.max(0, 100 - tp1);
-  const tp2 = isFixed353530 ? 35 : Math.round(remainder * 0.65 * 10) / 10;
-  const tp3 = isFixed353530 ? 30 : Math.round((remainder - tp2) * 10) / 10;
+  let tp1 = 20;
+  let tp2 = 40;
+  let tp3 = 40;
+
+  if (settings.multi_tp_default_weight_mode === "FIXED_20_40_40") {
+    tp1 = 20;
+    tp2 = 40;
+    tp3 = 40;
+  } else if (settings.multi_tp_default_weight_mode === "FIXED_35_35_30") {
+    tp1 = 35;
+    tp2 = 35;
+    tp3 = 30;
+  } else if (settings.multi_tp_default_weight_mode === "FRONT_LOADED_50_30_20") {
+    tp1 = 50;
+    tp2 = 30;
+    tp3 = 20;
+  } else if (settings.multi_tp_default_weight_mode === "EQUAL_SPLIT") {
+    tp1 = 33.3;
+    tp2 = 33.3;
+    tp3 = 33.4;
+  } else {
+    tp1 = Math.min(90, Math.max(10, settings.tp1_target_weight_pct ?? 20));
+    const rem = Math.max(0, 100 - tp1);
+    tp2 = Math.round(rem * 0.65 * 10) / 10;
+    tp3 = Math.round((rem - tp2) * 10) / 10;
+  }
+  const remainder = Math.max(0, Math.round((100 - tp1) * 10) / 10);
+
+  const liveEquityValue = snapshot?.account?.equity ?? snapshot?.account?.wallet_balance;
+  const liveEquity = liveEquityValue == null ? 0 : Number(liveEquityValue);
+  const safeLiveEquity = Number.isFinite(liveEquity) && liveEquity > 0 ? liveEquity : 0;
 
   return (
     <div>
@@ -114,7 +163,7 @@ export const SettingsPage: React.FC = () => {
           </p>
         </div>
 
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading}>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving || loading || !settingsLoaded}>
           <Save size={14} />
           <span>{saving ? "Đang lưu..." : loading ? "Đang tải..." : "Lưu Cài Đặt"}</span>
         </button>
@@ -236,6 +285,24 @@ export const SettingsPage: React.FC = () => {
               />
             </div>
 
+            <div className="form-group">
+              <label className="form-label" style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Số lệnh / vị thế tối đa cùng lúc (Max Active Signals)</span>
+                <span style={{ color: "#10b981", fontWeight: 700 }}>{settings.max_active_signals ?? 15} lệnh</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="30"
+                className="form-input mono"
+                value={settings.max_active_signals ?? 15}
+                onChange={(e) => setSettings({ ...settings, max_active_signals: parseInt(e.target.value) || 15 })}
+              />
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                Đã mở khóa giới hạn: Cho phép bot mở tối đa tới 15 vị thế đồng thời khi thị trường có nhiều kèo tiềm năng.
+              </div>
+            </div>
+
             <div className="form-group" style={{ marginTop: "14px", padding: "12px", background: "rgba(56, 189, 248, 0.05)", borderRadius: "8px", border: "1px solid rgba(56, 189, 248, 0.2)" }}>
               <label className="form-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontWeight: 600, color: "#38bdf8" }}>Đệm chống quét râu SL sàn Binance (%)</span>
@@ -251,11 +318,22 @@ export const SettingsPage: React.FC = () => {
                 onChange={(e) => setSettings({ ...settings, sl_buffer_pct: parseFloat(e.target.value) || 0 })}
               />
               <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
-                🛡️ Tự động nới khoảng cách SL ra thêm 1% so với giá Admin đưa để tránh bị râu nến Binance liếm cắn SL (Khối lượng vào lệnh sẽ được tự động co lại để giữ nguyên mức rủi ro tiền tệ).
+                Tự động nới khoảng cách SL ra thêm 1% so với giá Admin đưa để tránh bị râu nến Binance chạm SL (Khối lượng vào lệnh sẽ được tự động co lại để giữ nguyên mức rủi ro tiền tệ).
               </div>
             </div>
           </div>
         </div>
+
+        {/* Real-time Capital & Risk Projection Simulator */}
+        <CapitalRiskSimulator
+          riskPerSignalPct={settings.risk_per_signal_pct ?? 2.5}
+          maxDailyLossPct={settings.max_daily_loss_pct ?? 15.0}
+          tp1WeightPct={tp1}
+          tp2WeightPct={tp2}
+          tp3WeightPct={tp3}
+          liveEquity={safeLiveEquity}
+          onApplyRisk={(newRisk) => setSettings((prev) => ({ ...prev, risk_per_signal_pct: newRisk }))}
+        />
 
         {/* Execution Policy Card */}
         <div className="card" style={{ gridColumn: "span 2" }}>
@@ -268,16 +346,27 @@ export const SettingsPage: React.FC = () => {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "16px" }}>
             <div className="form-group">
+              <label className="form-label">Margin Mode</label>
+              <select
+                className="form-input"
+                value={settings.margin_mode}
+                onChange={(e) => setSettings({ ...settings, margin_mode: e.target.value as AppSettings["margin_mode"] })}
+              >
+                <option value="CROSSED">CROSSED</option>
+                <option value="ISOLATED">ISOLATED</option>
+              </select>
+            </div>
+
+            <div className="form-group">
               <label className="form-label">Quy tắc chọn Entry khi gặp vùng giá (Range Entry)</label>
               <select
                 className="form-input"
                 value={settings.entry_range_policy}
-                onChange={(e) => setSettings({ ...settings, entry_range_policy: e.target.value })}
+                onChange={(e) => setSettings({ ...settings, entry_range_policy: e.target.value as AppSettings["entry_range_policy"] })}
               >
+                <option value="SPLIT_2_LIMITS">SPLIT_2_LIMITS (Chia 50/50 hai đầu vùng giá - Chống lỡ tàu & Triệt tiêu Adverse Selection)</option>
                 <option value="BEST_PRICE">BEST_PRICE (Ưu tiên giá khớp tối ưu nhất cho vị thế)</option>
-                <option value="MID">MID (Giá trung bình giữa Entry 1 và Entry 2)</option>
-                <option value="MIN">MIN (Ưu tiên giá thấp nhất)</option>
-                <option value="MAX">MAX (Ưu tiên giá cao nhất)</option>
+                <option value="MID_POINT">MID_POINT (Giá trung bình giữa Entry 1 và Entry 2)</option>
               </select>
             </div>
 
@@ -287,15 +376,22 @@ export const SettingsPage: React.FC = () => {
                 className="form-input"
                 value={settings.multi_tp_default_weight_mode}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === "FIXED_35_35_30") {
+                  const val = e.target.value as AppSettings["multi_tp_default_weight_mode"];
+                  if (val === "FIXED_20_40_40") {
+                    setSettings({ ...settings, multi_tp_default_weight_mode: val, tp1_target_weight_pct: 20 });
+                  } else if (val === "FIXED_35_35_30") {
                     setSettings({ ...settings, multi_tp_default_weight_mode: val, tp1_target_weight_pct: 35 });
+                  } else if (val === "FRONT_LOADED_50_30_20") {
+                    setSettings({ ...settings, multi_tp_default_weight_mode: val, tp1_target_weight_pct: 50 });
+                  } else if (val === "EQUAL_SPLIT") {
+                    setSettings({ ...settings, multi_tp_default_weight_mode: val, tp1_target_weight_pct: 33.3 });
                   } else {
                     setSettings({ ...settings, multi_tp_default_weight_mode: val });
                   }
                 }}
               >
-                <option value="FIXED_35_35_30">CHUẨN BẢO VỆ VỐN: TP1 35% - TP2 35% - TP3 30% (Khuyến nghị)</option>
+                <option value="FIXED_20_40_40">CHUẨN TỐI ƯU LỢI NHUẬN: TP1 20% - TP2 40% - TP3 40% (Mới - Khuyến nghị)</option>
+                <option value="FIXED_35_35_30">BẢO VỆ VỐN CAO: TP1 35% - TP2 35% - TP3 30%</option>
                 <option value="CUSTOM_TP1_RATIO">CUSTOM_TP1 (Tùy chỉnh TP1 - Tự động tính TP2 & TP3 thông minh)</option>
                 <option value="EQUAL_SPLIT">EQUAL_SPLIT (Chia đều khối lượng cho tất cả các TP)</option>
                 <option value="FRONT_LOADED_50_30_20">FRONT_LOADED_50_30_20 (Cố định: TP1 50%, TP2 30%, TP3 20%)</option>
@@ -312,7 +408,7 @@ export const SettingsPage: React.FC = () => {
                   Tỷ lệ chốt lời TP1 mục tiêu (Target TP1 Allocation):
                 </span>
                 <span style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px", display: "block" }}>
-                  Kéo chỉnh tỷ lệ chốt lời tại TP1. Hệ thống tự động phân bổ thông minh phần còn lại cho TP2 & TP3.
+                  Kéo chỉnh tỷ lệ chốt lời tại TP1. Hệ thống tự động chuyển sang chế độ Tùy chỉnh (CUSTOM_TP1) và phân bổ thông minh cho TP2 & TP3.
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -323,8 +419,15 @@ export const SettingsPage: React.FC = () => {
                   step="5"
                   className="form-input mono"
                   style={{ width: "80px", textAlign: "center", fontSize: "15px", fontWeight: 700, color: "#10b981" }}
-                  value={settings.tp1_target_weight_pct ?? 60}
-                  onChange={(e) => setSettings({ ...settings, tp1_target_weight_pct: parseFloat(e.target.value) || 60 })}
+                  value={tp1}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || 20;
+                    setSettings({
+                      ...settings,
+                      multi_tp_default_weight_mode: "CUSTOM_TP1_RATIO",
+                      tp1_target_weight_pct: val,
+                    });
+                  }}
                 />
                 <span style={{ fontWeight: 700, color: "#10b981" }}>%</span>
               </div>
@@ -335,8 +438,15 @@ export const SettingsPage: React.FC = () => {
               min="10"
               max="90"
               step="5"
-              value={settings.tp1_target_weight_pct ?? 60}
-              onChange={(e) => setSettings({ ...settings, tp1_target_weight_pct: parseInt(e.target.value) || 60 })}
+              value={tp1}
+              onChange={(e) => {
+                const val = parseInt(e.target.value) || 20;
+                setSettings({
+                  ...settings,
+                  multi_tp_default_weight_mode: "CUSTOM_TP1_RATIO",
+                  tp1_target_weight_pct: val,
+                });
+              }}
               style={{ width: "100%", cursor: "pointer", accentColor: "#10b981" }}
             />
 

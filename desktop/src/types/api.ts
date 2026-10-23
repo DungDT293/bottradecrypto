@@ -121,6 +121,20 @@ export interface PnLSummary {
   last_sync_time?: string;
 }
 
+export interface TradeRecord {
+  id: string;
+  order_id?: string;
+  symbol: string;
+  side: string;
+  price: string;
+  qty: string;
+  commission?: string | null;
+  realized_pnl?: number | string | null;
+  time: string;
+  channel_name?: string | null;
+  chat_id?: number | null;
+}
+
 export interface SignalRecord {
   signal_id: string;
   chat_id: number;
@@ -133,9 +147,12 @@ export interface SignalRecord {
   stop_loss?: string;
   take_profits: string[];
   leverage: number;
-  margin_mode: string;
+  margin_mode: MarginMode;
   risk_pct: string;
+  channel_name?: string;
+  source_type?: "AI" | "TELEGRAM" | string;
   blocking_reason?: string;
+  telegram_timestamp?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -189,10 +206,16 @@ export interface PositionRecord {
   entry_price: string;
   mark_price?: string;
   unrealized_pnl?: string;
+  roe_pct?: string;
+  initial_margin?: string;
+  notional?: string;
   leverage: number;
   margin_type: string;
   sl_order_id?: string;
+  sl_price?: string;
   tp_order_ids: string[];
+  source_type?: "AI" | "TELEGRAM" | "MANUAL" | string;
+  source_label?: string;
 }
 
 export interface OrderRecord {
@@ -218,18 +241,31 @@ export interface AlertRecord {
   read: boolean;
 }
 
+export type ExecutionMode = "READ_ONLY" | "SHADOW" | "PAPER" | "TESTNET" | "LIVE";
+export type MarginMode = "ISOLATED" | "CROSSED";
+export type EntryRangePolicy = "BEST_PRICE" | "MID_POINT" | "SPLIT_2_LIMITS" | "NEEDS_POLICY";
+export type MultiTPWeightMode =
+  | "EXPLICIT"
+  | "EQUAL_SPLIT"
+  | "FRONT_LOADED_50_30_20"
+  | "FIXED_20_40_40"
+  | "FIXED_35_35_30"
+  | "CUSTOM_TP1_RATIO"
+  | "NEEDS_POLICY";
+
 export interface AppSettings {
-  mode: "READ_ONLY" | "SHADOW" | "PAPER" | "TESTNET" | "LIVE";
+  mode: ExecutionMode;
   live_trading_enabled: boolean;
   risk_per_signal_pct: number;
   max_daily_loss_pct: number;
   max_leverage: number;
-  margin_mode: string;
-  entry_range_policy: string;
-  multi_tp_default_weight_mode: string;
+  margin_mode: MarginMode;
+  entry_range_policy: EntryRangePolicy;
+  multi_tp_default_weight_mode: MultiTPWeightMode;
   tp1_target_weight_pct?: number;
   breakeven_after_tp1?: boolean;
   sl_buffer_pct?: number;
+  max_active_signals?: number;
 }
 
 export interface AppSnapshot {
@@ -342,4 +378,49 @@ export interface AutoJoinResponse {
   total_channels: number;
   message: string;
   results: AutoJoinResult[];
+}
+
+export interface AISetup {
+  has_setup: boolean;
+  symbol: string;
+  direction: "LONG" | "SHORT";
+  confidence: number;
+  bull_arguments?: string;
+  bear_arguments?: string;
+  risk_verdict?: string;
+  rationale: string;
+  entry_price: number;
+  stop_loss: number;
+  take_profit_1: number;
+  take_profit_2: number;
+  take_profit_3: number;
+  estimated_rr?: number;
+  source: string;
+}
+
+export interface AIStatusResponse {
+  enabled: boolean;
+  has_gemini_key: boolean;
+  gemini_key_masked: string | null;
+  preferred_model?: string;
+  scan_interval_minutes: number;
+  min_confidence: number;
+  watchlist: string[];
+  last_scan_time: string | null;
+  last_scan_results: AISetup[];
+  is_scanning: boolean;
+  quota_status?: string;
+  cooldown_remaining_seconds?: number;
+  daily_api_calls?: number;
+  last_scan_skipped_symbols?: string[];
+  last_scan_symbol_validation_error?: string | null;
+}
+
+export interface AIConfigPayload {
+  enabled?: boolean;
+  gemini_api_key?: string;
+  preferred_model?: string;
+  scan_interval_minutes?: number;
+  min_confidence?: number;
+  watchlist?: string[];
 }

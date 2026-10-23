@@ -1,23 +1,25 @@
 import asyncio
 import hashlib
 import re
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from telethon import TelegramClient, events
 
-from config.config import AppConfig
-from core.enums import ExecutionMode, PositionSide, SignalState, UpdateType
+from config.config import AppConfig, exchange_writes_enabled
+from core.enums import ExecutionMode, OrderSide, OrderType, PositionSide, SignalState, UpdateType
 from core.models import SourceMetadata, ValidatedSignal
 from execution.order_manager import OrderManager
 from execution.position_manager import PositionManager
+from execution.reconciliation import build_validated_signal_from_row
 from parser.normalizer import normalize_text
 from parser.signal_parser import SignalParser
 from parser.update_parser import ChannelUpdateParser
 from parser.validator import SignalValidator
 from services.channel_analytics_service import KNOWN_CHANNELS
-from services.admin_evidence import classify_media_claim, detect_media_kind
-from storage.database import DatabaseManager, SignalRepository
+from services.admin_evidence import classify_media_claim, detect_media_kind, is_brag_media_claim
+from storage.database import DatabaseManager, OrderRepository, SignalRepository
 
 try:
     from backend.events.event_bus import event_bus
@@ -59,18 +61,27 @@ class TelegramSignalListener:
         order_manager: Optional[OrderManager] = None,
         position_manager: Optional[PositionManager] = None,
         is_shadow: bool = False,
+        entry_enabled_provider: Optional[Callable[[], bool]] = None,
     ):
         self.config = config
         self.tg_client = tg_client
         self.db = db_manager
         self.signal_repo = SignalRepository(db_manager)
+        self.order_repo = OrderRepository(db_manager)
         self.parser = SignalParser()
         self.validator = SignalValidator(config)
         self.update_parser = ChannelUpdateParser()
         self.order_manager = order_manager
         self.position_manager = position_manager
         self.is_shadow = is_shadow
+        self._entry_enabled = entry_enabled_provider or (lambda: True)
         self._periodic_sync_task: Optional[asyncio.Task] = None
+        self._stop_requested = False
+
+    def _is_authorized_admin(self, event: Any) -> bool:
+        sender_id = getattr(event, "sender_id", None)
+        admin_ids = set(getattr(self.config.telegram, "admin_sender_ids", []) or [])
+        return sender_id is not None and sender_id in admin_ids
 
     def compute_fingerprint(self, text: str) -> str:
         cleaned = "".join(text.split()).lower()
@@ -84,8 +95,8 @@ class TelegramSignalListener:
 
         # 1. Check Allowlist
         allowed_chats = self.config.telegram.allowed_chat_ids
-        if allowed_chats and chat_id not in allowed_chats:
-            return  # Silently ignore channels not in allowlist
+        if not allowed_chats or chat_id not in allowed_chats:
+            return  # Empty allowlist is deny-all
 
         now_utc = datetime.now(timezone.utc)
         orig_date = getattr(event, "date", None)
@@ -96,70 +107,16 @@ class TelegramSignalListener:
         if edit_date and edit_date.tzinfo is None:
             edit_date = edit_date.replace(tzinfo=timezone.utc)
 
-        # 2. Normalize text first; media claims never enter signal execution.
+        # 2. Normalize text and inspect media attachment
         media_kind = detect_media_kind(event)
         normalized = normalize_text(raw_text)
-        if media_kind:
-            evidence = classify_media_claim(raw_text, media_kind)
-            event_time = (edit_date or orig_date or now_utc).replace(tzinfo=None)
-            version, is_valid_version, status_code = self.signal_repo.save_message_version(
-                chat_id=chat_id,
-                message_id=msg_id,
-                event_date=event_time,
-                received_at=datetime.utcnow(),
-                raw_text=raw_text,
-                normalized_text=normalized,
-                fingerprint=self.compute_fingerprint(normalized or f"media:{media_kind}"),
-                is_edit=is_edit,
-                reply_to_msg_id=reply_to_msg_id,
-            )
-            if status_code in ("DUPLICATE", "OUT_OF_ORDER"):
-                return
-            self.signal_repo.save_message(
-                chat_id=chat_id,
-                message_id=msg_id,
-                sender_id=getattr(event, "sender_id", None),
-                telegram_timestamp=(orig_date or now_utc).replace(tzinfo=None),
-                received_at=datetime.utcnow(),
-                raw_text=raw_text,
-                normalized_text=normalized,
-                fingerprint=self.compute_fingerprint(normalized or f"media:{media_kind}"),
-                edit_timestamp=edit_date.replace(tzinfo=None) if edit_date else None,
-            )
-            parent_signal_id = self.signal_repo.resolve_reply_parent(chat_id, reply_to_msg_id) if reply_to_msg_id else None
-            self.signal_repo.save_admin_evidence(
-                chat_id, msg_id, event_time, evidence,
-                sender_id=getattr(event, "sender_id", None),
-                parent_signal_id=parent_signal_id,
-            )
-            if parent_signal_id:
-                self.signal_repo.record_timeline_event(
-                    parent_signal_id,
-                    "ADMIN_MEDIA_CLAIM",
-                    evidence.detail,
-                    {"evidence_type": evidence.evidence_type, "verification_status": evidence.verification_status},
-                )
-            if event_bus:
-                try:
-                    asyncio.create_task(event_bus.publish("admin_evidence_recorded", {
-                        "chat_id": chat_id,
-                        "message_id": msg_id,
-                        "evidence_type": evidence.evidence_type,
-                        "exchange_claim": evidence.exchange_claim,
-                        "verification_status": evidence.verification_status,
-                        "is_trade_fill": False,
-                    }))
-                except Exception:
-                    pass
-            print(f"[CLAIM ONLY] Media message {msg_id}: {evidence.evidence_type}; no trade action")
-            return
 
-        if not normalized:
+        if not normalized and not media_kind:
             # Empty / deleted message content
             print(f"[THONG TIN] Tin nhan trong hoac da bi xoa. Msg ID: {msg_id}")
             return
 
-        fingerprint = self.compute_fingerprint(normalized)
+        fingerprint = self.compute_fingerprint(normalized or f"media:{media_kind}")
         event_time = (edit_date or orig_date or now_utc).replace(tzinfo=None)
 
         # Check if edit is stale before storing
@@ -203,6 +160,41 @@ class TelegramSignalListener:
             edit_timestamp=edit_date.replace(tzinfo=None) if edit_date else None,
         )
 
+        parent_signal_id = self.signal_repo.resolve_reply_parent(chat_id, reply_to_msg_id) if reply_to_msg_id else None
+
+        # 3b. Handle Media / Charts
+        if media_kind:
+            evidence = classify_media_claim(raw_text, media_kind)
+            self.signal_repo.save_admin_evidence(
+                chat_id, msg_id, event_time, evidence,
+                sender_id=getattr(event, "sender_id", None),
+                parent_signal_id=parent_signal_id,
+            )
+            if parent_signal_id:
+                self.signal_repo.record_timeline_event(
+                    parent_signal_id,
+                    "ADMIN_MEDIA_CLAIM",
+                    evidence.detail,
+                    {"evidence_type": evidence.evidence_type, "verification_status": evidence.verification_status},
+                )
+            if event_bus:
+                try:
+                    asyncio.create_task(event_bus.publish("admin_evidence_recorded", {
+                        "chat_id": chat_id,
+                        "message_id": msg_id,
+                        "evidence_type": evidence.evidence_type,
+                        "exchange_claim": evidence.exchange_claim,
+                        "verification_status": evidence.verification_status,
+                        "is_trade_fill": False,
+                    }))
+                except Exception:
+                    pass
+
+            if is_brag_media_claim(raw_text):
+                print(f"[CLAIM ONLY] Media message {msg_id}: {evidence.evidence_type}; brag / result claim, no trade action")
+                return
+            print(f"[MEDIA ATTACHED] Tin nhan {msg_id} co dinh kem hinh anh/chart ({media_kind}). Tiep tuc xu ly tin hieu.")
+
         channel_name = KNOWN_CHANNELS.get(chat_id, f"Kênh {chat_id}")
         print(f"\n[DA NHAN TIN] Nhóm: {channel_name} (ID: {chat_id}) | Msg ID: {msg_id} | v{version} {'(CHINH SUA)' if is_edit else ''}")
 
@@ -224,6 +216,33 @@ class TelegramSignalListener:
             parent_signal_id = self.signal_repo.resolve_reply_parent(chat_id, reply_to_msg_id)
 
         update_type, update_val, detail_text = self.update_parser.parse_update(normalized)
+        admin_update_types = {
+            UpdateType.CANCEL_PENDING_ENTRY,
+            UpdateType.ENTRY_CHANGE,
+            UpdateType.MOVE_SL_TO_BREAKEVEN,
+            UpdateType.CLOSE_ALL,
+            UpdateType.SL_CHANGE,
+        }
+        if update_type in admin_update_types and not self._is_authorized_admin(event):
+            if parent_signal_id:
+                self.signal_repo.record_timeline_event(
+                    parent_signal_id,
+                    "ADMIN_UPDATE_UNAUTHORIZED",
+                    f"Bỏ qua cập nhật {update_type.value} từ sender không được ủy quyền.",
+                    {"sender_id": getattr(event, "sender_id", None)},
+                )
+            print(f"[CHAN CAP NHAT ADMIN KHONG DUOC UY QUYEN] sender_id={getattr(event, 'sender_id', None)}")
+            return
+
+        if update_type in admin_update_types and (self.is_shadow or not exchange_writes_enabled(self.config)):
+            if parent_signal_id:
+                self.signal_repo.record_timeline_event(
+                    parent_signal_id,
+                    "EXCHANGE_UPDATE_BLOCKED",
+                    f"Đã chặn cập nhật sàn {update_type.value} trong chế độ {self.config.mode.value}.",
+                )
+            print(f"[CHAN CAP NHAT SAN] {update_type.value} bi chan trong che do {self.config.mode.value}.")
+            return
 
         # Handle specific update types
         if update_type == UpdateType.RESULT_TP_REPORTED:
@@ -266,6 +285,64 @@ class TelegramSignalListener:
                         print(f"[DA DOI ENTRY] Đã hủy lệnh chờ Limit cũ của kèo {symbol} theo yêu cầu đổi Entry sang {update_val}.")
                     except Exception as ex_entry_update:
                         print(f"[CANH BAO] Khong the cap nhat Entry theo tin update: {ex_entry_update}")
+
+        elif update_type == UpdateType.MOVE_SL_TO_BREAKEVEN:
+            print(f"[YEU CAU DOI SL HOA VON] {detail_text}")
+            target_signal_id = parent_signal_id or self.signal_repo.get_latest_pending_signal_id(chat_id)
+            if target_signal_id and self.order_manager:
+                sig_data = self.signal_repo.get_signal(target_signal_id)
+                if sig_data and sig_data.get("state") in (SignalState.OPEN_PROTECTED.value, SignalState.PARTIALLY_FILLED.value):
+                    symbol = sig_data["symbol"]
+                    try:
+                        pos = await self.order_manager.client.get_position(symbol)
+                        amt = Decimal(str(pos.get("positionAmt", 0))) if pos else Decimal("0")
+                        entry_p = Decimal(str(pos.get("entryPrice", 0))) if pos else Decimal("0")
+                        if amt != Decimal("0") and entry_p > Decimal("0"):
+                            val_sig = build_validated_signal_from_row(sig_data, self.config)
+                            db_orders = self.order_repo.get_orders_for_signal(target_signal_id)
+                            old_sl_id = None
+                            for o in db_orders:
+                                if o.is_algo and o.status == "NEW" and not o.client_order_id.startswith("be_"):
+                                    old_sl_id = o.client_order_id
+                                    break
+                            be_order = await self.order_manager.move_sl_to_breakeven(
+                                signal=val_sig,
+                                position_qty=abs(amt),
+                                avg_entry_price=entry_p,
+                                existing_sl_algo_id=old_sl_id,
+                            )
+                            if be_order:
+                                self.signal_repo.record_timeline_event(
+                                    target_signal_id,
+                                    "BREAKEVEN_SL_ACTIVATED",
+                                    f"Admin yêu cầu 'Move SL to BE': Đã dời SL về hòa vốn Entry ({entry_p}) + phí sàn thành công!",
+                                )
+                                print(f"[DA DOI SL VE BE] Kèo {symbol} đã được dời SL về hòa vốn {entry_p} theo tin nhắn admin.")
+                    except Exception as ex_be:
+                        print(f"[CANH BAO] Khong the doi SL ve BE theo tin update: {ex_be}")
+
+        elif update_type == UpdateType.CLOSE_ALL:
+            print(f"[YEU CAU DONG TOAN BO VI THE] {detail_text}")
+            target_signal_id = parent_signal_id or self.signal_repo.get_latest_pending_signal_id(chat_id)
+            if target_signal_id and self.order_manager:
+                sig_data = self.signal_repo.get_signal(target_signal_id)
+                if sig_data:
+                    symbol = sig_data["symbol"]
+                    try:
+                        pos = await self.order_manager.client.get_position(symbol)
+                        amt = Decimal(str(pos.get("positionAmt", 0))) if pos else Decimal("0")
+                        if amt != Decimal("0"):
+                            await self.order_manager.position_manager.execute_emergency_close(
+                                symbol=symbol,
+                                quantity=abs(amt),
+                                side=PositionSide.LONG if amt > 0 else PositionSide.SHORT,
+                                signal_id=target_signal_id,
+                            )
+                            self.signal_repo.update_signal_state(target_signal_id, SignalState.CLOSED, reason="Admin yêu cầu đóng toàn bộ vị thế")
+                            self.signal_repo.record_timeline_event(target_signal_id, "ADMIN_CLOSE_ALL", "Đã đóng toàn bộ vị thế theo lệnh Admin Telegram")
+                            print(f"[DA DONG VI THE] Đã đóng toàn bộ vị thế {symbol} theo yêu cầu admin.")
+                    except Exception as ex_close:
+                        print(f"[CANH BAO] Khong the dong vi the theo tin admin: {ex_close}")
 
         # In Shadow Mode or READ_ONLY mode: Output conditional evaluation for admin updates
         if (self.is_shadow or self.config.mode == ExecutionMode.READ_ONLY) and update_type != UpdateType.UNKNOWN:
@@ -316,7 +393,13 @@ class TelegramSignalListener:
                     new_entries = parsed.entries or []
                     if new_entries != old_entries:
                         print(f"\n[EDIT ENTRY: SUA GIA VAO KHI CHUA KHOP] Kèo {symbol}: Giá cũ {old_entries} -> Giá mới {new_entries}")
-                        if self.order_manager and self.config.mode in (ExecutionMode.TESTNET, ExecutionMode.LIVE):
+                        if not self._entry_enabled():
+                            self.signal_repo.record_timeline_event(
+                                existing_sig["signal_id"],
+                                "ENTRY_EDIT_BLOCKED_ENTRY_DISABLED",
+                                "Đã tạm dừng nhận lệnh mới; giữ nguyên lệnh Entry đang chờ.",
+                            )
+                        elif self.order_manager and exchange_writes_enabled(self.config):
                             try:
                                 await self.order_manager.cancel_pending_entries_for_signal(existing_sig["signal_id"], symbol)
                                 self.signal_repo.record_timeline_event(
@@ -382,14 +465,18 @@ class TelegramSignalListener:
                             "ACCEPT_SL_TIGHTENING",
                             f"Chap nhan siet SL tu {old_sl} ve {new_sl}",
                         )
+                        # Persist new tightened SL into DB immediately
+                        with self.signal_repo.db.get_connection() as conn:
+                            conn.execute(
+                                "UPDATE signals SET stop_loss = ?, updated_at = ? WHERE signal_id = ?",
+                                (str(new_sl), datetime.utcnow().isoformat(), existing_sig["signal_id"]),
+                            )
                         # Update SL on exchange if active
-                        if self.order_manager:
+                        if self.order_manager and exchange_writes_enabled(self.config):
                             try:
                                 pos = await self.order_manager.client.get_position(parsed.symbol_candidate)
                                 amt = Decimal(str(pos.get("positionAmt", 0))) if pos else Decimal("0")
                                 if amt != Decimal("0"):
-                                    import uuid
-                                    from core.enums import OrderSide, OrderType
                                     sl_side = OrderSide.SELL if side == PositionSide.LONG else OrderSide.BUY
                                     new_sl_cid = f"sl_{existing_sig['signal_id'][:8]}_{uuid.uuid4().hex[:4]}"
                                     resp = await self.order_manager.client.create_algo_order(
@@ -401,9 +488,14 @@ class TelegramSignalListener:
                                         client_algo_id=new_sl_cid,
                                     )
                                     old_algos = await self.order_manager.client.get_open_algo_orders(parsed.symbol_candidate)
+                                    owned_ids = {
+                                        o.client_order_id
+                                        for o in self.order_repo.get_orders_for_signal(existing_sig["signal_id"])
+                                        if o.is_algo and o.is_reduce_only and o.client_order_id != new_sl_cid
+                                    }
                                     for oa in (old_algos or []):
                                         cid = oa.get("clientAlgoId")
-                                        if cid and cid != new_sl_cid:
+                                        if cid in owned_ids:
                                             await self.order_manager.client.cancel_algo_order(parsed.symbol_candidate, client_algo_id=cid)
                                     print(f"[DA CAP NHAT SL TREN SAN] Da cap nhat SL moi ({new_sl}) thanh cong tren Binance.")
                             except Exception as ex_sl:
@@ -413,6 +505,18 @@ class TelegramSignalListener:
         # 7. Validate & Resolve Policies
         if not parsed.symbol_candidate or parsed.symbol_candidate == "UNKNOWN":
             return  # Silently skip non-signal messages (greetings, reactions, links without pair)
+
+        # Filter out obvious marketing bait, brag/result announcements, or messages without any prices
+        if parsed.validation_status == SignalState.REJECTED and any(
+            k in (parsed.blocking_reason or "").lower() for k in ["tin nhan cau keo", "bao cao ket qua", "trade result", "lua dao", "khoe lai"]
+        ):
+            print(f"[BO QUA TIN RAC / QUANG CAO] {parsed.blocking_reason} (Chat: {chat_id}, Msg: {msg_id})")
+            return
+
+        # Teaser / link bait without entries and without SL: Do not pollute signals table
+        if not parsed.entries and not parsed.stop_loss:
+            print(f"[BO QUA TIN KHONG CO GIA] Chat {chat_id} Msg {msg_id} symbol {parsed.symbol_candidate} thieu ca Entry va SL (teaser/spam). Khong ghi vao bang tin hieu.")
+            return
 
         self.signal_repo.save_signal(parsed)
         source_override = self.config.sources.get(chat_id)
@@ -464,6 +568,17 @@ class TelegramSignalListener:
                 print("=" * 60 + "\n")
             return
         elif status == SignalState.VALIDATED:
+            if not self._entry_enabled():
+                reason = "Đã tạm dừng nhận lệnh mới; tín hiệu được lưu nhưng không gửi lệnh."
+                print(f"[CHAN ENTRY] {reason}")
+                self.signal_repo.record_timeline_event(validated.signal_id, "ENTRY_DISABLED", reason)
+                return
+            if self.is_shadow or not exchange_writes_enabled(self.config):
+                reason = f"Chế độ {self.config.mode.value} không cho phép gửi lệnh sàn."
+                print(f"[CHAN MODE] {reason}")
+                self.signal_repo.record_timeline_event(validated.signal_id, "EXCHANGE_WRITE_BLOCKED", reason)
+                return
+
             # If signal arrived late: Smart viability evaluation (Admin updates + Binance market price)
             if is_stale_signal:
                 can_enter, eval_reason = await self._evaluate_late_signal_viability(
@@ -510,7 +625,7 @@ class TelegramSignalListener:
                 print("=" * 60 + "\n")
                 return
 
-            if self.order_manager and self.config.mode in (ExecutionMode.TESTNET, ExecutionMode.LIVE):
+            if self.order_manager and exchange_writes_enabled(self.config):
                 if self.config.mode == ExecutionMode.LIVE and not self.config.live_trading_enabled:
                     print(f"\n{'='*60}")
                     print(f"[CHAN LENH LIVE: GIAO DICH LIVE DANG TAT] Kèo {validated.symbol} từ '{channel_name}' bị chặn vì 'Giao dịch Live' chưa được bật.")
@@ -529,11 +644,13 @@ class TelegramSignalListener:
                     equity = await client.get_account_equity()
 
                     # 1. Fetch live open positions from Binance
-                    open_positions = []
                     try:
                         open_positions = await client.get_open_positions()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        reason = f"Không thể xác minh vị thế hiện tại: {exc}. Chặn gửi lệnh để tránh tính sai rủi ro."
+                        self.signal_repo.record_timeline_event(validated.signal_id, "POSITION_CHECK_FAILED", reason)
+                        self.signal_repo.update_signal_state(validated.signal_id, SignalState.ERROR, reason)
+                        return
 
                     # 2. Check Chart Trend & Market Context (1h EMA20 trend, 24h change, funding rate, BTC context)
                     market_ctx = {}
@@ -600,9 +717,20 @@ class TelegramSignalListener:
                             at_risk_count += 1
 
                     source_cfg = self.config.sources.get(chat_id)
-                    margin_mult = getattr(source_cfg, "margin_multiplier", 1.0) if source_cfg else 1.0
-                    is_elite_admin = (chat_id in (-1001756316676, -1002052872813, -1001754095061, -1002007658025, -1001552004524)) or (margin_mult == 1.0)
-                    max_allowed_at_risk = 4
+                    is_elite_admin = chat_id in (-1001756316676, -1002052872813, -1001754095061, -1002007658025, -1001552004524)
+                    max_allowed_at_risk = getattr(self.config.risk, "max_active_signals", 15)
+
+                    # Hard Ceiling: Tong so vi the dong thoi tren Binance khong bao gio vuot qua tran toi da (15)
+                    total_open_positions = len(open_positions)
+                    if total_open_positions >= max_allowed_at_risk:
+                        slot_reject_reason = (
+                            f"Danh mục đã đạt trần tối đa {total_open_positions}/{max_allowed_at_risk} vị thế đồng thời trên Binance. "
+                            f"Kèo {validated.symbol} từ '{channel_name}' tạm hoãn để bảo toàn ký quỹ."
+                        )
+                        print(f"\n[QUẢN LÝ TRẦN VỊ THẾ] {slot_reject_reason}\n")
+                        self.signal_repo.record_timeline_event(validated.signal_id, "MAX_CONCURRENT_POSITIONS_REACHED", slot_reject_reason)
+                        self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, slot_reject_reason)
+                        return
 
                     if at_risk_count >= max_allowed_at_risk and not is_elite_admin:
                         slot_reject_reason = (
@@ -628,6 +756,17 @@ class TelegramSignalListener:
                         )
 
                     open_risk = Decimal("0.0")
+                    for position in open_positions:
+                        position_amt = abs(Decimal(str(position.get("positionAmt", "0"))))
+                        entry_price = Decimal(str(position.get("entryPrice", "0")))
+                        active_signal_for_position = self.signal_repo.get_active_signal_for_symbol(str(position.get("symbol", "")))
+                        position_sl = (
+                            Decimal(str(active_signal_for_position.get("stop_loss", "0")))
+                            if active_signal_for_position and active_signal_for_position.get("stop_loss")
+                            else Decimal("0")
+                        )
+                        if position_amt > 0 and entry_price > 0 and position_sl > 0:
+                            open_risk += position_amt * abs(entry_price - position_sl)
 
                     ticker = await client._request("GET", "/fapi/v1/ticker/price", params={"symbol": validated.symbol})
                     current_price = Decimal(ticker.get("price", "0"))
@@ -873,9 +1012,11 @@ class TelegramSignalListener:
         self._periodic_sync_task = asyncio.create_task(self._periodic_channel_sync())
 
         try:
-            while True:
+            while not self._stop_requested:
                 try:
                     await self.tg_client.run_until_disconnected()
+                    if self._stop_requested:
+                        break
                     if not self.tg_client.is_connected():
                         print("[TELEGRAM] Mat ket noi. Dang ket noi lai sau 3 giay...")
                         await asyncio.sleep(3)
@@ -895,6 +1036,13 @@ class TelegramSignalListener:
         finally:
             if self._periodic_sync_task and not self._periodic_sync_task.done():
                 self._periodic_sync_task.cancel()
+
+    async def stop(self) -> None:
+        self._stop_requested = True
+        if self._periodic_sync_task and not self._periodic_sync_task.done():
+            self._periodic_sync_task.cancel()
+        if self.tg_client.is_connected():
+            await self.tg_client.disconnect()
 
     async def _evaluate_late_signal_viability(
         self,
@@ -1024,6 +1172,27 @@ class TelegramSignalListener:
         except Exception:
             pass
 
+    def _save_historical_message_only(self, chat_id: int, m: Any) -> None:
+        try:
+            raw_text = getattr(m, "raw_text", "") or ""
+            orig_date = getattr(m, "date", None)
+            now_utc = datetime.utcnow()
+            dt = orig_date.replace(tzinfo=None) if orig_date else now_utc
+            norm = normalize_text(raw_text)
+            fp = self.compute_fingerprint(norm)
+            self.signal_repo.save_message(
+                chat_id=chat_id,
+                message_id=m.id,
+                sender_id=getattr(m, "sender_id", None),
+                telegram_timestamp=dt,
+                received_at=now_utc,
+                raw_text=raw_text,
+                normalized_text=norm,
+                fingerprint=fp,
+            )
+        except Exception:
+            pass
+
     async def _periodic_channel_sync(self):
         """
         Periodically polls allowed channels every 60 seconds to catch:
@@ -1057,6 +1226,11 @@ class TelegramSignalListener:
                                 ).fetchone()
 
                             if not row:
+                                msg_date = m.date.replace(tzinfo=None) if getattr(m, "date", None) else datetime.utcnow()
+                                age_seconds = (datetime.utcnow() - msg_date).total_seconds()
+                                if age_seconds > 2700:  # Gửi quá 45 phút trước -> Lưu log tin nhắn, không sinh tín hiệu rác
+                                    self._save_historical_message_only(chat_id, m)
+                                    continue
                                 print(f"[PERIODIC SYNC] Phát hiện tin nhắn mới bị sót (Chat: {chat_id} | Msg #{m.id}). Đang tự động xử lý...")
                                 await self.handle_incoming_message(m, is_edit=False)
                             else:

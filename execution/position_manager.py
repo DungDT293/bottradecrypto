@@ -58,30 +58,63 @@ class PositionManager:
                 except Exception:
                     pass
 
-            # Place immediate market reduce-only order
-            await self.client.create_standard_order(
-                symbol=symbol,
-                side=close_side,
-                order_type=OrderType.MARKET,
-                quantity=quantity,
-                reduce_only=True,
-            )
+            close_qty = abs(Decimal(str(quantity)))
+            if close_qty <= Decimal("0"):
+                try:
+                    pos = await self.client.get_position(symbol)
+                    if pos:
+                        close_qty = abs(Decimal(str(pos.get("positionAmt", "0"))))
+                except Exception:
+                    pass
 
-            # Wait briefly and verify position is closed
-            await asyncio.sleep(0.5)
-            pos = await self.client.get_position(symbol)
-            if pos:
-                amt = Decimal(str(pos.get("positionAmt", "0")))
-                if amt == Decimal("0"):
-                    self.repo.update_signal_state(
-                        signal_id,
-                        SignalState.CLOSED,
-                        reason="BI CHAN: SL THAT BAI - DA DONG KHAN CAP VI THE THANH CONG",
+            if close_qty <= Decimal("0"):
+                self.repo.update_signal_state(
+                    signal_id,
+                    SignalState.CLOSED,
+                    reason="DONG KHAN CAP: Vi the da bang 0",
+                )
+                return True
+
+            filter_info = None
+            try:
+                filter_info = await self.client.get_symbol_filter(symbol)
+                if filter_info and filter_info.step_size:
+                    from risk.risk_engine import RiskEngine
+                    close_qty = RiskEngine.round_step_size(close_qty, filter_info.step_size)
+            except Exception:
+                pass
+
+            min_qty = filter_info.min_qty if filter_info and filter_info.min_qty else Decimal("0")
+            for attempt in range(3):
+                try:
+                    pos = await self.client.get_position(symbol)
+                    remaining = abs(Decimal(str(pos.get("positionAmt", "0")))) if pos else Decimal("0")
+                    if remaining <= min_qty or remaining == Decimal("0"):
+                        self.repo.update_signal_state(
+                            signal_id,
+                            SignalState.CLOSED,
+                            reason="BI CHAN: SL THAT BAI - DA DONG KHAN CAP VI THE THANH CONG",
+                        )
+                        return True
+                    close_qty = remaining
+                    if filter_info and filter_info.step_size:
+                        from risk.risk_engine import RiskEngine
+                        close_qty = RiskEngine.round_step_size(close_qty, filter_info.step_size)
+                    if close_qty <= Decimal("0"):
+                        break
+                    await self.client.create_standard_order(
+                        symbol=symbol,
+                        side=close_side,
+                        order_type=OrderType.MARKET,
+                        quantity=close_qty,
+                        client_order_id=f"emg_{signal_id[:12]}_{attempt}",
+                        reduce_only=True,
                     )
-                    return True
-                else:
-                    raise EmergencyCloseError(f"Dong vi the khan cap that bai, vi the con lai: {amt}")
-            return True
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                except Exception:
+                    if attempt == 2:
+                        raise
+            raise EmergencyCloseError(f"Dong vi the khan cap that bai, vi the con lai: {close_qty}")
         except Exception as e:
             self.repo.update_signal_state(
                 signal_id,

@@ -1,5 +1,5 @@
 # TÀI LIỆU TOÀN DIỆN VỀ KIẾN TRÚC, TÍNH NĂNG VÀ VẬN HÀNH DỰ ÁN
-## TELEGRAM BINANCE SIGNAL EXECUTOR (v1.3.1 PRO)
+## TELEGRAM BINANCE SIGNAL EXECUTOR (v1.3.3 PRO)
 
 ---
 
@@ -168,7 +168,8 @@ graph LR
 - **Thành phần:**
   - *Phần 1: Thông lượng Ingestion:* Số tin đã nhận $\to$ Đã chuẩn hóa NFKC $\to$ Nhận diện định dạng $\to$ Vượt qua kiểm tra logic $\to$ Số tin bị từ chối.
   - *Phần 2: Báo cáo Kế toán chuẩn:* Tách bạch rõ 4 đại lượng theo múi giờ `Asia/Ho_Chi_Minh` (00:00 - 24:00):
-    $$\text{Net PnL} = \text{Realized PnL} - \text{Phí Giao Dịch (Commission)} - \text{Phí Funding}$$
+    $$\text{Net PnL} = \text{Realized PnL} - \text{Phí Giao Dịch (Commission)} + \text{Phí Funding (Funding Fee)}$$
+    *(với Phí Funding mang dấu đại số âm/dương từ API Binance: giá trị dương là nhận funding, giá trị âm là trả funding).*
 - **Liên kết dữ liệu:** `/stats/pnl`, `/stats/telemetry`.
 
 ### 9. Chờ Xác Nhận / Human-In-The-Loop (`ReviewsPage.tsx`)
@@ -257,30 +258,30 @@ $$\text{Ký Quỹ Bắt Buộc (Margin \$)} = \frac{\text{Giá Trị Vị Thế}
 
 ---
 
-## 5. DANH SÁCH 8 KÊNH ĐANG HOẠT ĐỘNG & BẰNG CHỨNG LOẠI BỎ 3 KÊNH
+## 5. DANH SÁCH 5 KÊNH TINH HOA ĐANG HOẠT ĐỘNG (TOP 5 ELITE WHITELIST)
 
-Dựa trên dữ liệu thực tế thu thập từ **25,070 tin nhắn** trong vòng 6 tháng qua và đối chiếu biến động giá sàn Binance Futures 1h klines:
+Dựa trên dữ liệu thực tế thu thập từ **25.070 tin nhắn** trong vòng 6 tháng qua và kiểm chứng đối soát lệnh thực tế trên sàn Binance Futures:
 
-### Bảng Đánh Giá 8 Kênh Hoạt Động Chính Thức:
+### Bảng 5 Kênh Tinh Hoa Chính Thức Được Cấp Phép:
 
-| STT | Tên Kênh Telegram | Chat ID | Tỉ Lệ Thắng (6 Tháng) | Đòn Bẩy Quy Định | Đặc Điểm Nhận Diện & Xử Lý |
+| STT | Tên Kênh Telegram | Chat ID | Tỉ Lệ Thắng Thực Tế | Đòn Bẩy Áp Dụng | Đặc Điểm Nhận Diện & Chiến Lược |
 | :---: | :--- | :---: | :---: | :---: | :--- |
-| **1** | **CRYPTO LEOPARD'S** | `-1002052872813` | **84.6%** (33W-6L) | 20x - 50x | Kèo chất lượng cao, thường có 2 Entry và TP gạch nối. |
-| **2** | **Crypto Neon** | `-1001370457350` | **80.0%** (28W-7L) | **Cố định 10x** | Kênh hay hô 50x mạo hiểm, Bot tự ép override về 10x an toàn. |
-| **3** | **Crypto spider 🕷️ scalper** | `-1001895315984` | **78.9%** (30W-8L) | 20x - 50x | Kèo scalping nhanh, khớp TP1 rất nhanh, kích hoạt dời BE chuẩn. |
-| **4** | **THE CRYPTO TRADER** | `-1001590450482` | **63.9%** (23W-13L) | 20x | R:R tốt (1:2.02). Bắn lệnh ngắn gọn, không spam quảng cáo. |
-| **5** | **THE WOLF (CRYPTO)®** | `-1002007658025` | **56.4%** (22W-17L) | 20x | Kèo swing trung hạn, mục tiêu TP xa. |
-| **6** | **Global Crypto Research** | `-1001161683441` | **55.0%** (22W-18L) | 20x | Tỷ lệ R:R cao (1:2.12), phân tích cơ bản kết hợp kỹ thuật. |
-| **7** | **THE MASTER (CRYPTO)** | `-1002266035358` | **52.5%** (21W-19L) | 20x - 25x | Kèo dạng Entry Zone, thường kèm 3 TP và 1 SL rõ ràng. |
-| **8** | **Crypto World Updates** | `-1001652601224` | **47.5%** (19W-21L) | 20x | Lệnh có tỷ lệ SL/TP cân bằng, tần suất ổn định. |
+| **1** | **THE WOLF (CRYPTO)®** | `-1002007658025` | **65.0%** | 11x - 20x | Kèo R:R dương (1.24), TP dải gạch nối, ăn đậm sóng trung bình. |
+| **2** | **Boom_Boom_Billionaires** | `-1001756316676` | **75.0%** | 12x - 20x | Tỷ lệ chạm TP1 cực cao (75%), dời hòa vốn Kèo Bất Tử siêu tốc. |
+| **3** | **CRYPTO LEOPARD'S** | `-1002052872813` | **79.5%** | 20x - 25x | Bắt vùng giá BELOW cực tốt, tỷ lệ thắng cao nhất bảng xếp hạng. |
+| **4** | **CRYPTO MONK** | `-1001552004524` | **62.5%** | 15x - 25x | Kèo Scalp nhanh, chọn lọc kỹ; áp dụng policy `allow_buy_as_short_exception: true`. |
+| **5** | **Crypto Neon** | `-1001370457350` | **71.4%** | **Cố định 10x - 20x** | Kỷ luật thép, biên SL 5%, đòn bẩy kẹp an toàn 10x. |
 
-### Bằng Chứng Loại Bỏ Hoàn Toàn 3 Kênh Bị Chặn:
-1. **Crypto Hunters (`-1002191067035`):**
-   - *Lý do loại bỏ:* Tỷ lệ quét Stop Loss thực tế lên tới **77.5%** (chỉ thắng 9/40 kèo ngẫu nhiên). Kênh đặt SL quá sát cấu trúc nến khiến tài khoản liên tục bị cắn SL trước khi giá chạy.
-2. **ESTR - EAT SLEEP TRADE REPEAT (`-1001656921849`):**
-   - *Lý do loại bỏ:* Tỷ lệ lỗi logic SL/TP lên đến **72.7%** do người soạn tin copy nhầm template (Lệnh LONG nhưng SL đặt cao hơn giá Entry, hoặc TP đặt thấp hơn Entry).
-3. **CRYPTO MONK (`-1001552004524`):**
-   - *Lý do loại bỏ:* Tần suất tín hiệu thật quá thấp (chỉ 64 tin/3 tháng), nhưng có tới **17.2%** là tin dụ đăng ký VIP và tin mâu thuẫn SHORT/BUY trong cùng một tin.
+### Danh Mục Các Kênh Bị Loại Bỏ & Thanh Lọc Triệt Để (Blacklist):
+Toàn bộ dữ liệu của các kênh sau đã bị xóa sạch khỏi cơ sở dữ liệu và chặn vĩnh viễn:
+1. **Crypto Hunters (`-1002191067035`):** Tỷ lệ quét Stop Loss thực tế lên tới **77.5%**, liên tục giấu số liệu lỗ trên channel.
+2. **ESTR - EAT SLEEP TRADE REPEAT (`-1001656921849`):** Tỷ lệ lỗi logic SL/TP lên đến **72.7%** do copy nhầm template.
+3. **Global Crypto Research (`-1001161683441`):** Quá nhiều tin tức vĩ mô và quảng cáo làm loãng luồng tín hiệu.
+4. **Crypto spider scalper (`-1001895315984`):** Tần suất bắn quá dày, tỷ lệ quét râu nến cao.
+5. **THE MASTER (CRYPTO) (`-1002266035358`):** Vùng Entry Zone quá rộng, dễ bị trượt giá.
+6. **Crypto World Updates (`-1001652601224`):** Tần suất dày nhưng tỷ lệ R:R âm, không tối ưu cho tài khoản nhỏ.
+7. **Alpha Trade Zone (`-1001860630181`):** Cú pháp không nhất quán, giấu số liệu cắt lỗ.
+8. **Crypto Pulse Matrix® (`-1001966506182`):** Tỷ lệ tin rác và câu view cao.
 
 ---
 
@@ -327,9 +328,9 @@ Từ những quan sát trên hình ảnh thực tế của người dùng:
 - **Hiện tượng:** Khi backend khởi động lại, engine quét đối chiếu sàn phát hiện vị thế nhưng tạo thêm một lệnh Stop Loss mới trong khi lệnh cũ vẫn còn trên sàn.
 - **Khắc phục:** Nâng cấp `ReconciliationEngine` để kiểm tra danh sách `openOrders` trên Binance trước khi đặt lệnh bảo vệ, hủy lệnh mồ côi và bảo đảm duy nhất 1 lệnh Stop Loss gắn với vị thế.
 
-### Feature 10: Tự Động Phân Bổ Multi-TP (60% / 26% / 14%) & Kích Hoạt Hòa Vốn (Breakeven)
-- Phân bổ thông minh khối lượng chốt lời: TP1 chốt 60% bảo toàn lãi lớn nhất, TP2 chốt 26%, TP3 chốt 14%.
-- Ngay khi sàn khớp lệnh TP1, hệ thống tự động dời Stop Loss về giá hòa vốn (kèm bù trượt giá và phí sàn), đưa vị thế về trạng thái "Kèo Bất Tử" (Risk-Free).
+### Feature 10: Tự Động Phân Bổ Multi-TP (35% / 35% / 30% - Geometric Decay) & Kích Hoạt Hòa Vốn (Breakeven)
+- Phân bổ thông minh khối lượng chốt lời: TP1 khóa cố định 35% để đút túi lãi ban đầu và kích hoạt dời SL về hòa vốn (Kèo Bất Tử - Breakeven), 65% còn lại được phân bổ giảm dần theo luật hàm mũ (35% cho TP2, 30% cho TP3) kèm cơ chế gộp coin lẻ (Anti-Dust Remainder).
+- Ngay khi sàn khớp lệnh TP1, hệ thống tự động dời Stop Loss về giá hòa vốn (kèm bù trượt giá, phí sàn và đệm an toàn 0.1% tick size), đưa vị thế về trạng thái "Kèo Bất Tử" (Risk-Free).
 
 ### Feature 11: Đóng Gói Bộ Cài Đặt Chuẩn NSIS v1.1.7
 - Đóng gói file cài đặt tự động `telegram-binance-signal-executor_1.1.7_x64-setup.exe` trong `target/release/bundle/nsis` và thư mục gốc của dự án.
@@ -347,9 +348,9 @@ Từ những quan sát trên hình ảnh thực tế của người dùng:
 ### Feature 14: Bộ Cài Đặt Tự Động NSIS v1.1.8
 - Đóng gói bản cài đặt Windows mới nhất `telegram-binance-signal-executor_1.1.8_x64-setup.exe` tích hợp trọn vẹn toàn bộ các bản vá trên.
 
-### Feature 15: Chuyển Đổi Ký Quỹ CROSSED, Giới Hạn Margin 1.5% - 2.0% & Breakeven Tức Thì (v1.1.9)
+### Feature 15: Chuyển Đổi Ký Quỹ CROSSED, Phân Hạng Ký Quỹ 5.0% & Breakeven Tức Thì (v1.1.9 -> v1.3.2)
 - **Đồng bộ hóa Cross Margin:** Tự động gọi API `set_margin_type_cross()` để chuyển đổi margin mode sang `CROSSED` cho mọi symbol theo đúng khuyến nghị của các Admin Telegram.
-- **Dual-Constraint Position Sizing:** Tích hợp kiểm soát ký quỹ kép, vừa đảm bảo rủi ro đô la `budget_risk_amount` vừa khống chế biên ký quỹ tối đa `max_margin_per_trade_pct = 2.0%` của số dư ví. Ngăn chặn tuyệt đối tình trạng tài khoản nhỏ bị chiếm dụng margin lớn (như 10%) khi đòn bẩy sàn thấp hoặc SL sâu (-8% đến -10%).
+- **Dual-Constraint Position Sizing:** Tích hợp kiểm soát ký quỹ kép, vừa đảm bảo rủi ro đô la `budget_risk_amount` vừa áp dụng chuẩn ký quỹ mục tiêu `target_margin_pct = 5.0%` của số dư ví cho 5 nhóm tinh hoa (2.5% cho nhóm phụ). Đảm bảo luôn giữ lại ít nhất 75% - 80% vốn tiền mặt dự phòng.
 - **Nâng cấp Breakeven tức thì:** Hệ thống dời SL về Entry + phí sàn ngay khi TP1 khớp thành công trên Binance (qua cờ `tp1_reached`, trạng thái order DB hoặc kiểm tra lệnh TP1 không còn trong open orders), đảm bảo vị thế luôn được bảo vệ thành "Kèo Bất Tử" (Risk-Free).
 
 ### Feature 16: Bộ Cài Đặt Tự Động NSIS v1.1.9
@@ -365,6 +366,51 @@ Từ những quan sát trên hình ảnh thực tế của người dùng:
 ### Feature 18: Kẹp Đòn Bẩy An Toàn & Chuẩn Hóa Ký Quỹ Động (Safe Clamp & Dynamic Margin Mode)
 - **Kẹp đòn bẩy an toàn (Safe Leverage Clamp):** Tự động tính toán khoảng cách từ Entry đến SL và ép đòn bẩy tối đa theo công thức $\text{Max Safe Lev} = \text{int}(0.75 / \text{SL Distance})$. Đảm bảo điểm Cắt Lỗ (SL) luôn kích hoạt trước điểm Thanh Lý ít nhất 25% biên độ an toàn, triệt tiêu nguy cơ cháy tài khoản do thị trường đi ngược.
 - **Ký quỹ linh hoạt (Configurable Margin Mode):** Sửa lỗi ghim cứng `ISOLATED` tại `parser/validator.py`, cho phép hệ thống áp dụng chế độ `CROSSED` theo cấu hình người dùng `config.yaml` hoặc tôn trọng yêu cầu riêng từ tín hiệu admin.
+
+### Bug 19: Triệt Tiêu Lỗi Ký Hiệu Khoa Học Trên Binance Futures (_format_decimal) (v1.3.2)
+- **Hiện tượng:** Khi đặt lệnh với các cặp coin meme có giá trị siêu nhỏ ($0.00000001), Python tự động ép kiểu `str(Decimal)` thành ký hiệu khoa học dạng `1E-8` hoặc `1e-7`. Binance Futures API từ chối với lỗi `-1100 / -1111: Illegal characters`.
+- **Khắc phục:** Tích hợp hàm `_format_decimal(val)` sử dụng định dạng `f"{val:f}"` cho toàn bộ các trường `quantity`, `price`, `triggerPrice` trong `create_standard_order` và `create_algo_order`.
+
+### Bug 20: Đệm Giá An Toàn Khi Dời Breakeven (0.1% Tick Size Buffer) (v1.3.2)
+- **Hiện tượng:** Khi TP1 vừa khớp, giá thị trường đôi khi hồi về rất sát giá Entry. Lệnh dời SL về hòa vốn bị Binance từ chối với mã lỗi `-2021: Order would immediately trigger`.
+- **Khắc phục:** Bổ sung đệm giá an toàn `0.1% tick_size` giữa giá Breakeven và giá Mark thị trường hiện tại, đảm bảo lệnh dời SL luôn được Binance chấp thuận 100%.
+
+### Bug 21: Bảo Toàn Số Dư Khối Lượng TP Cuối (Anti-Dust Remainder Preservation) (v1.3.2)
+- **Hiện tượng:** Phép chia làm tròn `round_step_size` khi chia khối lượng cho 3-6 mốc TP làm hao hụt một lượng nhỏ coin lẻ ở mốc TP cuối cùng.
+- **Khắc phục:** Mốc TP cuối cùng tự động tính toán theo công thức phần dư `filled_qty - accumulated_tp_qty`, đảm bảo 100% khối lượng đã khớp đều được chốt lời trọn vẹn.
+
+### Bug 22: Cờ Bảo Vệ Tiến Trình Đối Soát Lệnh (Reconciliation Glitch Guard) (v1.3.2)
+- **Hiện tượng:** Khi mạng internet hoặc API Binance bị lag tạm thời, hàm `get_open_algo_orders()` trả về danh sách rỗng. Hệ thống đối soát có nguy cơ hiểu nhầm là đã mất SL và tiến hành hủy nhầm lệnh hoặc đặt thừa thêm SL mới.
+- **Khắc phục:** Thiết lập cờ `fetch_algos_success`. Hệ thống chỉ thực hiện điều chỉnh hoặc đồng bộ khi và chỉ khi API Binance phản hồi thành công và trả về dữ liệu nguyên vẹn.
+
+### Feature 23: Làm Tròn Bước Giá Khi Đóng Khẩn Cấp (Emergency Close Step Size Rounding) (v1.3.2)
+- Tích hợp `RiskEngine.round_step_size()` và kiểm tra khối lượng tối thiểu (`min_qty dust`) trong `execute_emergency_close`, đảm bảo lệnh Market cắt lỗ khẩn cấp không bao giờ bị Binance từ chối do sai `LOT_SIZE`.
+
+### Feature 24: Nhận Diện Nâng Cao Cú Pháp Telegram & Chính Sách Admin (v1.3.2)
+- Bổ sung regex nhận diện các cập nhật: `kèo bất tử`, `risk free`, `close 1/2`, `close half`, `chốt nửa`.
+- Hỗ trợ bóc tách mẫu `Entry Zone:` nhiều dòng (cho Boom_Boom_Billionaires) và vùng giá đơn `BELOW (0.0028)` (cho CRYPTO LEOPARD'S).
+- Kích hoạt chính sách `allow_buy_as_short_exception: true` cho kênh CRYPTO MONK xử lý hoàn hảo các tín hiệu `#SHORT` có dòng ghi chú `BUY : 1)`.
+
+### Feature 25: Minh Bạch Hóa Thuật Toán Quản Trị Vốn Trên Desktop UI (v1.3.2)
+- Thay thế ô thông báo đỏ "Lý do chặn" thành ô xanh "Trạng thái hoàn tất / Lý do đóng vị thế" đối với các lệnh đã đóng bình thường.
+- Bổ sung cửa sổ modal giải trình chi tiết cơ chế phân bổ vốn (Risk Engine) với công thức tính cụ thể: Số vốn ký quỹ (Margin), Giá trị vị thế (Notional), Khoảng cách SL và Đòn bẩy tối đa an toàn.
+
+### Feature 26: Đóng Gói Bộ Cài Đặt Hoàn Chỉnh NSIS v1.3.2 (v1.3.2)
+- Đóng gói bản cài đặt hoàn chỉnh `telegram-binance-signal-executor_1.3.2_x64-setup.exe` dung lượng 96.49 MB, tích hợp 117/117 bài test tự động đạt chuẩn 100% không giới hạn bản quyền.
+
+### Feature 27: Triệt Tiêu Adverse Selection Vùng Entry Với SPLIT_2_LIMITS (v1.3.3)
+- Phân bổ 50% khối lượng ở mép đón đầu vùng giá để chắc chắn có mặt trên tàu & khóa lãi dời BE thành Kèo Bất Tử ở TP1, 50% ở đáy vùng để tối ưu hóa giá vốn nếu giá pullback sâu.
+- Tích hợp lựa chọn trực tiếp trên Desktop UI Settings, cấu hình `config.yaml` và cờ `allow_range_split_limits` theo từng kênh.
+
+### Feature 28: Đệm Giãn Cách An Toàn 8-15s & Thanh Tiến Trình Auto-Join Telegram (v1.3.3)
+- Chèn độ trễ ngẫu nhiên an toàn `asyncio.sleep(random.uniform(8.0, 15.0))` giữa mỗi lượt tham gia kênh Telegram để triệt tiêu nguy cơ Telegram khóa tạm thời (`FloodWaitError`) hoặc hạn chế tài khoản (`PEER_FLOOD`).
+- Tích hợp thanh tiến trình thời gian thực (Progress Bar) trên cả 2 màn hình ConnectionsPage và GroupsPage hiển thị chi tiết kênh đang tham gia và thời gian đệm an toàn.
+
+### Feature 29: Cấu Hình Nạp Link Telegram Từ Xa (Remote Dynamic JSON Provider) (v1.3.3)
+- Tự động nạp động link invite mới nhất từ GitHub Gist / Cloudflare Pages / Local Cache (`config/elite_channels.json`), chống đứt gãy tính năng khi các kênh Private định kỳ đổi link mà không cần build lại file `.exe`.
+
+### Feature 30: Đóng Gói Bộ Cài Đặt NSIS v1.3.3 (v1.3.3)
+- Đóng gói bản cài đặt hoàn chỉnh `telegram-binance-signal-executor_1.3.3_x64-setup.exe`, vượt qua 120/120 bài kiểm thử tự động đạt chuẩn 100%.
 
 ---
 

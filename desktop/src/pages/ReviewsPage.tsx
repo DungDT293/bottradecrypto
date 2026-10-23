@@ -12,7 +12,7 @@ export const ReviewsPage: React.FC = () => {
 
   // Resolution modal state
   const [resolvingSignal, setResolvingSignal] = useState<SignalRecord | null>(null);
-  const [targetState, setTargetState] = useState<"ACTIVE" | "REJECTED" | "CANCELLED">("REJECTED");
+  const [targetState, setTargetState] = useState<"VALIDATED" | "REJECTED">("REJECTED");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -32,12 +32,12 @@ export const ReviewsPage: React.FC = () => {
     fetchReviewSignals();
   }, []);
 
-  const openResolution = (sig: SignalRecord, state: "ACTIVE" | "REJECTED" | "CANCELLED") => {
+  const openResolution = (sig: SignalRecord, state: "VALIDATED" | "REJECTED") => {
     setResolvingSignal(sig);
     setTargetState(state);
     setReason(
-      state === "ACTIVE"
-        ? "Người dùng đã kiểm tra và phê duyệt thực thi thủ công."
+      state === "VALIDATED"
+        ? "Người dùng đã kiểm tra và phê duyệt tín hiệu."
         : state === "REJECTED"
         ? "Người dùng từ chối tín hiệu do vi phạm rủi ro hoặc trùng coin."
         : "Người dùng hủy bỏ tín hiệu."
@@ -142,7 +142,7 @@ export const ReviewsPage: React.FC = () => {
                       <button
                         className="btn btn-secondary btn-sm"
                         style={{ color: "var(--color-success)" }}
-                        onClick={() => openResolution(sig, "ACTIVE")}
+                        onClick={() => openResolution(sig, "VALIDATED")}
                       >
                         <CheckCircle2 size={13} />
                         <span>Duyệt</span>
@@ -170,7 +170,7 @@ export const ReviewsPage: React.FC = () => {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>
-                {targetState === "ACTIVE" ? "Duyệt Thực Thi Tín Hiệu" : "Từ Chối Tín Hiệu"}: {resolvingSignal.symbol}
+                {targetState === "VALIDATED" ? "Duyệt Tín Hiệu" : "Từ Chối Tín Hiệu"}: {resolvingSignal.symbol}
               </h3>
               <button
                 onClick={() => setResolvingSignal(null)}
@@ -201,7 +201,7 @@ export const ReviewsPage: React.FC = () => {
                 Hủy bỏ
               </button>
               <button
-                className={`btn ${targetState === "ACTIVE" ? "btn-primary" : "btn-danger"}`}
+                className={`btn ${targetState === "VALIDATED" ? "btn-primary" : "btn-danger"}`}
                 onClick={handleSubmitResolution}
                 disabled={submitting}
               >

@@ -6,10 +6,15 @@ import argparse
 import os
 import sys
 
-# Ensure project root is in sys.path
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# Ensure project root / PyInstaller MEIPASS is in sys.path
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    PROJECT_ROOT = sys._MEIPASS
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
+else:
+    PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
 
 if sys.platform == "win32":
     need_stdout_redirect = False
@@ -74,7 +79,23 @@ def main():
     parser.add_argument("--data-dir", type=str, default="./data", help="Data directory path")
     parser.add_argument("--config", type=str, default=None, help="Config YAML file path")
 
-    args = parser.parse_args()
+    raw_argv = sys.argv[1:]
+    reconstructed = []
+    i = 0
+    while i < len(raw_argv):
+        arg = raw_argv[i]
+        if arg in ("--data-dir", "--config", "--host", "--port") and i + 1 < len(raw_argv):
+            val = raw_argv[i + 1]
+            i += 2
+            while i < len(raw_argv) and not raw_argv[i].startswith("--"):
+                val = f"{val} {raw_argv[i]}"
+                i += 1
+            reconstructed.extend([arg, val.strip('"\'')])
+        else:
+            reconstructed.append(arg)
+            i += 1
+
+    args = parser.parse_args(reconstructed)
 
     run_server(
         host=args.host,

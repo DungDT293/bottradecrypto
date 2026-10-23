@@ -17,11 +17,11 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# Secret master salt for cryptographic HMAC signing
-MASTER_SIGNING_SECRET = os.environ.get(
-    "LICENSE_MASTER_SECRET",
-    "SIG_EXEC_COMMERCIAL_PRO_MASTER_KEY_2026_@_DEEPMIND_ANTIGRAVITY_CRYPTO"
-)
+def _signing_secret() -> bytes:
+    secret = os.environ.get("LICENSE_MASTER_SECRET", "").strip()
+    if not secret:
+        raise RuntimeError("LICENSE_MASTER_SECRET is not configured")
+    return secret.encode("utf-8")
 
 class LicenseService:
     def __init__(
@@ -66,7 +66,7 @@ class LicenseService:
 
     def _sign_payload(self, hwid: str, plan: str, expires_epoch: int) -> str:
         msg = f"{hwid.strip().upper()}|{plan.strip().upper()}|{expires_epoch}".encode("utf-8")
-        return hmac.new(MASTER_SIGNING_SECRET.encode("utf-8"), msg, hashlib.sha256).hexdigest()[:16].upper()
+        return hmac.new(_signing_secret(), msg, hashlib.sha256).hexdigest()[:16].upper()
 
     def generate_license_key(
         self,
@@ -130,8 +130,9 @@ class LicenseService:
         provided_sig = payload.get("s", "").strip().upper()
 
         current_hwid = self.get_hardware_id()
-        # Allow "ANY" for universal master demo keys
-        if req_hwid != "ANY" and req_hwid != current_hwid:
+        if req_hwid == "ANY":
+            return {"valid": False, "reason": "Universal license keys are disabled"}
+        if req_hwid != current_hwid:
             return {
                 "valid": False,
                 "reason": f"Mã bản quyền này thuộc về máy khác ({req_hwid}). Mã máy của bạn là {current_hwid}",

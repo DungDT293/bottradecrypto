@@ -1,4 +1,4 @@
-# TELEGRAM BINANCE SIGNAL EXECUTOR (v1.3.1 PRO)
+# TELEGRAM BINANCE SIGNAL EXECUTOR (v1.3.3 PRO)
 
 Hệ thống tự động tiếp nhận tín hiệu giao dịch từ các nhóm/kênh Telegram tinh hoa qua tài khoản cá nhân (MTProto Telethon), phân tích cú pháp đa tầng, kiểm soát rủi ro không cháy vốn (Zero-Liquidation), tự động dời hòa vốn (Kèo Bất Tử) và quản lý lệnh chuyên nghiệp trên sàn Binance USD-M Futures.
 
@@ -79,9 +79,19 @@ telegram_binance_signal_executor/
 │   └── listener.py            # Lắng nghe tin nhắn mới & chỉnh sửa, chống trùng lặp
 ├── cli/
 │   └── main.py                # Điểm vào dòng lệnh (gui, telegram-login, list-chats...)
-├── tests/                     # 108 bài kiểm thử đơn vị, dịch vụ và UI (100% PASS)
-├── DOCUMENTATION_BINANCE_API.md
-├── POLICY_SPECIFICATION.md
+├── tests/                     # 117 bài kiểm thử đơn vị, tích hợp và UI (100% PASS)
+├── docs/                      # THƯ VIỆN TÀI LIỆU TOÀN DIỆN (Xem docs/README.md)
+│   ├── README.md              # Mục lục điều hướng tài liệu toàn hệ thống
+│   ├── SYSTEM_ARCHITECTURE_AND_FEATURE_SPEC.md # Kiến trúc & Đặc tả 26 tính năng
+│   ├── POLICY_SPECIFICATION.md # Danh sách chính sách & Quy tắc xử lý giao dịch
+│   ├── DOCUMENTATION_BINANCE_API.md # Cẩm nang tích hợp Binance USD-M Futures
+│   ├── channel_signal_knowledge_base.md # Cơ sở tri thức tín hiệu 5 nhóm tinh hoa
+│   ├── DESKTOP_UI_ARCHITECTURE.md # Kiến trúc giao diện Desktop Tauri v2 + React 19
+│   ├── SYSTEM_QUANT_ARCHITECTURE.md # Bản vẽ định lượng & Luồng PnL Binance
+│   ├── CRYPTO_TRADING_MINDMAP_AND_GROWTH_SYSTEM.md # Mindmap tư duy & Quản trị vốn
+│   ├── SUSTAINABLE_PROFIT_ROADMAP.md # Lộ trình lợi nhuận bền vững 15% - 30%/tháng
+│   ├── CHANNEL_RANKING_1_YEAR.md # Báo cáo thẩm định kênh 1 năm
+│   └── COMMERCIAL_LICENSE_GUIDE.md # Hướng dẫn phân phối & Cài đặt trực tiếp
 ├── requirements.txt
 ├── config.example.yaml
 ├── .env.example
@@ -377,7 +387,7 @@ copy dist\backend-x86_64-pc-windows-msvc.exe desktop\src-tauri\binaries\
 cd desktop\src-tauri
 cargo tauri build --bundles nsis
 ```
-- **Tệp cài đặt đầu ra:** `telegram-binance-signal-executor_1.3.1_x64-setup.exe` (được đưa ra thư mục gốc để người dùng cài đặt nhanh)
+- **Tệp cài đặt đầu ra:** `telegram-binance-signal-executor_1.3.3_x64-setup.exe` (được đưa ra thư mục gốc để người dùng cài đặt nhanh)
 - **Tệp thực thi độc lập:** `desktop/src-tauri/target/release/app.exe`
 - **Kịch bản khởi chạy đồng bộ:** `launch_app.bat` (tự động dọn dẹp tiến trình treo, đồng bộ database, copy file nhị phân mới và bật ứng dụng).
 
@@ -385,7 +395,31 @@ cargo tauri build --bundles nsis
 
 ## 11. NHẬT KÝ PHIÊN BẢN (CHANGELOG)
 
-### Bản phát hành v1.3.1 (Hiện hành):
+### Bản phát hành v1.3.3 (Hiện hành):
+- **Triệt tiêu hiện tượng Adverse Selection với chính sách `SPLIT_2_LIMITS`:**
+  - Chia 50/50 ở cả 2 đầu vùng giá Entry (50% mép đón đầu để chắc chắn có mặt trên tàu & khóa lãi dời BE ở TP1, 50% ở đáy vùng để tối ưu hóa giá vốn nếu giá pullback sâu).
+  - Tích hợp lựa chọn trực tiếp trên Desktop UI Settings, cấu hình `config.yaml` và hỗ trợ cờ `allow_range_split_limits` theo từng kênh.
+- **Bảo vệ tài khoản Telegram & Chống FloodWait/PEER_FLOOD:**
+  - Chèn độ trễ ngẫu nhiên an toàn `asyncio.sleep(random.uniform(8.0, 15.0))` giữa mỗi lượt tham gia kênh Telegram.
+  - Tích hợp thanh tiến trình thời gian thực (Progress Bar) trên cả 2 màn hình ConnectionsPage và GroupsPage hiển thị chi tiết kênh đang tham gia và thời gian đệm an toàn.
+- **Cấu hình link mời từ xa (Remote Dynamic JSON Provider):**
+  - Tự động nạp động link invite mới nhất từ GitHub Gist / Cloudflare Pages / Local Cache (`config/elite_channels.json`), chống đứt gãy tính năng khi các kênh Private định kỳ đổi link mà không cần build lại file `.exe`.
+- **Bộ cài đặt NSIS v1.3.3:** Đóng gói bản cài đặt hoàn chỉnh `telegram-binance-signal-executor_1.3.3_x64-setup.exe`.
+- **Kiểm thử toàn diện:** Vượt qua 120/120 bài test tự động (`120 passed in 9.97s`).
+
+### Bản phát hành v1.3.2:
+- **Tối ưu hóa & Vá lỗi Toàn diện sau Rà soát Sub-Agent:**
+  - **Triệt tiêu lỗi Scientific Notation (`_format_decimal`):** Chuẩn hóa toàn bộ số lượng (`quantity`) và mức giá (`price`, `triggerPrice`) sang chuỗi số thực cố định, xóa bỏ hoàn toàn lỗi `-1100 / -1111` trên các coin meme giá nhỏ.
+  - **Đệm an toàn dời Breakeven (0.1% tick_size):** Ngăn chặn triệt để lỗi từ chối lệnh `-2021: Order would immediately trigger` khi giá entry quá sát giá mark.
+  - **Bảo toàn khối lượng TP cuối:** Khắc phục tình trạng mất coin lẻ do chia nguyên; dồn trọn vẹn số dư vào TP cuối.
+  - **Khắc phục Crash Reconciliation:** Sửa lỗi tham số `current_market_price` tại `on_entry_filled()` và bổ sung cờ bảo vệ chống hủy nhầm lệnh khi mạng rớt tạm thời.
+  - **Làm tròn đóng khẩn cấp:** `execute_emergency_close` tự động làm tròn `round_step_size` và đối chiếu an toàn với `min_qty`.
+  - **Nhận diện nâng cao Telegram:** Bổ sung regex nhận diện `kèo bất tử`, `risk free`, `close 1/2`, `Entry Zone:` nhiều dòng và chính sách `#SHORT` có kèm `BUY : 1)`.
+  - **Minh bạch Quản trị Vốn:** Bổ sung giải trình chi tiết công thức Margin, Đòn bẩy và Khoảng cách SL trong `SignalsPage`.
+- **Bộ cài đặt NSIS v1.3.2:** Đóng gói bản cài đặt hoàn chỉnh `telegram-binance-signal-executor_1.3.2_x64-setup.exe`.
+- **Kiểm thử toàn diện:** Vượt qua 117/117 bài test tự động (`117 passed`).
+
+### Bản phát hành v1.3.1:
 - **Khóa cứng Whitelist 5 Nhóm Tinh Hoa (Top 5 Elite):** Chỉ tiếp nhận và xử lý tín hiệu từ 5 kênh có winrate cao nhất: `THE WOLF (CRYPTO)®`, `Boom_Boom_Billionaires`, `CRYPTO LEOPARD'S`, `CRYPTO MONK`, `Crypto Neon`.
 - **Thanh lọc dữ liệu triệt để (Database Purging):** Xóa sạch toàn bộ dữ liệu tin nhắn, tín hiệu cũ ngoài 5 nhóm tinh hoa trên cả AppData Local, AppData Roaming và thư mục dự án.
 - **Phòng thủ đa tầng trên giao diện (Defense-in-Depth UI):** Khóa cứng bộ lọc hiển thị tại `LeaderboardPage`, `SignalsPage`, và `GroupsPage` đảm bảo không bao giờ hiển thị kênh ngoài whitelist.

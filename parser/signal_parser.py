@@ -1,11 +1,31 @@
 import re
-import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.enums import EntryMode, FieldSource, MarginMode, PositionSide, SignalState
 from core.models import ParsedSignal, SourceMetadata
 from parser.normalizer import normalize_text
+
+
+NON_COIN_WORDS = {
+    "FREE", "VIP", "LONG", "SHORT", "BUY", "SELL", "USDT", "USD",
+    "FUTURES", "FUTURE", "SPOT", "SIGNAL", "SIGNALS", "TRADE", "TRADING",
+    "PROFIT", "LOSS", "TARGET", "TARGETS", "ENTRY", "ENTRIES", "SETUP", "LEVERAGE",
+    "MARGIN", "ACCURACY", "PUMP", "DUMP", "CALL", "CALLS", "DAILY", "TODAY", "WEEKLY",
+    "CRYPTO", "TOKEN", "COIN", "PERCENT", "LINK", "ADMIN", "FAST", "ALERT", "ALERTS",
+    "CHANNEL", "COMMUNITY", "GROUP", "MEMBERS", "RESULTS", "PROOF", "PREMIUM", "STOP",
+    "MORE", "TIME", "JOIN", "POST", "GIVEAWAY",
+}
+
+
+def is_valid_coin_ticker(base: str) -> bool:
+    if not base or len(base) < 1 or len(base) > 12:
+        return False
+    if base.isdigit():
+        return False
+    if base.upper() in NON_COIN_WORDS:
+        return False
+    return True
 
 
 class SignalParser:
@@ -87,10 +107,18 @@ class SignalParser:
         validation_status = SignalState.PARSED
         blocking_reason = None
 
-        # Anti-VIP bait / scam detector
+        # Anti-VIP bait / scam detector / Trade Result detector
         is_vip_bait = bool(
             re.search(
-                r"\b(?:dm\s*for\s*(?:entry|targets?|sl|signal|access)|sl\s*in\s*vip|tp\s*in\s*vip|only\s*in\s*vip|100%\s*guaranteed|insider\s*pump|pay\s*for\s*signal|inbox\s*for\s*calls)\b",
+                r"\b(?:dm\s*for\s*(?:entry|targets?|sl|signal|access)|sl\s*in\s*vip|tp\s*in\s*vip|only\s*in\s*vip|100%\s*guaranteed|insider\s*pump|pay\s*for\s*signal|inbox\s*for\s*calls|leverage\s*&\s*entry|entry\s*:\s*\(?click\s*and\s*join|click\s*to\s*enter|claim\s*your\s*free|free\s*\d+\s*usdt|accept\s*\d+\s*people\s*without\s*money|biggest\s*whale\s*channel)\b",
+                normalized,
+                re.IGNORECASE,
+            )
+        )
+
+        is_trade_result = bool(
+            re.search(
+                r"\b(?:trade\s*result|target\s*\d+\s*achieved|profit\s*proof|take-profit\s*target\s*\d+\s*achieved|captured\s*:\s*\d+%\s*profit|duration\s*:\s*\d+\s*(?:d|day|hr|min))\b|take-profit\s*target\s*\d+\s*✅|#leopard_(?:vip|free)_trade|take\s*profit\s*0\d\s*[✔️✅]|(?:first|second|all)\s*targets?\s*(?:smashed|achieved)\b",
                 normalized,
                 re.IGNORECASE,
             )
@@ -99,6 +127,9 @@ class SignalParser:
         if is_vip_bait:
             validation_status = SignalState.REJECTED
             blocking_reason = "Tin nhan cau keo VIP / quang cao lua dao (Tu choi vao lenh)"
+        elif is_trade_result:
+            validation_status = SignalState.REJECTED
+            blocking_reason = "Bao cao ket qua trade / khoe lai (Trade Result), khong phai keo moi"
         elif dir_conflict_warning:
             validation_status = SignalState.NEEDS_REVIEW
             blocking_reason = "Mau thuan huong lenh giua tieu de va muc entry (vd: SHORT nhung BUY)"
@@ -136,7 +167,7 @@ class SignalParser:
             validation_status = SignalState.NEEDS_POLICY
             blocking_reason = "Thieu margin mode (can ap dung policy ISOLATED)"
 
-        signal_id = f"sig_{metadata.chat_id}_{metadata.message_id}_{uuid.uuid4().hex[:6]}"
+        signal_id = f"sig_{metadata.chat_id}_{metadata.message_id}"
 
         return ParsedSignal(
             signal_id=signal_id,
@@ -170,6 +201,8 @@ class SignalParser:
             base = m_trade.group(1).upper()
             quote = m_trade.group(2).upper()
             raw = f"{base}/{quote}"
+            if not is_valid_coin_ticker(base):
+                return raw, None, f"'{base}' khong phai ma coin hop le"
             if quote == "USDT":
                 return raw, f"{base}USDT", None
             else:
@@ -180,6 +213,8 @@ class SignalParser:
             base = m_slash.group(1).upper()
             quote = m_slash.group(2).upper()
             raw = f"{base}/{quote}"
+            if not is_valid_coin_ticker(base):
+                return raw, None, f"'{base}' khong phai ma coin hop le"
             if quote == "USDT":
                 return raw, f"{base}USDT", None
             else:
@@ -189,23 +224,27 @@ class SignalParser:
         m_usdt = re.search(r"(?:^|[\s\$#])([A-Za-z0-9]{1,12})USDT\b", text, re.IGNORECASE)
         if m_usdt:
             base = m_usdt.group(1).upper()
+            if not is_valid_coin_ticker(base):
+                return f"{base}USDT", None, f"'{base}' khong phai ma coin hop le"
             return f"{base}USDT", f"{base}USDT", None
 
-        # 3. Match Coin: SYMBOL or PAIR: SYMBOL (e.g. Coin: WIF)
-        m_coin = re.search(r"(?:COIN|Coin|PAIR|Pair)\s*[:#-]?\s*[$#]?([A-Za-z0-9]{2,10})\b", text)
+        # 3. Match Coin: SYMBOL or PAIR: SYMBOL (e.g. Coin: WIF, Coin: Q)
+        m_coin = re.search(r"(?:COIN|Coin|PAIR|Pair)\s*[:#-]?\s*[$#]?([A-Za-z0-9]{1,10})\b", text)
         if m_coin:
             base = m_coin.group(1).upper()
-            if base not in ["FREE", "VIP", "LONG", "SHORT", "BUY", "SELL", "USDT"]:
-                return f"{base}/USDT", f"{base}USDT", None
+            if not is_valid_coin_ticker(base):
+                return f"{base}/USDT", None, f"'{base}' khong phai ma coin hop le"
+            return f"{base}/USDT", f"{base}USDT", None
 
-        # 4. Match #SYMBOL | or #SYMBOL with SETUP/DIRECTION (e.g. #BEL | SHORT SETUP, #CIEN | SHORT SETUP, #CFX | SHORT SETUP)
-        m_hash = re.search(r"#([A-Za-z0-9]{2,12})\s*(?:\|\s*)?(?:SHORT|LONG|BUY|SELL|\bSETUP\b)", text, re.IGNORECASE)
+        # 4. Match #SYMBOL | or #SYMBOL with SETUP/DIRECTION (e.g. #BEL | SHORT SETUP, #Q SHORT, #W LONG)
+        m_hash = re.search(r"#([A-Za-z0-9]{1,12})\s*(?:\|\s*)?(?:SHORT|LONG|BUY|SELL|\bSETUP\b)", text, re.IGNORECASE)
         if m_hash:
             base = m_hash.group(1).upper()
             if base.endswith("STOCK") or base in ["CIEN", "NVDA", "TSLA", "AAPL", "MSTR", "CAT", "CVX", "SPY", "QQQ"]:
                 return f"{base}", None, f"Ma co phieu My / Stock '{base}' khong ho tro tren Binance Futures"
-            if base not in ["FREE", "VIP", "LONG", "SHORT", "BUY", "SELL", "USDT", "SETUP", "TARGET", "STOP"]:
-                return f"{base}/USDT", f"{base}USDT", None
+            if not is_valid_coin_ticker(base):
+                return f"{base}/USDT", None, f"'{base}' khong phai ma coin hop le"
+            return f"{base}/USDT", f"{base}USDT", None
 
         return "UNKNOWN", None, "Khong tim thay symbol hop le"
 
@@ -217,8 +256,8 @@ class SignalParser:
         has_long_header = bool(re.search(r"(?:#LONG|\bLONG\b|Position:\s*LONG|Direction\s*:\s*LONG|\(LONG\)|LONG\s*ZONE|LONG\s*ENTRY)", text, re.IGNORECASE))
 
         # Check for explicit BUY/SELL in entry section
-        has_buy_entry = bool(re.search(r"\bBUY\s*:\s*\n?\s*\d+\)", text, re.IGNORECASE))
-        has_sell_entry = bool(re.search(r"\bSELL\s*:\s*\n?\s*\d+\)", text, re.IGNORECASE))
+        has_buy_entry = bool(re.search(r"\bBUY\s*[:\s]*\n?\s*\d+\)", text, re.IGNORECASE))
+        has_sell_entry = bool(re.search(r"\bSELL\s*[:\s]*\n?\s*\d+\)", text, re.IGNORECASE))
 
         # Detect conflict like ATOM sample: SHORT header but BUY entry
         if (has_short_header and has_buy_entry) or (has_long_header and has_sell_entry):
@@ -273,8 +312,8 @@ class SignalParser:
         """
         Extract entry prices. Handles single, multiple, range, and ambiguous cases (TRUTH).
         """
-        # Check TRUTH / LEOPARD pattern: "Short BELOW (0.02300)(0.02325)" or "LONG **BELOW (0.04650)(0.04600)"
-        m_below = re.search(r"(?:Short|LONG|BUY|SELL)[\s\*]+BELOW\s*\(([\d\.]+k?)\)\s*\(([\d\.]+k?)\)", text, re.IGNORECASE)
+        # Check TRUTH / LEOPARD pattern: "Short BELOW (0.02300)(0.02325)" or "LONG BELOW (0.01830)(0.01800)" or "Short ABOVE (...)"
+        m_below = re.search(r"(?:Short|LONG|BUY|SELL)[\s\*]+(?:BELOW|ABOVE)\s*\(?([\d\.]+k?)\)?(?:[\s\-/–]*\(?([\d\.]+k?)\)?)?", text, re.IGNORECASE)
         if m_below:
             try:
                 def parse_k(v_str: str) -> Decimal:
@@ -284,8 +323,11 @@ class SignalParser:
                     return Decimal(v_str)
 
                 p1 = parse_k(m_below.group(1))
-                p2 = parse_k(m_below.group(2))
-                return [p1, p2], EntryMode.MULTIPLE, "BELOW co 2 muc gia, can policy cho phep", True
+                if m_below.group(2):
+                    p2 = parse_k(m_below.group(2))
+                    return [p1, p2], EntryMode.MULTIPLE, "BELOW/ABOVE co 2 muc gia, can policy cho phep", True
+                else:
+                    return [p1], EntryMode.SINGLE, None, False
             except InvalidOperation:
                 pass
 
@@ -297,7 +339,7 @@ class SignalParser:
         # - "LONG ENTRY: 2440 : 2422" or "Entry: 63100 : 62700" (colon separator)
         # - "Take Entries: 0.04685 - 0.0484", "LONG ZONE: 0.69 - 0.67"
         m_range = re.search(
-            r"(?:Entries|Entry|ENTERY|Take Entries|LONG\s*ZONE|SHORT\s*ZONE|BUY\s*ZONE|SELL\s*ZONE|ZONE|LONG\s*ENTRY|SHORT\s*ENTRY|BUY\s*ENTRY|SELL\s*ENTRY)[\s\w]*[:\=]\s*\[?\s*-?\s*\$?([\d\.]+)\s*(?:-|–|TO|to|:)\s*\$?([\d\.]+)\s*\]?",
+            r"(?:Entries|Entry|ENTERY|Take Entries|LONG\s*ZONE|SHORT\s*ZONE|BUY\s*ZONE|SELL\s*ZONE|ZONE|LONG\s*ENTRY|SHORT\s*ENTRY|BUY\s*ENTRY|SELL\s*ENTRY)[\s\w]*(?:[:\=]|->|=>)\s*\[?\s*-?\s*\$?([\d\.]+)\s*(?:-|–|TO|to|:)\s*\$?([\d\.]+)\s*\]?",
             text,
             re.IGNORECASE,
         )
@@ -311,10 +353,16 @@ class SignalParser:
 
         # Check Entry Zone with diamond bullet or non-standard separator (Boom_Boom_Billionaires)
         m_zone = re.search(
-            r"Entry\s*Zone\s*:[^\d\n]*?\$?([\d\.]+)[^\d\n]+?\$?([\d\.]+)",
+            r"Entry\s*Zone\s*:[^\d]*?\$?([\d\.]+)[^\d\n\r]*[\n\r]+[^\d]*?\$?([\d\.]+)",
             text,
             re.IGNORECASE,
         )
+        if not m_zone:
+            m_zone = re.search(
+                r"Entry\s*Zone\s*:[^\d\n]*?\$?([\d\.]+)[^\d\n]+?\$?([\d\.]+)",
+                text,
+                re.IGNORECASE,
+            )
         if m_zone:
             try:
                 p1 = Decimal(m_zone.group(1))
@@ -441,14 +489,14 @@ class SignalParser:
         """
         tps: List[Decimal] = []
 
-        # 1. Slash separated targets e.g. "Targets: $0.144/$0.156/$0.174"
+        # 1. Slash or Pipe separated targets e.g. "Targets: $0.144/$0.156/$0.174" or "Targets :- 0.01362 | 0.01374"
         m_slash = re.search(
-            r"(?:Targets?|Take[\s\-]*Profits?|Profit\s*Targets?)\s*[:\-\>\s]*((?:\$?[\d\.]+\s*\/\s*)+\$?[\d\.]+)",
+            r"(?:Targets?|Take[\s\-]*Profits?|Profit\s*Targets?)\s*[:\-\>\s]*((?:\$?[\d\.]+\s*(?:\/|\|)\s*)+\$?[\d\.]+)",
             text,
             re.IGNORECASE,
         )
         if m_slash:
-            parts = re.split(r"\s*\/\s*", m_slash.group(1).strip())
+            parts = re.split(r"\s*(?:\/|\|)\s*", m_slash.group(1).strip())
             for p in parts:
                 clean_p = p.replace("$", "").strip()
                 try:
@@ -536,8 +584,8 @@ class SignalParser:
             # Check if this line marks the start of a target section
             if re.search(r"(?:TAKE-?\s*PROFITS?|PROFIT\s*TARGETS?|\bTARGETS?\b|\bTP\b)", line_str, re.IGNORECASE) and not re.search(r"(?:Stop|Entr|Buy|Sell|Trailing|Trigger|Management|Close)", line_str, re.IGNORECASE):
                 in_target_section = True
-                # Inline explicit TP e.g. "Target: $830", "TP1: 0.5230", "Target 2. $0.04920"
-                m_inline = re.search(r"(?:TP\d*|Target\s*\d*)\s*[\.\:\-\>\s]*\$?([\d\.]+)", line_str, re.IGNORECASE)
+                # Inline explicit TP e.g. "Target: $830", "TP1: 0.5230", "Target 2. $0.04920", "Targets: 0.0650"
+                m_inline = re.search(r"(?:TP\d*|Targets?\s*\d*|Take[\s\-]*Profits?)\s*[\.\:\-\>\s]*\$?([\d\.]+)", line_str, re.IGNORECASE)
                 if m_inline:
                     try:
                         val = Decimal(m_inline.group(1))
@@ -577,6 +625,18 @@ class SignalParser:
                     pass
 
             if in_target_section:
+                # Subcase 6-inline: Check multiple targets on same line e.g. "🥇 0.03900 🥈 0.04050 🥉 0.04300"
+                inline_medals = re.findall(r"(?:[🥇🥈🥉]|[0-9]+(?:[\uFE0F]?\u20E3)|[①-⑩]|[➊-➓]|TP\d*|\d+[\.\)])\s*(?:[🟢🔴\s]*)\$?([\d\.]+)", line_str, re.IGNORECASE)
+                if len(inline_medals) > 1:
+                    for im in inline_medals:
+                        try:
+                            v = Decimal(im)
+                            if v not in tps:
+                                tps.append(v)
+                        except InvalidOperation:
+                            pass
+                    continue
+
                 # Subcase 6a: Check hyphen-separated line inside section: "0.04160-0.04000-0.03650"
                 if re.search(r"^[\d\.]+(?:\s*-\s*[\d\.]+)+$", line_str):
                     for p in re.split(r"\s*-\s*", line_str):
@@ -592,8 +652,9 @@ class SignalParser:
                 # Handles:
                 # - Bare numbers: "0.0153033", "2410"
                 # - Bullets: "1: 2410", "1) 0.0457", "➊ 0.08300", "① 0.0457", "1️⃣ 0.0457", "1. 0.0457", "➤ 0.08300", "• 0.08300"
+                # - With color/status emojis or trailing notes: "1)🟩 0.04377", "1) 0.02810 - 25%", "1) 0.02810 ✅"
                 m_bullet = re.search(
-                    r"(?:(?:\b\d+[\)\:\.](?!\d)|[0-9]+(?:[\uFE0F]?\u20E3)|[①-⑩]|[➊-➓]|[🥇🥈🥉]|[\-\•\➤\➔\➜\🎯\🧿])\s*)?\$?\s*(\d+(?:\.\d+)?k?)\s*$",
+                    r"(?:(?:\b\d+[\)\:\.](?!\d)|[0-9]+(?:[\uFE0F]?\u20E3)|[①-⑩]|[➊-➓]|[🥇🥈🥉]|[\-\•\➤\➔\➜\🎯\🧿\🟩\🟢\🔴])\s*)*\$?\s*(\d+(?:\.\d+)?k?)(?:\s*(?:-|–|\(|✅|[✔️✔])|\s*$)",
                     line_str,
                     re.IGNORECASE,
                 )

@@ -40,10 +40,16 @@ class SignalValidator:
         if signal.validation_status == SignalState.NEEDS_REVIEW:
             allow_below = getattr(self.config.execution, "allow_below_pattern_as_valid", False) or \
                           (source_override and getattr(source_override, "allow_below_pattern", False))
-            if allow_below and "BELOW" in (signal.blocking_reason or ""):
+            allow_buy_short = getattr(self.config.execution, "allow_buy_as_short_exception", False) or \
+                              (source_override and getattr(source_override, "allow_buy_as_short_exception", False))
+
+            if allow_below and any(k in (signal.blocking_reason or "").upper() for k in ["BELOW", "ABOVE"]):
                 signal.validation_status = SignalState.PARSED
                 signal.blocking_reason = None
                 signal.entry_mode = EntryMode.RANGE
+            elif allow_buy_short and "Mau thuan huong lenh" in (signal.blocking_reason or ""):
+                signal.validation_status = SignalState.PARSED
+                signal.blocking_reason = None
             else:
                 return signal, None
         elif signal.validation_status == SignalState.REJECTED:
@@ -122,7 +128,9 @@ class SignalValidator:
         entry_range_val = (min(signal.entries), max(signal.entries)) if (signal.entry_mode == EntryMode.RANGE and len(signal.entries) >= 2) else None
         if signal.entry_mode == EntryMode.RANGE:
             range_policy = self.config.execution.entry_range_policy
-            if source_override and source_override.allow_range_midpoint:
+            if source_override and getattr(source_override, "allow_range_split_limits", False):
+                range_policy = EntryRangePolicy.SPLIT_2_LIMITS
+            elif source_override and source_override.allow_range_midpoint:
                 range_policy = EntryRangePolicy.MID_POINT
 
             if range_policy == EntryRangePolicy.NEEDS_POLICY:
@@ -190,13 +198,20 @@ class SignalValidator:
                 weights = [Decimal("0.5"), Decimal("0.3"), Decimal("0.2")]
                 resolved_tps = list(zip(signal.take_profits, weights))
                 signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY
-            elif tp_policy == MultiTPWeightMode.CUSTOM_TP1_RATIO or policy_str in [
+            elif tp_policy in [MultiTPWeightMode.CUSTOM_TP1_RATIO, MultiTPWeightMode.FIXED_20_40_40, MultiTPWeightMode.FIXED_35_35_30] or policy_str in [
                 "CUSTOM_TP1_RATIO",
                 "CUSTOM",
+                "FIXED_20_40_40",
+                "FIXED_35_35_30",
                 "FRONT_LOADED",
                 "FRONT_LOADED_50_30_20",
             ]:
-                tp1_target = getattr(self.config.execution, "tp1_target_weight_pct", Decimal("60.0"))
+                if policy_str == "FIXED_20_40_40":
+                    tp1_target = Decimal("20.0")
+                elif policy_str == "FIXED_35_35_30":
+                    tp1_target = Decimal("35.0")
+                else:
+                    tp1_target = getattr(self.config.execution, "tp1_target_weight_pct", Decimal("20.0"))
                 weights = calculate_tp_weights(len(signal.take_profits), tp1_target)
                 resolved_tps = list(zip(signal.take_profits, weights))
                 signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY

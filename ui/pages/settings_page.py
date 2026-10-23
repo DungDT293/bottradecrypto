@@ -92,6 +92,7 @@ class SettingsPage(QWidget):
 
         self.range_policy_combo = QComboBox()
         self.range_policy_combo.addItem("NEEDS_POLICY (Chặn lại để hỏi người dùng)", "NEEDS_POLICY")
+        self.range_policy_combo.addItem("SPLIT_2_LIMITS (Chia 50/50 hai đầu vùng giá - Chống lỡ tàu)", "SPLIT_2_LIMITS")
         self.range_policy_combo.addItem("MID_POINT (Lấy trung điểm vùng entry)", "MID_POINT")
         self.range_policy_combo.addItem("BEST_PRICE (Đặt limit tại giá tốt nhất)", "BEST_PRICE")
         policy_layout.addRow("Xử lý Entry dạng Range:", self.range_policy_combo)

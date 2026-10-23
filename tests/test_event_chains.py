@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 
 from config.config import load_config
-from core.enums import MarginMode, OrderSide, OrderType, PositionSide, SignalState, UpdateType
+from core.enums import ExecutionMode, MarginMode, OrderSide, OrderType, PositionSide, SignalState, UpdateType
 from core.exceptions import BotTradingError, EmergencyCloseError
 from core.models import Order, ParsedSignal, SourceMetadata, ValidatedSignal
 from execution.order_manager import OrderManager
@@ -21,12 +21,14 @@ def env_setup(tmp_path):
     db = DatabaseManager(db_file)
     client = MockBinanceFuturesClient(initial_equity=Decimal("10000.0"))
     config = load_config()
+    config.mode = ExecutionMode.TESTNET
+    config.live_trading_enabled = False
     sig_repo = SignalRepository(db)
     ord_repo = OrderRepository(db)
     pos_mgr = PositionManager(client, sig_repo)
     risk_eng = RiskEngine(config)
     order_mgr = OrderManager(client, ord_repo, sig_repo, pos_mgr, risk_eng, config)
-    recon = ReconciliationEngine(client, db)
+    recon = ReconciliationEngine(client, db, config=config)
     return db, client, sig_repo, ord_repo, pos_mgr, order_mgr, recon, config
 
 

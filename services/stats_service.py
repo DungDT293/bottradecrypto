@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 import pytz
@@ -29,22 +29,16 @@ class StatsService:
 
     def get_local_day_boundaries(self, days_back: int = 0) -> Tuple[datetime, datetime]:
         """
-        Returns (start_utc, end_utc) for `days_back` days in Asia/Ho_Chi_Minh timezone.
-        days_back=0: Today from 00:00:00 to now.
-        days_back=6: 7 days window (today and 6 previous calendar days from 00:00:00 to now).
+        Return UTC bounds for calendar days in Asia/Ho_Chi_Minh.
+
+        ``days_back=0`` means today from local midnight through this instant.
+        ``days_back=6`` means today plus six previous local calendar days.
         """
         now_local = datetime.now(VN_TZ)
         today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        if days_back == 0:
-            start_local = today_start_local
-        else:
-            from datetime import timedelta
-            start_local = today_start_local - timedelta(days=days_back)
-            
-        start_utc = start_local.astimezone(timezone.utc)
-        now_utc = datetime.now(timezone.utc)
-        return start_utc, now_utc
+        days_back = max(0, min(int(days_back), 3650))
+        start_local = today_start_local - timedelta(days=days_back)
+        return start_local.astimezone(timezone.utc), now_local.astimezone(timezone.utc)
 
     def get_telegram_telemetry(self) -> Dict[str, Any]:
         """
@@ -115,8 +109,8 @@ class StatsService:
             ).fetchall()
 
             daily_rows = conn.execute(
-                "SELECT * FROM daily_pnl WHERE date_str >= ? ORDER BY date_str ASC",
-                (start_utc.strftime("%Y-%m-%d"),),
+                "SELECT * FROM daily_pnl WHERE date_str >= ? AND date_str <= ? ORDER BY date_str ASC",
+                (start_utc.astimezone(VN_TZ).strftime("%Y-%m-%d"), end_utc.astimezone(VN_TZ).strftime("%Y-%m-%d")),
             ).fetchall()
 
         total_realized_pnl = Decimal("0.00")
@@ -125,21 +119,29 @@ class StatsService:
         win_count = 0
         loss_count = 0
         be_count = 0
-        has_trades = len(daily_rows) > 0 or len(closed_signals) > 0
+        # Closed signal rows are lifecycle telemetry, not proof of realized PnL.
+        # Only persisted PnL rows establish that this summary has trading data.
+        has_trades = bool(daily_rows)
 
         for row in daily_rows:
             try:
                 total_realized_pnl += Decimal(row["realized_pnl"])
                 total_commission += Decimal(row["fees_paid"])
+                # daily_pnl.net_pnl already includes realized PnL and fees. Derive funding as residual.
+                total_funding += Decimal(row["net_pnl"]) - Decimal(row["realized_pnl"]) + Decimal(row["fees_paid"])
+                win_count += int(row["win_count"] or 0)
+                loss_count += int(row["loss_count"] or 0)
             except Exception:
                 pass
 
-        total_closed = len(closed_signals)
+        # Preserve lifecycle count, or take verified executed trades count
+        total_closed = max(len(closed_signals), win_count + loss_count)
         win_rate_pct = 0.0
-        if total_closed > 0 and (win_count + loss_count + be_count) > 0:
+        if (win_count + loss_count + be_count) > 0:
             win_rate_pct = round((win_count / (win_count + loss_count + be_count)) * 100, 1)
 
-        net_pnl = total_realized_pnl - total_commission - total_funding
+        # Funding income is signed: positive income adds to net PnL; negative income subtracts.
+        net_pnl = total_realized_pnl - total_commission + total_funding
 
         return {
             "period_label": "Hôm nay" if days_back == 0 else f"{days_back + 1} ngày qua",
@@ -162,3 +164,99 @@ class StatsService:
             "data_completeness": "FULL" if has_trades else "UNKNOWN",
             "last_sync_time": end_utc.astimezone(VN_TZ).strftime("%H:%M:%S %d/%m/%Y"),
         }
+
+    async def sync_binance_income(self, client: Any, days_back: int = 30) -> Dict[str, Any]:
+        """
+        Synchronizes Binance Futures income (/fapi/v1/income) directly into daily_pnl table.
+        Ingests REALIZED_PNL, COMMISSION, and FUNDING_FEE grouped by VN calendar day (Asia/Ho_Chi_Minh).
+        """
+        try:
+            start_utc, end_utc = self.get_local_day_boundaries(days_back)
+            start_ms = int(start_utc.timestamp() * 1000)
+            end_ms = int(end_utc.timestamp() * 1000)
+
+            incomes = await client._request(
+                "GET",
+                "/fapi/v1/income",
+                params={"startTime": start_ms, "endTime": end_ms, "limit": 1000},
+                signed=True,
+            )
+            if not incomes:
+                incomes = await client._request(
+                    "GET",
+                    "/fapi/v1/income",
+                    params={"limit": 1000},
+                    signed=True,
+                )
+
+            if not incomes:
+                return {"success": True, "count": 0}
+
+            from collections import defaultdict
+            grouped: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+                "realized": Decimal("0.0"),
+                "commission": Decimal("0.0"),
+                "funding": Decimal("0.0"),
+                "trades": 0,
+                "wins": 0,
+                "losses": 0,
+            })
+
+            for inc in incomes:
+                ts = inc.get("time")
+                if not ts:
+                    continue
+                dt = datetime.fromtimestamp(ts / 1000, VN_TZ)
+                date_str = dt.strftime("%Y-%m-%d")
+                itype = inc.get("incomeType")
+                val = Decimal(str(inc.get("income", 0)))
+
+                if itype == "REALIZED_PNL":
+                    grouped[date_str]["realized"] += val
+                    grouped[date_str]["trades"] += 1
+                    if val > Decimal("0"):
+                        grouped[date_str]["wins"] += 1
+                    elif val < Decimal("0"):
+                        grouped[date_str]["losses"] += 1
+                elif itype == "COMMISSION":
+                    grouped[date_str]["commission"] += abs(val)
+                elif itype == "FUNDING_FEE":
+                    grouped[date_str]["funding"] += val
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            with self.db.get_connection() as conn:
+                for d_str, data in grouped.items():
+                    net_pnl = data["realized"] - data["commission"] + data["funding"]
+                    conn.execute(
+                        """
+                        INSERT INTO daily_pnl (
+                            date_str, starting_equity, realized_pnl, fees_paid,
+                            net_pnl, deposits_withdrawals, trading_halted, updated_at,
+                            win_count, loss_count, total_trades
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(date_str) DO UPDATE SET
+                            realized_pnl = excluded.realized_pnl,
+                            fees_paid = excluded.fees_paid,
+                            net_pnl = excluded.net_pnl,
+                            updated_at = excluded.updated_at,
+                            win_count = excluded.win_count,
+                            loss_count = excluded.loss_count,
+                            total_trades = excluded.total_trades
+                        """,
+                        (
+                            d_str,
+                            "0.0",
+                            str(data["realized"].quantize(Decimal("0.0001"))),
+                            str(data["commission"].quantize(Decimal("0.0001"))),
+                            str(net_pnl.quantize(Decimal("0.0001"))),
+                            "0.0",
+                            0,
+                            now_iso,
+                            data["wins"],
+                            data["losses"],
+                            data["trades"],
+                        ),
+                    )
+            return {"success": True, "count": len(incomes), "days_synced": len(grouped)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}

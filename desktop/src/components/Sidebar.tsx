@@ -56,7 +56,7 @@ export const Sidebar: React.FC = () => {
         <ShieldCheck size={24} className="text-success" />
         <div>
           <h1>Signal Executor</h1>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v1.3.1 Desktop Shell</div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v1.3.7 Desktop Shell</div>
         </div>
 
       </div>
@@ -89,7 +89,9 @@ export const Sidebar: React.FC = () => {
           </span>
         </div>
         <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-          Chế độ: <strong style={{ color: "var(--text-secondary)" }}>{snapshot?.mode || "READ_ONLY"}</strong>
+          Chế độ: <strong style={{ color: snapshot?.mode === "LIVE" ? "#10b981" : "var(--text-secondary)" }}>
+            {snapshot?.mode === "LIVE" ? "TIỀN THẬT (LIVE)" : (snapshot?.mode || "LIVE")}
+          </strong>
         </div>
       </div>
     </aside>

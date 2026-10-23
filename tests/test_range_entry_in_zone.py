@@ -76,5 +76,56 @@ Stop loss : 1.202498649
 
     print("ALL RANGE ENTRY IN ZONE TESTS PASSED!")
 
+
+def test_range_entry_split_2_limits_execution():
+    from core.enums import EntryRangePolicy
+    from config.policy_defaults import SourcePolicyOverride
+
+    parser = SignalParser()
+    raw_text = """
+🔥 VIP Scalp Signal
+✅ LONG
+#SOL/USDT
+Entry: 150.0 - 155.0
+Take Profits: 160.0, 165.0
+Stop loss: 145.0
+"""
+    # 1. Global policy test
+    cfg = AppConfig()
+    cfg.execution.entry_range_policy = EntryRangePolicy.SPLIT_2_LIMITS
+    validator = SignalValidator(cfg)
+
+    meta = SourceMetadata(
+        chat_id=-1002052872813,  # Leopard
+        message_id=9991,
+        source_name="CRYPTO LEOPARD'S",
+        telegram_timestamp=datetime.now(timezone.utc)
+    )
+    parsed = parser.parse(raw_text, meta)
+    _, validated = validator.validate_and_resolve(parsed)
+
+    assert validated is not None
+    assert len(validated.entries) == 2
+    assert validated.entries[0] == (Decimal("150.0"), Decimal("0.5"))
+    assert validated.entries[1] == (Decimal("155.0"), Decimal("0.5"))
+
+    # 2. Source override test with allow_range_split_limits=True
+    cfg_default = AppConfig()  # entry_range_policy is BEST_PRICE
+    override = SourcePolicyOverride(
+        chat_id=-1002052872813,
+        name="CRYPTO LEOPARD'S",
+        allow_range_split_limits=True
+    )
+    validator_override = SignalValidator(cfg_default)
+    parsed2 = parser.parse(raw_text, meta)
+    _, validated2 = validator_override.validate_and_resolve(parsed2, override)
+
+    assert validated2 is not None
+    assert len(validated2.entries) == 2
+    assert validated2.entries[0] == (Decimal("150.0"), Decimal("0.5"))
+    assert validated2.entries[1] == (Decimal("155.0"), Decimal("0.5"))
+
+
 if __name__ == "__main__":
     test_xrp_range_entry_logic()
+    test_range_entry_split_2_limits_execution()

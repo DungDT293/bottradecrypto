@@ -206,12 +206,78 @@ async def test_telegram_auto_join_elite_mock(commercial_api_client):
         assert len(res_data["results"]) == 5
 
 
-def test_system_public_ip_endpoint(commercial_api_client):
+def test_system_public_ip_endpoint(commercial_api_client, monkeypatch):
     client, token, _ = commercial_api_client
     headers = {"X-Session-Token": token}
+    import backend.api.router as router_module
+    monkeypatch.setattr(router_module.urllib.request, "urlopen", lambda *args, **kwargs: _FakeIpResponse())
 
     resp = client.get("/system/public-ip", headers=headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "success" in data
     assert "ip" in data
+
+
+@pytest.mark.asyncio
+async def test_fetch_remote_elite_channels_resolution():
+    from services.telegram_service import TelegramService
+    from config.config import AppConfig
+
+    cfg = AppConfig()
+    svc = TelegramService(cfg)
+
+    # 1. Fallback to local config/elite_channels.json or default
+    channels = await svc.fetch_remote_elite_channels()
+    assert len(channels) == 5
+    assert any(c["name"] == "THE WOLF (CRYPTO)®" for c in channels)
+    assert any("Leopard" in c["name"] or "LEOPARD" in c["name"] for c in channels)
+
+
+@pytest.mark.asyncio
+async def test_auto_join_progress_callback_and_delay():
+    from services.telegram_service import TelegramService
+    from config.config import AppConfig
+
+    cfg = AppConfig()
+    svc = TelegramService(cfg)
+
+    mock_client = AsyncMock()
+    mock_client.is_connected = MagicMock(return_value=True)
+    mock_client.is_user_authorized = AsyncMock(return_value=True)
+
+    # Return empty dialogs so channels need to be joined
+    mock_client.get_dialogs.return_value = []
+
+    progress_events = []
+    async def fake_progress(step, total, channel_name, delay_seconds, message, status):
+        progress_events.append({
+            "step": step,
+            "total": total,
+            "channel_name": channel_name,
+            "delay_seconds": delay_seconds,
+            "message": message,
+            "status": status,
+        })
+
+    with patch.object(svc, "get_client", return_value=mock_client), \
+         patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+
+        res = await svc.auto_join_elite_channels(progress_callback=fake_progress)
+        assert res["success"] is True
+        assert res["total_channels"] == 5
+        assert len(progress_events) > 0
+
+        # Verify progress messages and waiting status
+        waiting_events = [e for e in progress_events if e["status"] == "WAITING"]
+        assert len(waiting_events) > 0
+        for we in waiting_events:
+            assert 8.0 <= we["delay_seconds"] <= 15.0
+            assert "bảo vệ tài khoản" in we["message"]
+
+        # Verify asyncio.sleep was called with random delays between 8 and 15 seconds
+        sleep_calls = [call.args[0] for call in mock_sleep.call_args_list if isinstance(call.args[0], float) and call.args[0] >= 8.0]
+        assert len(sleep_calls) > 0
+        for s_val in sleep_calls:
+            assert 8.0 <= s_val <= 15.0
+

@@ -53,7 +53,9 @@ async def scan_pinned_channels():
     upd_parser = ChannelUpdateParser()
     binance_symbols = get_binance_futures_symbols()
 
-    client = TelegramClient("data/telegram_user", 28680296, "927e2da6e7d0ec3d97a79d11cc794e46")
+    if not cfg.telegram.api_id or not cfg.telegram.api_hash:
+        raise RuntimeError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in local .env")
+    client = TelegramClient("data/telegram_user", cfg.telegram.api_id, cfg.telegram.api_hash)
     await client.connect()
     if not await client.is_user_authorized():
         print("Telegram not authorized!")

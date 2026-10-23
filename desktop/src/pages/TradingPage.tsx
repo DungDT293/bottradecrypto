@@ -3,6 +3,7 @@ import { AlertOctagon, XCircle, ShieldCheck, RefreshCw } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { AITraderCard } from "../components/AITraderCard";
 import type { PositionRecord, OrderRecord } from "../types/api";
 
 export const TradingPage: React.FC = () => {
@@ -156,12 +157,13 @@ export const TradingPage: React.FC = () => {
         <table>
           <thead>
             <tr>
-              <th>Cặp giao dịch</th>
+              <th>Cặp & Nguồn</th>
               <th>Chiều & Đòn bẩy</th>
-              <th>Khối lượng</th>
+              <th>Ký quỹ (Margin) / Số lượng</th>
               <th>Giá vào (Entry)</th>
               <th>Giá hiện tại (Mark)</th>
               <th>Unrealized PnL</th>
+              <th>% PnL (ROE)</th>
               <th>Bảo vệ SL</th>
               <th>Lệnh TP</th>
               <th style={{ textAlign: "right" }}>Thao tác</th>
@@ -170,29 +172,105 @@ export const TradingPage: React.FC = () => {
           <tbody>
             {positions.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                <td colSpan={10} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
                   Hiện không có vị thế bot nào đang mở.
                 </td>
               </tr>
             ) : (
               positions.map((pos) => {
                 const unpnl = parseFloat(pos.unrealized_pnl || "0");
+                const posMargin = parseFloat(pos.initial_margin || "0") || (parseFloat(pos.amount) * parseFloat(pos.entry_price) / (pos.leverage || 1));
+                const posNotional = parseFloat(pos.notional || "0") || (parseFloat(pos.amount) * parseFloat(pos.entry_price));
+                const roePct = pos.roe_pct ? pos.roe_pct : (posMargin > 0 ? `${(unpnl / posMargin * 100).toFixed(2)}%` : "+0.00%");
+                const isRoePos = !roePct.startsWith("-");
+                const isAi = pos.source_type === "AI" || pos.source_label?.includes("AI");
+                const isTelegram = pos.source_type === "TELEGRAM" || (!isAi && pos.source_type !== "MANUAL");
+
                 return (
                   <tr key={pos.symbol}>
-                    <td className="mono" style={{ fontWeight: 700, color: "#fff" }}>{pos.symbol}</td>
+                    <td>
+                      <div className="mono" style={{ fontWeight: 700, color: "#fff", fontSize: "14px" }}>
+                        {pos.symbol}
+                      </div>
+                      <div style={{ marginTop: "4px" }}>
+                        {isAi ? (
+                          <span
+                            className="badge"
+                            style={{
+                              background: "rgba(168, 85, 247, 0.15)",
+                              color: "#c084fc",
+                              border: "1px solid rgba(168, 85, 247, 0.35)",
+                              fontSize: "10px",
+                              fontWeight: 600,
+                              padding: "2px 6px",
+                            }}
+                          >
+                            🤖 AI Quant (Argon 4)
+                          </span>
+                        ) : isTelegram ? (
+                          <span
+                            className="badge"
+                            style={{
+                              background: "rgba(59, 130, 246, 0.12)",
+                              color: "#60a5fa",
+                              border: "1px solid rgba(59, 130, 246, 0.3)",
+                              fontSize: "10px",
+                              fontWeight: 600,
+                              padding: "2px 6px",
+                            }}
+                          >
+                            {pos.source_label || "📢 Telegram"}
+                          </span>
+                        ) : (
+                          <span
+                            className="badge"
+                            style={{
+                              background: "rgba(156, 163, 175, 0.12)",
+                              color: "#9ca3af",
+                              fontSize: "10px",
+                              padding: "2px 6px",
+                            }}
+                          >
+                            👤 Thủ công
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td>
                       <span className={`badge ${pos.side === "LONG" ? "badge-read-only" : "badge-live"}`}>
                         {pos.side} {pos.leverage}x ({pos.margin_type})
                       </span>
                     </td>
-                    <td className="mono">{pos.amount}</td>
+                    <td className="mono">
+                      <div style={{ fontWeight: 700, color: "#10b981", fontSize: "13px" }}>
+                        ${posMargin.toFixed(2)} USDT
+                      </div>
+                      <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                        {pos.amount} coin (~${posNotional.toFixed(1)})
+                      </div>
+                    </td>
                     <td className="mono">{pos.entry_price}</td>
                     <td className="mono">{pos.mark_price || "—"}</td>
                     <td className={`mono ${unpnl >= 0 ? "text-success" : "text-danger"}`} style={{ fontWeight: 700 }}>
                       {unpnl >= 0 ? `+${unpnl.toFixed(2)}` : unpnl.toFixed(2)} USDT
                     </td>
+                    <td className={`mono ${isRoePos ? "text-success" : "text-danger"}`} style={{ fontWeight: 700, fontSize: "13px" }}>
+                      {isRoePos && !roePct.startsWith("+") ? `+${roePct}` : roePct}
+                    </td>
                     <td>
-                      {pos.sl_order_id ? (
+                      {pos.sl_price ? (
+                        <span
+                          className="badge"
+                          style={{
+                            background: "rgba(239, 68, 68, 0.15)",
+                            color: "#f87171",
+                            border: "1px solid rgba(239, 68, 68, 0.35)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          SL: {pos.sl_price}
+                        </span>
+                      ) : pos.sl_order_id ? (
                         <span className="badge badge-read-only">SL: {pos.sl_order_id.slice(-6)}</span>
                       ) : (
                         <span className="badge badge-live">CHƯA CÓ SL</span>
@@ -266,6 +344,9 @@ export const TradingPage: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Autonomous AI Quant Scanner & Setups */}
+      <AITraderCard />
 
       {/* Confirmation Modal for Single Position Close */}
       <ConfirmModal

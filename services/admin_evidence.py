@@ -19,8 +19,8 @@ class AdminEvidence:
 
 
 _RESULT_MARKERS = re.compile(
-    r"\b(?:profit|roi|pnl|last\s+price|entry\s+price|target\s+(?:achieved|hit)|"
-    r"tp\d*\s*hit|take\s+profit|winner|gain|result|closed)\b",
+    r"\b(?:roi|pnl|last\s+price|target\s+(?:achieved|hit)|"
+    r"tp\d*\s*hit|all\s+tp(?:s)?\s+hit|winner|gain|result|closed(?:\s+in\s+profit)?)\b",
     re.IGNORECASE,
 )
 _BINANCE_MARKERS = re.compile(
@@ -31,6 +31,22 @@ _REFERRAL_MARKERS = re.compile(
     r"(?:referral\s+code|invite\s+code|ref\.?\s*code|register|referral|bonus|qr\s*code)",
     re.IGNORECASE,
 )
+_BRAG_REGEX = re.compile(
+    r"(?:"
+    r"\b(?:ROI|PNL)\s*[:=]?\s*[\+\-]?\d+"
+    r"|[\+\-]?\d+(?:\.\d+)?%\s*(?:ROI|PROFIT|GAIN)"
+    r"|\b(?:BINANCE\s+FUTURES|BINANCE).*(?:ROI|PNL)"
+    r"|\b(?:TARGET\s+(?:\d+\s+)?(?:ACHIEVED|HIT)|TP\d*\s*HIT|ALL\s+TP(?:S)?\s+HIT|CLOSED\s+IN\s+PROFIT|MASSIVE\s+PROFIT)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_brag_media_claim(raw_text: str) -> bool:
+    """Return True if message text contains explicit profit/result bragging patterns."""
+    if not raw_text:
+        return False
+    return bool(_BRAG_REGEX.search(raw_text))
 
 
 def _document_is_image(document: Any) -> bool:

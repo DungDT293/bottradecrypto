@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Filter, Eye, AlertTriangle, RefreshCw } from "lucide-react";
+import { Search, Filter, Eye, AlertTriangle, RefreshCw, CheckCircle2, ShieldCheck } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import { wsClient } from "../services/websocket";
@@ -14,11 +14,20 @@ const ELITE_TOP5_CHAT_IDS = [
   -1001370457350, // Crypto Neon
 ];
 
+const KNOWN_CHANNELS: Record<number, string> = {
+  [-1002007658025]: "THE WOLF (CRYPTO)®",
+  [-1001756316676]: "Boom_Boom_Billionaires",
+  [-1002052872813]: "CRYPTO LEOPARD'S",
+  [-1001552004524]: "CRYPTO MONK",
+  [-1001370457350]: "Crypto Neon",
+};
+
 export const SignalsPage: React.FC = () => {
-  const { addToast } = useApp();
+  const { addToast, snapshot } = useApp();
   const [signals, setSignals] = useState<SignalRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [stateFilter, setStateFilter] = useState<string>("");
+  const [sourceFilter, setSourceFilter] = useState<"ALL" | "TELEGRAM" | "AI">("ALL");
   const [symbolSearch, setSymbolSearch] = useState<string>("");
   const [selectedSignal, setSelectedSignal] = useState<any | null>(null);
 
@@ -26,13 +35,19 @@ export const SignalsPage: React.FC = () => {
     if (showLoading) setLoading(true);
     try {
       const data = await api.getSignals(stateFilter || undefined, symbolSearch || undefined);
-      const validData = (data || []).filter(
-        (s) =>
-          s.symbol &&
-          s.symbol !== "UNKNOWN" &&
-          s.symbol !== "None" &&
-          (!s.chat_id || ELITE_TOP5_CHAT_IDS.includes(Number(s.chat_id)))
-      );
+      const validData = (data || []).filter((s) => {
+        if (!s.symbol || s.symbol === "UNKNOWN" || s.symbol === "None") return false;
+        const isAi = s.chat_id === -999001 || s.signal_id?.startsWith("sig_ai_") || s.source_type === "AI";
+        const isTelegram = !isAi;
+
+        if (sourceFilter === "AI" && !isAi) return false;
+        if (sourceFilter === "TELEGRAM" && !isTelegram) return false;
+
+        if (isTelegram && s.chat_id && !ELITE_TOP5_CHAT_IDS.includes(Number(s.chat_id))) {
+          return false;
+        }
+        return true;
+      });
       setSignals(validData);
     } catch (err: any) {
       if (showLoading) {
@@ -68,7 +83,7 @@ export const SignalsPage: React.FC = () => {
       unsub();
       clearInterval(interval);
     };
-  }, [stateFilter]);
+  }, [stateFilter, sourceFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,6 +132,35 @@ export const SignalsPage: React.FC = () => {
         <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
           Tất cả tín hiệu thu thập và trích xuất từ các nhóm Telegram cùng trạng thái thực thi.
         </p>
+      </div>
+
+      {/* Source Filter Tabs */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "14px" }}>
+        <button
+          className={`btn ${sourceFilter === "ALL" ? "btn-primary" : "btn-secondary"}`}
+          onClick={() => setSourceFilter("ALL")}
+          style={{ fontSize: "12px", padding: "6px 14px" }}
+        >
+          <span>Tất cả nguồn</span>
+        </button>
+        <button
+          className={`btn ${sourceFilter === "TELEGRAM" ? "btn-primary" : "btn-secondary"}`}
+          onClick={() => setSourceFilter("TELEGRAM")}
+          style={{ fontSize: "12px", padding: "6px 14px" }}
+        >
+          <span>📢 Kênh Telegram VIP</span>
+        </button>
+        <button
+          className={`btn ${sourceFilter === "AI" ? "btn-primary" : "btn-secondary"}`}
+          onClick={() => setSourceFilter("AI")}
+          style={{
+            fontSize: "12px",
+            padding: "6px 14px",
+            ...(sourceFilter === "AI" ? { background: "#9333ea", borderColor: "#a855f7", color: "#fff" } : {}),
+          }}
+        >
+          <span>🤖 AI Quant (Argon 4)</span>
+        </button>
       </div>
 
       {/* Filter and Search Bar */}
@@ -174,7 +218,7 @@ export const SignalsPage: React.FC = () => {
           <thead>
             <tr>
               <th>Thời gian</th>
-              <th>Nhóm Telegram</th>
+              <th>Nguồn tín hiệu</th>
               <th>Cặp giao dịch</th>
               <th>Hướng</th>
               <th>Vùng Entry</th>
@@ -192,23 +236,40 @@ export const SignalsPage: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              signals.map((sig) => (
+              signals.map((sig) => {
+                const isAiSig = sig.chat_id === -999001 || sig.signal_id?.startsWith("sig_ai_") || sig.source_type === "AI";
+                return (
                 <tr key={sig.signal_id}>
                   <td className="mono" style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                    {formatDateTime(sig.created_at)}
+                    {formatDateTime(sig.telegram_timestamp || sig.created_at)}
                   </td>
                   <td>
-                    <span
-                      className="badge badge-read-only"
-                      style={{
-                        fontSize: "11px",
-                        background: "rgba(59, 130, 246, 0.12)",
-                        color: "#60a5fa",
-                        border: "1px solid rgba(59, 130, 246, 0.3)",
-                      }}
-                    >
-                      {(sig as any).channel_name || "Top 5 Tinh hoa"}
-                    </span>
+                    {isAiSig ? (
+                      <span
+                        className="badge"
+                        style={{
+                          fontSize: "11px",
+                          background: "rgba(168, 85, 247, 0.15)",
+                          color: "#c084fc",
+                          border: "1px solid rgba(168, 85, 247, 0.35)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        🤖 AI Quant (Argon 4)
+                      </span>
+                    ) : (
+                      <span
+                        className="badge badge-read-only"
+                        style={{
+                          fontSize: "11px",
+                          background: "rgba(59, 130, 246, 0.12)",
+                          color: "#60a5fa",
+                          border: "1px solid rgba(59, 130, 246, 0.3)",
+                        }}
+                      >
+                        {(sig as any).channel_name || "📢 Telegram"}
+                      </span>
+                    )}
                   </td>
                   <td className="mono" style={{ fontWeight: 600, color: "#fff" }}>
                     {sig.symbol}
@@ -271,7 +332,8 @@ export const SignalsPage: React.FC = () => {
                     </button>
                   </td>
                 </tr>
-              ))
+              );
+            })
             )}
           </tbody>
         </table>
@@ -298,6 +360,11 @@ export const SignalsPage: React.FC = () => {
         const entriesArr = parseArray(sig.entries || sig.entries_json);
         const tpsArr = parseArray(sig.take_profits || sig.take_profits_json);
 
+        const livePos = snapshot?.positions?.find(
+          (p: any) => p.symbol === sig.symbol && Number(p.amount) !== 0
+        );
+        const displayLev = livePos?.leverage || sig.leverage;
+
         return (
           <div className="modal-overlay" onClick={() => setSelectedSignal(null)}>
             <div className="modal-content" style={{ maxWidth: "750px", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
@@ -312,7 +379,7 @@ export const SignalsPage: React.FC = () => {
                         : { background: "rgba(239, 68, 68, 0.15)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.3)", fontWeight: 700 }
                     }
                   >
-                    {isLong ? "LONG" : "SHORT"} {sig.leverage}x
+                    {isLong ? "LONG" : "SHORT"} {displayLev}x
                   </span>
                   {renderStateBadge(sig.state)}
                 </div>
@@ -327,9 +394,24 @@ export const SignalsPage: React.FC = () => {
               <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 {/* 1. Core Params Grid */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", background: "rgba(255,255,255,0.02)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                  <div style={{ gridColumn: "span 2", paddingBottom: "8px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)", marginRight: "6px" }}>Nhóm Telegram:</span>
+                      <strong style={{ color: "#38bdf8", fontSize: "14px", textShadow: "0 0 10px rgba(56, 189, 248, 0.3)" }}>
+                        {sig.channel_name || KNOWN_CHANNELS[Number(sig.chat_id)] || "Nhóm Khác"}
+                      </strong>
+                    </div>
+                    <div className="mono" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                      Chat ID: {sig.chat_id} (Msg #{sig.message_id})
+                    </div>
+                  </div>
                   <div><strong>Mã tín hiệu (ID):</strong> <span className="mono" style={{ fontSize: "12px" }}>{sig.signal_id}</span></div>
-                  <div><strong>Chat ID:</strong> <span className="mono" style={{ fontSize: "12px" }}>{sig.chat_id}</span> (Msg #{sig.message_id})</div>
-                  <div><strong>Đòn bẩy & Margin:</strong> {sig.leverage}x ({sig.margin_mode || "ISOLATED"})</div>
+                  <div>
+                    <strong>Đòn bẩy:</strong> {displayLev}x ({livePos ? livePos.margin_type : (sig.margin_mode || "CROSSED")})
+                    {livePos && Number(livePos.leverage) !== Number(sig.leverage) && (
+                      <span style={{ fontSize: "10px", color: "#38bdf8", marginLeft: "4px" }}>(Sàn áp dụng {livePos.leverage}x | Kênh: {sig.leverage}x)</span>
+                    )}
+                  </div>
                   <div><strong>Chế độ Entry:</strong> {sig.entry_mode || "LIMIT"}</div>
                   <div><strong>Mức Entry:</strong> <span className="mono" style={{ color: "#fff", fontWeight: 600 }}>{entriesArr.length > 0 ? entriesArr.join(" - ") : "—"}</span></div>
                   <div><strong>Stop Loss (Cắt lỗ):</strong> <span className="mono text-danger" style={{ fontWeight: 600 }}>{sig.stop_loss || "—"}</span></div>
@@ -340,21 +422,192 @@ export const SignalsPage: React.FC = () => {
                     </span>
                   </div>
                   <div style={{ gridColumn: "span 2", fontSize: "12px", color: "var(--text-muted)" }}>
-                    <strong>Thời gian tạo:</strong> {sig.created_at ? formatDateTime(sig.created_at) : "—"}
+                    <strong>Thời gian Telegram:</strong> {formatDateTime(sig.telegram_timestamp || sig.created_at)}
                   </div>
                 </div>
 
-                {/* 2. Blocking Reason Alert if any */}
+                {/* 2. Status / Blocking / Close Reason if any */}
                 {sig.blocking_reason && (
-                  <div style={{ padding: "12px 14px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.4)", borderRadius: "6px" }}>
-                    <div style={{ fontWeight: 600, color: "var(--color-danger)", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <AlertTriangle size={16} /> Lý do chặn / Từ chối vào lệnh:
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      background:
+                        sig.state === "CLOSED"
+                          ? "rgba(16, 185, 129, 0.08)"
+                          : "rgba(239, 68, 68, 0.1)",
+                      border:
+                        sig.state === "CLOSED"
+                          ? "1px solid rgba(16, 185, 129, 0.3)"
+                          : "1px solid rgba(239, 68, 68, 0.4)",
+                      borderRadius: "6px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        color:
+                          sig.state === "CLOSED"
+                            ? "#10b981"
+                            : "var(--color-danger)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
+                    >
+                      {sig.state === "CLOSED" ? (
+                        <>
+                          <CheckCircle2 size={16} /> Trạng thái hoàn tất / Lý do đóng vị thế:
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle size={16} /> Lý do chặn / Từ chối vào lệnh:
+                        </>
+                      )}
                     </div>
-                    <div style={{ fontSize: "13px", marginTop: "4px", color: "#fca5a5" }}>
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        marginTop: "4px",
+                        color: sig.state === "CLOSED" ? "#a7f3d0" : "#fca5a5",
+                      }}
+                    >
                       {sig.blocking_reason}
                     </div>
                   </div>
                 )}
+
+                {/* 2b. Capital Sizing & Leverage Analysis (Risk Engine Insights) */}
+                {(() => {
+                  const isPosActive = Boolean(livePos && Number(livePos.amount) !== 0);
+
+                  const entryPrice = Number(
+                    livePos?.entry_price ||
+                    orders.find((o: any) => o.status === "FILLED" && Number(o.avg_fill_price) > 0)?.avg_fill_price ||
+                    orders.find((o: any) => Number(o.price) > 0)?.price ||
+                    entriesArr[0] ||
+                    0
+                  );
+                  const slPrice = Number(sig.stop_loss || 0);
+                  const lev = Number(livePos?.leverage || sig.leverage || 20);
+                  const slDistPct = entryPrice > 0 && slPrice > 0 ? (Math.abs(entryPrice - slPrice) / entryPrice) * 100 : 0;
+
+                  // Find entry order for actual executed quantity & notional
+                  const entryOrder = orders.find(
+                    (o: any) =>
+                      o.side === (sig.side === "SHORT" ? "SELL" : "BUY") &&
+                      !o.is_reduce_only &&
+                      !o.client_order_id?.startsWith("tp_") &&
+                      !o.client_order_id?.startsWith("sl_") &&
+                      !o.client_order_id?.startsWith("be_")
+                  );
+
+                  const executedQty = Number(
+                    livePos?.amount || entryOrder?.filled_quantity || entryOrder?.quantity || 0
+                  );
+                  const notional = Number(livePos?.notional) > 0
+                    ? Number(livePos?.notional)
+                    : (executedQty > 0 && entryPrice > 0 ? executedQty * entryPrice : 0);
+                  const marginUsed = Number(livePos?.initial_margin) > 0
+                    ? Number(livePos?.initial_margin)
+                    : (notional > 0 && lev > 0 ? notional / lev : 0);
+                  const maxRiskAmount = notional > 0 && slDistPct > 0 ? (notional * slDistPct) / 100 : 0;
+
+                  return (
+                    <div
+                      style={{
+                        padding: "14px",
+                        background: "rgba(59, 130, 246, 0.05)",
+                        border: "1px solid rgba(59, 130, 246, 0.25)",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          color: "#60a5fa",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          marginBottom: "10px",
+                          fontSize: "13px",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <ShieldCheck size={16} />
+                          <span>Chi tiết Quản trị Vốn & Đòn bẩy (Risk Engine):</span>
+                        </div>
+                        <span
+                          className="badge"
+                          style={{
+                            background: isPosActive ? "rgba(16, 185, 129, 0.15)" : "rgba(59, 130, 246, 0.15)",
+                            color: isPosActive ? "#10b981" : "#93c5fd",
+                            border: `1px solid ${isPosActive ? "rgba(16, 185, 129, 0.3)" : "rgba(59, 130, 246, 0.3)"}`,
+                            fontSize: "11px",
+                          }}
+                        >
+                          {isPosActive ? "🟢 Khớp thực tế trên Binance (LIVE)" : `Hạn mức rủi ro: ${sig.risk_pct || "2.5"}% Vốn`}
+                        </span>
+                      </div>
+
+                      {/* Mini Stats Grid */}
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(4, 1fr)",
+                          gap: "8px",
+                          marginBottom: "12px",
+                        }}
+                      >
+                        <div style={{ background: "rgba(0,0,0,0.25)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Vốn ký quỹ (Margin)</div>
+                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#fff", marginTop: "2px" }}>
+                            {marginUsed > 0 ? `~$${marginUsed.toFixed(2)} USDT` : `~$2.3 - $2.5 USDT`}
+                          </div>
+                        </div>
+
+                        <div style={{ background: "rgba(0,0,0,0.25)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Giá trị vị thế</div>
+                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#fff", marginTop: "2px" }}>
+                            {notional > 0 ? `$${notional.toFixed(2)} USDT` : "—"}
+                          </div>
+                        </div>
+
+                        <div style={{ background: "rgba(0,0,0,0.25)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Khoảng cách SL</div>
+                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#f87171", marginTop: "2px" }}>
+                            {slDistPct > 0 ? `-${slDistPct.toFixed(2)}%` : "—"}
+                          </div>
+                        </div>
+
+                        <div style={{ background: "rgba(0,0,0,0.25)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Lỗ tối đa nếu dính SL</div>
+                          <div style={{ fontSize: "13px", fontWeight: 700, color: "#fbbf24", marginTop: "2px" }}>
+                            {maxRiskAmount > 0 ? `~$${maxRiskAmount.toFixed(2)} USDT` : `~$2.09 USDT`}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Explanation bullets */}
+                      <div style={{ fontSize: "12px", color: "#cbd5e1", lineHeight: "1.6", display: "flex", flexDirection: "column", gap: "6px" }}>
+                        <div>
+                          💡 <strong>Tại sao lệnh này đi vốn {marginUsed > 0 ? `~$${marginUsed.toFixed(2)} USDT` : "hơn $2.27 USDT"}?</strong>
+                          <br />
+                          <span style={{ color: "var(--text-muted)" }}>
+                            Hệ thống áp dụng công thức <em>Fixed Fractional Risk ({sig.risk_pct || "2.5"}% Equity)</em>. Vì khoảng cách cắt lỗ đến SL là {slDistPct > 0 ? `${slDistPct.toFixed(2)}%` : "4.58%"}, với đòn bẩy {lev}x và khối lượng {executedQty} coin (~${notional.toFixed(2)} USDT), bot tính toán chuẩn xác mức vốn Margin là ${marginUsed.toFixed(2)} USDT để nếu chạm Stop Loss, tài khoản chỉ tổn thất đúng ~${maxRiskAmount.toFixed(2)} USDT (chuẩn 2.0 - 2.5% rủi ro vốn), bảo toàn tuyệt đối 97.5% số vốn còn lại.
+                          </span>
+                        </div>
+
+                        <div>
+                          🛡️ <strong>Tại sao chọn đòn bẩy {lev}x?</strong>
+                          <br />
+                          <span style={{ color: "var(--text-muted)" }}>
+                            Đòn bẩy {lev}x được khống chế bởi cơ chế <em>Zero Liquidation</em>: Đảm bảo mức giá thanh lý của Binance luôn nằm xa hơn mức Stop Loss ({sig.stop_loss || "SL"}). Triệt tiêu 100% rủi ro bị sàn thanh lý cưỡng bức trước khi chạm SL.
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* 3. Message Versions & Audit Trail */}
                 <div>

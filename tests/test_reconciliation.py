@@ -2,7 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 import pytest
 
-from core.enums import OrderSide, OrderType, PositionSide, SignalState
+from config.config import AppConfig
+from core.enums import ExecutionMode, OrderSide, OrderType, PositionSide, SignalState
 from core.exceptions import AccountStateBlockedError, ExchangeAdapterError
 from execution.reconciliation import ReconciliationEngine
 from exchange.mock_exchange import MockBinanceFuturesClient
@@ -14,7 +15,8 @@ def test_setup(tmp_path):
     db_file = str(tmp_path / "test_recon.db")
     db = DatabaseManager(db_file)
     mock_client = MockBinanceFuturesClient(initial_equity=Decimal("10000.0"))
-    recon = ReconciliationEngine(mock_client, db)
+    config = AppConfig(mode=ExecutionMode.TESTNET, live_trading_enabled=False)
+    recon = ReconciliationEngine(mock_client, db, config=config)
     return recon, mock_client, db
 
 
@@ -84,7 +86,8 @@ async def test_reconciliation_blocks_if_hedge_mode(tmp_path):
     db = DatabaseManager(str(tmp_path / "test_hedge.db"))
     # Client in Hedge Mode (dualSidePosition=True)
     hedge_client = MockBinanceFuturesClient(is_dual_side=True)
-    recon = ReconciliationEngine(hedge_client, db)
+    config = AppConfig(mode=ExecutionMode.TESTNET, live_trading_enabled=False)
+    recon = ReconciliationEngine(hedge_client, db, config=config)
 
     with pytest.raises(AccountStateBlockedError):
         await recon.reconcile_all()

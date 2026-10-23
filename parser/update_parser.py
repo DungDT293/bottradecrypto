@@ -23,7 +23,11 @@ class ChannelUpdateParser:
         cleaned = text.strip()
 
         # 1. Breakeven commands
-        if re.search(r"\b(?:move\s+sl\s+to\s+be|sl\s+to\s+breakeven|breakeven|dời\s*sl\s*về\s*hòa\s*vốn|doi\s*sl\s*ve\s*hoa\s*von|sl\s*=\s*entry)\b", cleaned, re.IGNORECASE):
+        if re.search(
+            r"\b(?:move\s+sl\s+to\s+be|sl\s+to\s+breakeven|breakeven|dời\s*sl\s*về\s*hòa\s*vốn|doi\s*sl\s*ve\s*hoa\s*von|sl\s*=\s*entry|target\s*\d*\s*hit\s*-\s*sl\s*to\s*breakeven|risk\s*free|kèo\s*bất\s*tử|keo\s*bat\s*tu)\b",
+            cleaned,
+            re.IGNORECASE,
+        ):
             return UpdateType.MOVE_SL_TO_BREAKEVEN, None, "Yeu cau doi SL ve hoa von"
 
         # 2. Cancel pending entry
@@ -44,10 +48,10 @@ class ChannelUpdateParser:
         if re.search(r"\b(?:close\s+(?:now|all|position)|exit\s+(?:now|all)|đóng\s*(?:hết|vị\s*thế)|dong\s*(?:het|vi\s*the)|cat\s*lenh)\b", cleaned, re.IGNORECASE):
             return UpdateType.CLOSE_ALL, None, "Yeu cau dong toan bo vi the"
 
-        # 4. Close Partial
-        m_partial = re.search(r"\b(?:close|take\s+profit|chốt|chot)\s+(\d+)%", cleaned, re.IGNORECASE)
+        # 4. Close Partial (e.g. close 50%, close half, close 1/2, chốt nửa)
+        m_partial = re.search(r"\b(?:close|take\s+profit|chốt|chot)\s+(?:(\d+)%|(half|1/2|nửa|nua))", cleaned, re.IGNORECASE)
         if m_partial:
-            pct = Decimal(m_partial.group(1))
+            pct = Decimal("50") if m_partial.group(2) else Decimal(m_partial.group(1))
             return UpdateType.CLOSE_PARTIAL, pct, f"Yeu cau dong mot phan {pct}%"
 
         # 5. Result reports (Admin boasting or reporting)

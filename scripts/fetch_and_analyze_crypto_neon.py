@@ -28,7 +28,9 @@ OUTPUT_ANALYSIS = "data/crypto_neon_3_months_analysis.json"
 
 async def fetch_messages():
     print(f"Connecting to Telegram for channel {CHAT_ID}...")
-    client = TelegramClient("data/telegram_user", 28680296, "927e2da6e7d0ec3d97a79d11cc794e46")
+    if not config.telegram.api_id or not config.telegram.api_hash:
+        raise RuntimeError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in local .env")
+    client = TelegramClient("data/telegram_user", config.telegram.api_id, config.telegram.api_hash)
     await client.connect()
     if not await client.is_user_authorized():
         print("Telegram client not authorized!")

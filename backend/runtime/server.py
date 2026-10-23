@@ -29,41 +29,20 @@ def check_db_healthy(path: str) -> bool:
 
 
 def resolve_db_path(config: AppConfig, effective_data_dir: str) -> str:
-    import shutil
     raw_path = getattr(config, "database_file", None) or "./data/trading_state.db"
-    candidates = [
-        raw_path,
-        os.path.join(effective_data_dir, raw_path),
-        os.path.join(effective_data_dir, "data", os.path.basename(raw_path)),
-        os.path.join(effective_data_dir, os.path.basename(raw_path)),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "trading_state.db"),
-    ]
-    # Filter to only physically existing and healthy candidates
-    healthy_candidates = []
-    for cand in candidates:
-        if cand and os.path.exists(cand):
-            if check_db_healthy(cand):
-                healthy_candidates.append(cand)
-            else:
-                # If corrupt, attempt self-healing from clean workspace template
-                clean_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "trading_state.db")
-                if os.path.exists(clean_root) and check_db_healthy(clean_root):
-                    try:
-                        shutil.copyfile(clean_root, cand)
-                        healthy_candidates.append(cand)
-                    except Exception:
-                        pass
+    if os.path.isabs(raw_path):
+        return os.path.abspath(raw_path)
 
-    best_candidate = None
-    max_size = -1
-    for cand in healthy_candidates:
-        sz = os.path.getsize(cand)
-        if sz > max_size:
-            max_size = sz
-            best_candidate = cand
-    if best_candidate and max_size > 0:
-        return best_candidate
-    return os.path.join(effective_data_dir, "data", "trading_state.db")
+    # Relative DB paths are rooted at effective runtime data directory, not process CWD.
+    configured = os.path.abspath(os.path.join(effective_data_dir, raw_path))
+    if os.path.exists(configured):
+        return configured
+
+    # Preserve compatibility with packaged configs that still use ./data/trading_state.db.
+    runtime_path = os.path.abspath(os.path.join(effective_data_dir, "data", "trading_state.db"))
+    if runtime_path != configured and os.path.exists(runtime_path):
+        return runtime_path
+    return configured
 
 
 
@@ -84,7 +63,9 @@ def create_app(
         db_path = resolve_db_path(config, get_default_data_dir())
         db = DatabaseManager(db_path=db_path)
 
-    token = session_token or "dev_insecure_token"
+    token = session_token or os.environ.get("TBCE_SESSION_TOKEN", "")
+    if not token:
+        raise RuntimeError("Backend session token is not configured")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -100,19 +81,25 @@ def create_app(
         if hasattr(app.state, "reconciliation_task_starter") and callable(app.state.reconciliation_task_starter):
             reconciliation_task = asyncio.create_task(app.state.reconciliation_task_starter())
 
+        ai_trader_task = None
+        if hasattr(app.state, "ai_trader_task_starter") and callable(app.state.ai_trader_task_starter):
+            ai_trader_task = asyncio.create_task(app.state.ai_trader_task_starter())
+
         yield
         # Shutdown hook: Clean up metadata
         if listener_task and not listener_task.done():
             listener_task.cancel()
         if reconciliation_task and not reconciliation_task.done():
             reconciliation_task.cancel()
+        if ai_trader_task and not ai_trader_task.done():
+            ai_trader_task.cancel()
         if handshake_mgr:
             handshake_mgr.cleanup()
 
 
     app = FastAPI(
         title="Telegram Binance Signal Executor API",
-        version="1.3.0",
+        version="1.3.7",
         docs_url="/docs" if config.mode.value != "LIVE" else None,
         redoc_url=None,
         lifespan=lifespan,
@@ -157,6 +144,8 @@ def create_app(
         app.state.listener_task_starter = api_router.listener_task_starter
     if hasattr(api_router, "reconciliation_task_starter"):
         app.state.reconciliation_task_starter = api_router.reconciliation_task_starter
+    if hasattr(api_router, "ai_trader_task_starter"):
+        app.state.ai_trader_task_starter = api_router.ai_trader_task_starter
 
     app.include_router(api_router, prefix="/api")
     app.include_router(api_router, prefix="")
@@ -218,6 +207,10 @@ def run_server(
         access_log=False,
     )
     server = uvicorn.Server(uvi_config)
+
+    if "--open-browser" in sys.argv or os.environ.get("OPEN_BROWSER") == "1":
+        import webbrowser, threading
+        threading.Timer(1.2, lambda: webbrowser.open(f"http://127.0.0.1:{actual_port}/")).start()
 
     try:
         server.run()

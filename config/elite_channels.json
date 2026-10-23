@@ -1,0 +1,43 @@
+{
+  "version": "1.3.3",
+  "updated_at": "2026-10-21T15:30:00Z",
+  "description": "Danh sách 5 Kênh Tinh Hoa và Link Invite mới nhất cho Bot Trade Crypto",
+  "channels": [
+    {
+      "id": -1002007658025,
+      "name": "THE WOLF (CRYPTO)®",
+      "link": "https://t.me/+lBx7BGAjD4wxY2I5",
+      "hash": "lBx7BGAjD4wxY2I5",
+      "username": null
+    },
+    {
+      "id": -1001756316676,
+      "name": "Boom_Boom_Billionaires",
+      "link": "https://t.me/+n5N2aXPU5Y42MTNk",
+      "hash": "n5N2aXPU5Y42MTNk",
+      "username": null
+    },
+    {
+      "id": -1002052872813,
+      "name": "CRYPTO LEOPARD'S",
+      "link": "https://t.me/+2qFH92pocvhhNWFk",
+      "hash": "2qFH92pocvhhNWFk",
+      "username": null
+    },
+    {
+      "id": -1001552004524,
+      "name": "CRYPTO MONK",
+      "link": "https://t.me/+KacfkVSBR0tkNzI0",
+      "hash": "KacfkVSBR0tkNzI0",
+      "username": null
+    },
+    {
+      "id": -1001370457350,
+      "name": "Crypto Neon",
+      "link": "https://t.me/CryptoNeon0",
+      "hash": null,
+      "username": "CryptoNeon0"
+    }
+  ]
+}
+

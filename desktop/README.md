@@ -1,4 +1,4 @@
-# TELEGRAM BINANCE SIGNAL EXECUTOR - DESKTOP DASHBOARD SHELL (v1.3.1)
+# TELEGRAM BINANCE SIGNAL EXECUTOR - DESKTOP DASHBOARD SHELL (v1.3.3)
 
 Ứng dụng Desktop điều hành và quản trị giao dịch tín hiệu tự động thời gian thực (Real-time Trading Terminal), xây dựng trên nền tảng **Tauri v2 (Rust Core) + React 19 + TypeScript + Vite**.
 
@@ -74,4 +74,4 @@ npm run build
 cd src-tauri
 cargo tauri build --bundles nsis
 ```
-- File cài đặt tạo ra: `target/release/bundle/nsis/telegram-binance-signal-executor_1.3.1_x64-setup.exe`.
+- File cài đặt tạo ra: `target/release/bundle/nsis/telegram-binance-signal-executor_1.3.3_x64-setup.exe`.

@@ -26,9 +26,8 @@ if not exist "%APPDATA%\telegram_binance_signal_executor\data\trading_state.db" 
         copy /y "%~dp0data\trading_state.db" "%APPDATA%\telegram_binance_signal_executor\data\trading_state.db" >nul 2>&1
     )
 )
-copy /y "%~dp0config.yaml" "%APPDATA%\telegram_binance_signal_executor\config.yaml" >nul 2>&1
-if exist "%~dp0.env" (
-    copy /y "%~dp0.env" "%APPDATA%\telegram_binance_signal_executor\.env" >nul 2>&1
+if not exist "%APPDATA%\telegram_binance_signal_executor\config.yaml" (
+    copy /y "%~dp0config.yaml" "%APPDATA%\telegram_binance_signal_executor\config.yaml" >nul 2>&1
 )
 if not exist "%APPDATA%\telegram_binance_signal_executor\data\telegram_user.session" (
     if exist "%~dp0data\telegram_user.session" (

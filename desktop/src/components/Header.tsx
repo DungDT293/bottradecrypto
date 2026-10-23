@@ -92,37 +92,9 @@ export const Header: React.FC = () => {
   };
 
   const renderModeBadge = () => {
-    if (mode === "LIVE") {
-      return (
-        <span className="badge badge-live">
-          <Flame size={14} /> LIVE (TIỀN THẬT)
-        </span>
-      );
-    }
-    if (mode === "SHADOW") {
-      return (
-        <span className="badge badge-shadow">
-          <AlertTriangle size={14} /> SHADOW (MÔ PHỎNG)
-        </span>
-      );
-    }
-    if (mode === "PAPER") {
-      return (
-        <span className="badge badge-shadow">
-          <Shield size={14} /> PAPER TRADING
-        </span>
-      );
-    }
-    if (mode === "TESTNET") {
-      return (
-        <span className="badge badge-shadow">
-          <Shield size={14} /> BINANCE TESTNET
-        </span>
-      );
-    }
     return (
-      <span className="badge badge-read-only">
-        <Shield size={14} /> READ_ONLY (AN TOÀN)
+      <span className="badge badge-live">
+        <Flame size={14} /> LIVE (TIỀN THẬT)
       </span>
     );
   };

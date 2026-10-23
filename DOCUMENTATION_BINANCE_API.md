@@ -68,14 +68,19 @@ Hien tai, Binance da chuyen toan bo lenh conditional (Stop Market, Stop Limit, T
 - Ket qua hop le: `{"dualSidePosition": false}` (One-Way Mode).
 - Neu `true` (Hedge Mode): He thong bao **BLOCKED**; khong tu y doi mode vi se anh huong cac vi the dang mo cua nguoi dung.
 
-### Margin Type (Bat buoc ISOLATED):
-- Endpoint kiem tra: `GET /fapi/v2/positionRisk` -> kiem tra truong `marginType` la `isolated`.
-- Endpoint thiet lap neu chua co vi the: `POST /fapi/v1/marginType` (`marginType=ISOLATED`).
-- Luu y: Binance chi cho phep doi margin type khi KHONG co vi the va KHONG co open orders tren symbol do. Neu da co vi the cross, he thong bao **BLOCKED**.
+### Margin Type (Ho tro ca CROSSED va ISOLATED):
+- Endpoint kiem tra: `GET /fapi/v2/positionRisk` -> kiem tra truong `marginType`.
+- Endpoint thiet lap neu chua co vi the: `POST /fapi/v1/marginType` (`marginType=CROSSED` hoac `ISOLATED`).
+- Luu y: Binance chi cho phep doi margin type khi KHONG co vi the va KHONG co open orders tren symbol do. Mac dinh he thong hoat dong o che do `CROSSED` voi co che kiem soat ty le ky quy nghiem ngat (`target_margin_pct: 5.0%`).
+
+### Dinh dang so thuc & Bo loc (Formatting & Exchange Filters):
+- **Triet tieu loi Scientific Notation (-1100 / -1111):** Toan bo gia tri `quantity`, `price`, `triggerPrice` bat buoc phai qua ham `_format_decimal(val)` su dung `f"{val:f}"` de dam bao khong bao gio xuat hien ky hieu khoa hoc (vd: `1e-8`).
+- **Dem gia an toan khi doi Breakeven (-2021):** Luon kem dem an toan `0.1% tick_size` giua gia Breakeven va Mark Price de tranh loi `-2021: Order would immediately trigger`.
+- **Lam tron buoc gia khi Dong khan cap:** Ham `execute_emergency_close` luon su dung `round_step_size` theo bo loc `LOT_SIZE` cua san de dam bao lenh Market luon hop le.
 
 ### Leverage Filter:
 - Endpoint: `POST /fapi/v1/leverage`
-- He thong luon ap dung `min(signal_leverage, max_leverage_policy)`. Vi du tin ghi 200X, bot chi dat toi da 5X theo config.
+- He thong luon ap dung `min(25, int(0.75 / sl_distance))` theo cong thuc Safe Leverage Clamp de triet tieu hoan toan nguy co bi thanh ly truoc khi cham SL.
 
 ### Exchange Info & Filters:
 - Endpoint: `GET /fapi/v1/exchangeInfo`

@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from config.config import AppConfig
+from config.config import AppConfig, exchange_writes_enabled
 from config.policy_defaults import calculate_tp_weights
 from core.enums import MarginMode, PositionSide, SignalState
 from core.exceptions import AccountStateBlockedError, ReconciliationError
@@ -80,6 +80,39 @@ class ReconciliationEngine:
         self.order_manager = order_manager
         self.config = config or getattr(order_manager, "config", None)
 
+    @staticmethod
+    def _exchange_order_matches(local_order: Any, exchange_order: Dict[str, Any]) -> bool:
+        client_id = exchange_order.get("clientOrderId") or exchange_order.get("clientAlgoId")
+        exchange_id = exchange_order.get("orderId") or exchange_order.get("algoId")
+        return (
+            (client_id and client_id == local_order.client_order_id)
+            or (exchange_id and local_order.exchange_order_id and str(exchange_id) == str(local_order.exchange_order_id))
+        )
+
+    async def _position_owned_by_signal(self, row: Dict[str, Any], symbol: str) -> bool:
+        """Require local entry ownership before mutating state for exchange position."""
+        entry_orders = [o for o in self.order_repo.get_orders_for_signal(row["signal_id"]) if not o.is_reduce_only]
+        if not entry_orders:
+            return False
+        for order in entry_orders:
+            if order.status in ("FILLED", "PARTIALLY_FILLED") and order.filled_quantity > Decimal("0"):
+                return True
+            try:
+                status = await self.client.get_order_status(symbol, client_order_id=order.client_order_id)
+                exchange_status = status.get("status")
+                executed = Decimal(str(status.get("executedQty", "0")))
+                if exchange_status in ("FILLED", "PARTIALLY_FILLED") and executed > Decimal("0"):
+                    self.order_repo.update_order_fill(
+                        order.client_order_id,
+                        exchange_status,
+                        executed,
+                        Decimal(str(status.get("avgPrice", "0"))) if status.get("avgPrice") else None,
+                    )
+                    return True
+            except Exception:
+                continue
+        return False
+
     async def reconcile_all(self) -> Dict[str, Any]:
         report: Dict[str, Any] = {
             "account_one_way": False,
@@ -91,39 +124,41 @@ class ReconciliationEngine:
             "discrepancies": [],
         }
 
+        if self.config is None or not exchange_writes_enabled(self.config):
+            report["discrepancies"].append(
+                f"Reconciliation blocked in {self.config.mode.value if self.config else 'UNKNOWN'} mode"
+            )
+            return report
+
         # 1. Verify One-Way Position Mode
         try:
             await self.client.check_position_mode_one_way()
             report["account_one_way"] = True
         except AccountStateBlockedError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            report["discrepancies"].append(f"Không thể xác minh position mode: {exc}")
+            return report
 
         try:
             equity = await self.client.get_account_equity()
             report["equity"] = str(equity)
-        except Exception:
-            pass
+        except Exception as exc:
+            report["discrepancies"].append(f"Không thể xác minh equity: {exc}")
+            return report
 
-        # 2. Check active signals from local DB
+        # 2. Check active signals from local DB (strictly within last 2 days to avoid matching stale historical entries)
         with self.signal_repo.db.get_connection() as conn:
             raw_active_rows = conn.execute(
                 """
                 SELECT * FROM signals
                 WHERE state IN ('ENTRY_PENDING', 'PARTIALLY_FILLED', 'OPEN_PROTECTED', 'EXITING')
-                ORDER BY created_at DESC
+                ORDER BY updated_at DESC
                 """
             ).fetchall()
 
-        # Deduplicate to strictly 1 active signal per symbol (the latest one)
-        seen_symbols = set()
-        active_rows = []
-        for r in raw_active_rows:
-            sym = dict(r)["symbol"]
-            if sym not in seen_symbols:
-                seen_symbols.add(sym)
-                active_rows.append(r)
+        # Keep every active signal; symbol alone cannot identify one trade.
+        active_rows = raw_active_rows
 
         # Pre-fetch all active open positions, orders, and algo orders in single calls
         positions_map = {}
@@ -136,19 +171,25 @@ class ReconciliationEngine:
             fetch_positions_success = True
         except Exception as e:
             report["discrepancies"].append(f"Không thể lấy danh sách vị thế mở: {e}")
+            return report
 
-        all_open_orders = []
         try:
             all_open_orders = await self.client.get_open_orders()
-        except Exception:
-            pass
+        except Exception as exc:
+            report["discrepancies"].append(f"Không thể lấy danh sách open orders: {exc}")
+            return report
         active_order_symbols = {o.get("symbol") for o in (all_open_orders or []) if o.get("symbol")}
 
         all_open_algos = []
+        fetch_algos_success = False
         try:
             all_open_algos = await self.client.get_open_algo_orders()
-        except Exception:
-            pass
+            fetch_algos_success = True
+        except Exception as exc:
+            report["discrepancies"].append(f"Không thể lấy danh sách algo orders: {exc}")
+
+        cleaned_cids = set()
+        cleaned_aids = set()
 
         for r in active_rows:
             row = dict(r)
@@ -162,8 +203,50 @@ class ReconciliationEngine:
             entry_p = Decimal(str(pos.get("entryPrice", "0"))) if pos else Decimal("0")
             mark_p = Decimal(str(pos.get("markPrice", "0"))) if pos else Decimal("0")
 
+            # Safeguard: Ensure signal matches this open position on Binance (Entry price must match within +/-12%)
+            entries_raw = json.loads(row.get("entries_json") or "[]")
+            if entries_raw and entry_p > Decimal("0") and amt != Decimal("0"):
+                try:
+                    sig_entries = [Decimal(str(e)) for e in entries_raw]
+                    min_sig_e = min(sig_entries)
+                    max_sig_e = max(sig_entries)
+                    if entry_p < min_sig_e * Decimal("0.85") or entry_p > max_sig_e * Decimal("1.15"):
+                        # Stale or mismatched signal from another trade level, ignore!
+                        continue
+                except Exception:
+                    pass
+
+            if state == "ENTRY_PENDING" and amt == Decimal("0"):
+                try:
+                    created_at = datetime.fromisoformat(str(row.get("created_at", "")).replace("Z", "+00:00"))
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=datetime.utcnow().astimezone().tzinfo)
+                    age_seconds = (datetime.now(created_at.tzinfo) - created_at).total_seconds()
+                    ttl = int(getattr(self.config.risk, "entry_order_ttl_seconds", 900))
+                    if age_seconds > ttl:
+                        await self.order_manager.cancel_pending_entries_for_signal(sig_id, symbol) if self.order_manager else None
+                        self.signal_repo.update_signal_state(
+                            sig_id,
+                            SignalState.CLOSED,
+                            reason=f"Entry pending quá TTL ({int(age_seconds)}s > {ttl}s)",
+                        )
+                        self.signal_repo.record_timeline_event(
+                            sig_id,
+                            "ENTRY_TTL_EXPIRED",
+                            f"Đã hủy entry chờ quá hạn sau {int(age_seconds)} giây.",
+                        )
+                        report["orphaned_cleaned"] += 1
+                        continue
+                except Exception as exc:
+                    report["discrepancies"].append(f"Không thể xử lý TTL entry {sig_id}: {exc}")
+
             # Case A: Signal is ENTRY_PENDING but position is ALREADY open on Binance!
             if state in ["ENTRY_PENDING", "PARSED", "VALIDATED"] and amt != Decimal("0"):
+                if not await self._position_owned_by_signal(row, symbol):
+                    report["discrepancies"].append(
+                        f"Vị thế {symbol} không chứng minh được quyền sở hữu từ signal {sig_id}; bỏ qua nhận nuôi và bảo vệ tự động."
+                    )
+                    continue
                 report["discrepancies"].append(
                     f"Phát hiện vị thế {symbol} ({amt}) đã khớp sàn! Đang kích hoạt bảo vệ SL và TP..."
                 )
@@ -171,19 +254,32 @@ class ReconciliationEngine:
                     try:
                         validated_sig = build_validated_signal_from_row(row, self.config)
 
-                        # Check existing open algos on Binance
-                        has_sl_on_san = any(
-                            (a.get("orderType") == "STOP_MARKET" or a.get("type") == "STOP_MARKET")
-                            and a.get("symbol") == symbol
-                            for a in (all_open_algos or [])
-                        )
+                        if not fetch_algos_success:
+                            report["discrepancies"].append(
+                                f"Không thể xác minh algo orders cho {symbol}; bỏ qua reprotection để tránh đặt trùng."
+                            )
+                            continue
 
-                        # Check existing TP limit orders on Binance
+                        local_orders = self.order_repo.get_orders_for_signal(sig_id)
+                        # Match protective orders by client/exchange ID, never by symbol alone.
+                        has_sl_on_san = any(
+                            local.is_reduce_only and local.is_algo and any(
+                                (a.get("orderType") == "STOP_MARKET" or a.get("type") == "STOP_MARKET")
+                                and a.get("symbol") == symbol
+                                and self._exchange_order_matches(local, a)
+                                for a in (all_open_algos or [])
+                            )
+                            for local in local_orders
+                        )
                         has_tps_on_san = any(
-                            o.get("reduceOnly") in [True, "true", "True"]
-                            and o.get("type") == "LIMIT"
-                            and o.get("symbol") == symbol
-                            for o in (all_open_orders or [])
+                            local.is_reduce_only and not local.is_algo and any(
+                                o.get("reduceOnly") in [True, "true", "True"]
+                                and o.get("type") == "LIMIT"
+                                and o.get("symbol") == symbol
+                                and self._exchange_order_matches(local, o)
+                                for o in (all_open_orders or [])
+                            )
+                            for local in local_orders
                         )
 
                         if not has_sl_on_san or not has_tps_on_san:
@@ -194,17 +290,24 @@ class ReconciliationEngine:
                             )
                             report["positions_protected"] += 1
 
-                        # Update DB entry orders to FILLED
+                        # Persist aggregate fill only on the order confirmed by exchange; do not stamp every DCA order as fully filled.
                         db_orders = self.order_repo.get_orders_for_signal(sig_id)
+                        remaining_qty = abs(amt)
                         for o in db_orders:
-                            if not o.is_reduce_only and o.status != "FILLED":
+                            if o.is_reduce_only or remaining_qty <= Decimal("0"):
+                                continue
+                            order_remaining = max(Decimal("0"), o.quantity - o.filled_quantity)
+                            fill_for_order = min(order_remaining, remaining_qty)
+                            if fill_for_order > Decimal("0"):
                                 self.order_repo.update_order_fill(
                                     o.client_order_id,
-                                    status="FILLED",
-                                    filled_qty=abs(amt),
+                                    status="FILLED" if fill_for_order >= order_remaining else "PARTIALLY_FILLED",
+                                    filled_qty=o.filled_quantity + fill_for_order,
                                     avg_price=entry_p,
                                 )
+                                remaining_qty -= fill_for_order
 
+                        # Protection placement is exchange-confirmed only when on_entry_filled returns.
                         self.signal_repo.update_signal_state(sig_id, SignalState.OPEN_PROTECTED)
                         self.signal_repo.record_timeline_event(
                             sig_id,
@@ -223,6 +326,7 @@ class ReconciliationEngine:
                                 pass
                     except Exception as ex:
                         report["discrepancies"].append(f"Lỗi kích hoạt bảo vệ {symbol}: {ex}")
+                continue
             elif state == "ENTRY_PENDING" and amt == Decimal("0"):
                 try:
                     db_orders = self.order_repo.get_orders_for_signal(sig_id)
@@ -247,7 +351,8 @@ class ReconciliationEngine:
                         if any_filled:
                             continue
                         elif all_cancelled:
-                            self.order_repo.cancel_open_orders_for_symbol(symbol)
+                            # Only cancel orders owned by this signal; symbol-wide cancellation can destroy another trade.
+                            self.order_repo.cancel_open_orders_for_signal(sig_id)
                             self.signal_repo.update_signal_state(
                                 sig_id,
                                 SignalState.CLOSED,
@@ -271,21 +376,40 @@ class ReconciliationEngine:
             if state in ["OPEN_PROTECTED", "PARTIALLY_FILLED"]:
                 if not fetch_positions_success:
                     continue  # Do not cancel orders or close signal if network failed to query positionRisk
-                if amt == Decimal("0"):
-                    # Position was closed outside or hit SL/TP while bot was offline
-                    report["discrepancies"].append(
-                        f"Vị thế {symbol} đã đóng trên sàn (amt=0) nhưng local đang ở {state}. Cập nhật sang CLOSED."
-                    )
-                    try:
-                        await self.client.cancel_all_symbol_orders(symbol)
-                    except Exception:
-                        pass
 
+                # Check if position direction matches the signal
+                sig_side = str(row.get("side", "")).upper()
+                is_sig_long = sig_side in ("LONG", "BUY")
+                is_pos_long = amt > Decimal("0")
+                direction_mismatch = (amt != Decimal("0")) and (is_sig_long != is_pos_long)
+
+                if amt == Decimal("0") or direction_mismatch:
+                    # Position was closed outside or hit SL/TP while bot was offline
+                    close_reason = "amt=0" if amt == Decimal("0") else f"đã đổi chiều sang {'LONG' if is_pos_long else 'SHORT'}"
+                    report["discrepancies"].append(
+                        f"Vị thế {symbol} ({sig_side}) đã đóng trên sàn ({close_reason}) nhưng local đang ở {state}. Cập nhật sang CLOSED."
+                    )
+                    # Cancel only exchange orders proven to belong to this signal.
                     orders = self.order_repo.get_orders_for_signal(sig_id)
                     for ord in orders:
-                        if ord.status in ["NEW", "PARTIALLY_FILLED"]:
+                        if ord.status not in ("NEW", "PARTIALLY_FILLED"):
+                            continue
+                        try:
+                            if ord.is_algo:
+                                await self.client.cancel_algo_order(
+                                    symbol,
+                                    algo_id=ord.exchange_order_id or None,
+                                    client_algo_id=ord.client_order_id,
+                                )
+                            else:
+                                await self.client.cancel_standard_order(symbol, ord.client_order_id)
                             self.order_repo.update_order_fill(ord.client_order_id, "CANCELED", ord.filled_quantity, ord.avg_fill_price)
+                            cleaned_cids.add(ord.client_order_id)
+                            if ord.exchange_order_id:
+                                cleaned_aids.add(str(ord.exchange_order_id))
                             report["orphaned_cleaned"] += 1
+                        except Exception as exc:
+                            report["discrepancies"].append(f"Khong the huy lenh {ord.client_order_id}: {exc}")
 
                     self.signal_repo.update_signal_state(
                         sig_id,
@@ -331,9 +455,19 @@ class ReconciliationEngine:
                             if total_sl_qty >= abs(amt):
                                 has_full_coverage = True
 
-                            # Clean up duplicate SL orders if more than 1
-                            if len(active_sl_orders) > 1:
-                                for extra_sl in active_sl_orders[1:]:
+                            local_orders = self.order_repo.get_orders_for_signal(sig_id)
+                            owned_sl_orders = [
+                                a for a in active_sl_orders
+                                if any(self._exchange_order_matches(local, a) for local in local_orders if local.is_reduce_only and local.is_algo)
+                            ]
+                            has_full_coverage = any(
+                                a.get("closePosition") in [True, "true", "True"] or _algo_qty(a) >= abs(amt)
+                                for a in owned_sl_orders
+                            ) or sum(_algo_qty(a) for a in owned_sl_orders) >= abs(amt)
+
+                            # Clean up duplicate SL orders only when ownership is proven.
+                            if len(owned_sl_orders) > 1:
+                                for extra_sl in owned_sl_orders[1:]:
                                     try:
                                         await self.client.cancel_algo_order(
                                             symbol,
@@ -343,11 +477,11 @@ class ReconciliationEngine:
                                     except Exception:
                                         pass
 
-                            if not active_sl_orders or not has_full_coverage:
+                            if fetch_algos_success and (not owned_sl_orders or not has_full_coverage):
                                 report["discrepancies"].append(
                                     f"Phát hiện vị thế {symbol} ({abs(amt)}) chưa đủ SL bảo vệ. Đang tái đồng bộ SL & TP..."
                                 )
-                                for old_sl in active_sl_orders:
+                                for old_sl in owned_sl_orders:
                                     try:
                                         await self.client.cancel_algo_order(
                                             symbol,
@@ -356,17 +490,18 @@ class ReconciliationEngine:
                                         )
                                     except Exception:
                                         pass
-                                try:
-                                    await self.client.cancel_all_orders(symbol)
-                                except Exception:
-                                    pass
+
+                                # Mark previous open SL and TP orders for this signal as CANCELED in DB
+                                for old_o in self.order_repo.get_orders_for_signal(sig_id):
+                                    if old_o.is_reduce_only and old_o.status in ("NEW", "PARTIALLY_FILLED"):
+                                        self.order_repo.update_order_fill(old_o.client_order_id, "CANCELED", old_o.filled_quantity, old_o.avg_fill_price)
 
                                 validated_sig = build_validated_signal_from_row(row, self.config)
+                                # Protection API accepts aggregate filled quantity only; use current position size.
                                 await self.order_manager.on_entry_filled(
                                     signal=validated_sig,
                                     filled_qty=abs(amt),
                                     avg_entry_price=entry_p,
-                                    current_market_price=mark_p,
                                 )
                                 report["positions_protected"] += 1
                                 self.signal_repo.record_timeline_event(
@@ -394,19 +529,38 @@ class ReconciliationEngine:
                                             o for o in db_orders
                                             if ("tp_" in o.client_order_id and ("_1_" in o.client_order_id or o.client_order_id.endswith("_1")))
                                         ]
-                                        tp1_filled_in_db = any(o.status == "FILLED" for o in tp1_orders)
-                                        open_order_cids = {o.get("clientOrderId") for o in (all_open_orders or []) if o.get("clientOrderId")}
-                                        tp1_filled_on_exchange = bool(tp1_orders) and not any(o.client_order_id in open_order_cids for o in tp1_orders)
+                                        tp1_filled = any(o.status == "FILLED" for o in tp1_orders)
 
-                                        # Require actual TP1 fill OR price firmly past TP1 (0.3% buffer so a momentary touch doesn't trigger BE)
-                                        tp1_confirmed = (
-                                            tp1_filled_in_db
-                                            or tp1_filled_on_exchange
-                                            or (mark_p >= tp1_price * Decimal("1.003") if is_long else mark_p <= tp1_price * Decimal("0.997"))
-                                        )
+                                        # Actively query Binance to confirm if TP1 genuinely executed
+                                        if not tp1_filled and tp1_orders:
+                                            for tp_ord in tp1_orders:
+                                                try:
+                                                    st = await self.client.get_order_status(symbol, client_order_id=tp_ord.client_order_id)
+                                                    if st.get("status") == "FILLED":
+                                                        tp1_filled = True
+                                                        self.order_repo.update_order_fill(
+                                                            tp_ord.client_order_id,
+                                                            "FILLED",
+                                                            Decimal(str(st.get("executedQty", "0"))),
+                                                            Decimal(str(st.get("avgPrice", "0"))),
+                                                        )
+                                                        break
+                                                except Exception:
+                                                    pass
 
-                                        # Guard: Current mark price MUST be comfortably in profit compared to entry price (at least 0.2%)
-                                        price_favorable_for_be = (mark_p >= entry_p * Decimal("1.002")) if is_long else (mark_p <= entry_p * Decimal("0.998"))
+                                        # Strict validation: For LONG, TP1 MUST be above entry price; for SHORT, TP1 MUST be below entry price
+                                        valid_tp1_direction = (tp1_price > entry_p * Decimal("1.002")) if is_long else (tp1_price < entry_p * Decimal("0.998"))
+                                        if not valid_tp1_direction:
+                                            continue
+
+                                        # Price check: Mark price MUST actually touch or exceed TP1 price and TP1 must be valid
+                                        price_reached_tp1 = valid_tp1_direction and ((mark_p >= tp1_price if is_long else mark_p <= tp1_price) if mark_p > Decimal("0") else False)
+
+                                        # Guard: Current mark price MUST be comfortably in profit compared to entry price (at least 0.5% profit cushion)
+                                        price_favorable_for_be = (mark_p >= entry_p * Decimal("1.005")) if is_long else (mark_p <= entry_p * Decimal("0.995"))
+
+                                        # Safe trigger: TP1 order actually FILLED on Binance, OR price genuinely reached TP1 with comfortable profit
+                                        tp1_confirmed = tp1_filled or (price_reached_tp1 and price_favorable_for_be)
 
                                         if tp1_confirmed and price_favorable_for_be:
                                             validated_sig = build_validated_signal_from_row(row, self.config)
@@ -415,20 +569,76 @@ class ReconciliationEngine:
                                                 if o.is_algo and o.status == "NEW" and not o.client_order_id.startswith("be_"):
                                                     old_sl_id = o.client_order_id
                                                     break
-                                            await self.order_manager.move_sl_to_breakeven(
+                                            be_res = await self.order_manager.move_sl_to_breakeven(
                                                 signal=validated_sig,
                                                 position_qty=abs(amt),
                                                 avg_entry_price=entry_p,
                                                 existing_sl_algo_id=old_sl_id,
                                             )
-                                            report["breakeven_activated"] += 1
+                                            if be_res:
+                                                report["breakeven_activated"] += 1
+                                                report["discrepancies"].append(
+                                                    f"KÈO BẤT TỬ: TP1 ({tp1_price}) của {symbol} đã khớp! Đã tự động dời SL về hòa vốn Entry ({entry_p})!"
+                                                )
+                                                self.signal_repo.record_timeline_event(
+                                                    sig_id,
+                                                    "BREAKEVEN_SL_ACTIVATED",
+                                                    f"Kèo Bất Tử: TP1 ({tp1_price}) đã khớp. Đã dời SL về Entry ({entry_p}) + phí sàn!",
+                                                )
+
+                                # Check Step-by-Step Trailing Stop Loss on TP2 hit (Locks in TP1 profit on remaining volume)
+                                has_tp1_trail = any(o.client_order_id.startswith("trail_tp1_") for o in db_orders)
+                                if not has_tp1_trail and len(tps_raw) >= 2:
+                                    tp1_price = Decimal(str(tps_raw[0]))
+                                    tp2_price = Decimal(str(tps_raw[1]))
+                                    is_long = amt > Decimal("0")
+                                    tp2_orders = [
+                                        o for o in db_orders
+                                        if ("tp_" in o.client_order_id and ("_2_" in o.client_order_id or o.client_order_id.endswith("_2")))
+                                    ]
+                                    tp2_filled = any(o.status == "FILLED" for o in tp2_orders)
+                                    if not tp2_filled and tp2_orders:
+                                        for tp2_ord in tp2_orders:
+                                            try:
+                                                st = await self.client.get_order_status(symbol, client_order_id=tp2_ord.client_order_id)
+                                                if st.get("status") == "FILLED":
+                                                    tp2_filled = True
+                                                    self.order_repo.update_order_fill(
+                                                        tp2_ord.client_order_id,
+                                                        "FILLED",
+                                                        Decimal(str(st.get("executedQty", "0"))),
+                                                        Decimal(str(st.get("avgPrice", "0"))),
+                                                    )
+                                                    break
+                                            except Exception:
+                                                pass
+
+                                    valid_tp2_direction = (tp2_price > tp1_price) if is_long else (tp2_price < tp1_price)
+                                    price_reached_tp2 = valid_tp2_direction and ((mark_p >= tp2_price if is_long else mark_p <= tp2_price) if mark_p > Decimal("0") else False)
+                                    tp2_confirmed = tp2_filled or price_reached_tp2
+
+                                    if tp2_confirmed:
+                                        old_be_or_sl_id = None
+                                        for o in db_orders:
+                                            if o.is_algo and o.status == "NEW":
+                                                old_be_or_sl_id = o.client_order_id
+                                                break
+                                        validated_sig = build_validated_signal_from_row(row, self.config)
+                                        trail_res = await self.order_manager.move_sl_to_trailing_price(
+                                            signal=validated_sig,
+                                            position_qty=abs(amt),
+                                            target_price=tp1_price,
+                                            existing_sl_algo_id=old_be_or_sl_id,
+                                            label="trail_tp1",
+                                        )
+                                        if trail_res:
                                             report["discrepancies"].append(
-                                                f"KÈO BẤT TỬ: TP1 ({tp1_price}) của {symbol} đã khớp! Đã tự động dời SL về hòa vốn Entry ({entry_p})!"
+                                                f"KHÓA LÃI TỪNG NẤC: TP2 ({tp2_price}) của {symbol} đã khớp! Đã tự động dời SL lên mức giá TP1 ({tp1_price}) để khóa trọn lợi nhuận!"
                                             )
                                             self.signal_repo.record_timeline_event(
                                                 sig_id,
-                                                "BREAKEVEN_SL_ACTIVATED",
-                                                f"Kèo Bất Tử: TP1 ({tp1_price}) đã khớp. Đã dời SL về Entry ({entry_p}) + phí sàn!",
+                                                "TRAILING_PROFIT_ACTIVATED",
+                                                f"Khóa Lãi Từng Nấc: TP2 ({tp2_price}) đã khớp. Đã dời SL lên TP1 ({tp1_price}) khóa lãi an toàn cho phần còn lại!",
                                             )
                         except Exception as ex_be:
                             report["discrepancies"].append(f"Lỗi kiểm tra Breakeven cho {symbol}: {ex_be}")
@@ -442,28 +652,71 @@ class ReconciliationEngine:
                     a for a in (all_open_algos or [])
                     if a.get("symbol") == pos_sym
                     and (a.get("orderType") == "STOP_MARKET" or a.get("type") == "STOP_MARKET")
+                    and a.get("reduceOnly") in (True, "true", "True")
                 ]
                 if not active_sl_orders:
                     report["discrepancies"].append(
                         f"CẢNH BÁO: Phát hiện vị thế {pos_sym} ({amt}) đang mở trên sàn nhưng chưa có SL! Đang tự động bảo vệ..."
                     )
-                    with self.signal_repo.db.get_connection() as conn:
-                        sig_row = conn.execute(
-                            "SELECT * FROM signals WHERE symbol = ? AND state != 'REJECTED' ORDER BY created_at DESC LIMIT 1",
-                            (pos_sym,),
-                        ).fetchone()
-                    if sig_row and self.order_manager and self.config:
-                        try:
-                            val_sig = build_validated_signal_from_row(dict(sig_row), self.config)
-                            entry_p = Decimal(str(pos.get("entryPrice", "0")))
-                            await self.order_manager.on_entry_filled(
-                                signal=val_sig,
-                                filled_qty=abs(amt),
-                                avg_entry_price=entry_p,
-                            )
-                            self.signal_repo.update_signal_state(val_sig.signal_id, SignalState.OPEN_PROTECTED)
-                            report["positions_protected"] += 1
-                        except Exception as ex_prot:
-                            report["discrepancies"].append(f"Lỗi tự động bảo vệ vị thế mở {pos_sym}: {ex_prot}")
+                    # No local signal/order ownership means no automatic adoption.
+                    report["discrepancies"].append(
+                        f"Vị thế {pos_sym} không có signal active đã xác minh; không tự nhận nuôi vị thế."
+                    )
+
+        # 4. Clean up Zombie Orders on Binance for symbols with NO open position and NO pending entry
+        try:
+            with self.signal_repo.db.get_connection() as conn:
+                entry_rows = conn.execute("SELECT DISTINCT symbol FROM signals WHERE state = 'ENTRY_PENDING'").fetchall()
+                active_entry_symbols = {r["symbol"] for r in entry_rows}
+
+            open_pos_symbols = {s for s, p in positions_map.items() if abs(Decimal(str(p.get("positionAmt", "0")))) > Decimal("0")}
+
+            # Clean Zombie Algos
+            if fetch_algos_success and all_open_algos:
+                for algo in all_open_algos:
+                    a_sym = algo.get("symbol")
+                    if a_sym and a_sym not in open_pos_symbols and a_sym not in active_entry_symbols:
+                        caid = str(algo.get("clientAlgoId", ""))
+                        aid = algo.get("algoId")
+                        if (caid and caid in cleaned_cids) or (aid and str(aid) in cleaned_aids):
+                            continue
+                        is_reduce = algo.get("reduceOnly") in (True, "true", "True")
+                        is_bot_order = any(caid.startswith(pfx) for pfx in ("sl_", "be_", "trail_", "tp_", "emg_"))
+                        if is_bot_order or is_reduce:
+                            try:
+                                await self.client.cancel_algo_order(
+                                    a_sym,
+                                    algo_id=str(aid) if aid else None,
+                                    client_algo_id=caid if not aid else None,
+                                )
+                                report["orphaned_cleaned"] += 1
+                                report["discrepancies"].append(
+                                    f"Đã dọn dẹp lệnh Zombie Algo {caid or aid} của {a_sym} vì vị thế đã đóng hoàn toàn trên sàn."
+                                )
+                            except Exception as ex_clean:
+                                report["discrepancies"].append(f"Không thể hủy lệnh Zombie Algo {caid or aid}: {ex_clean}")
+
+            # Clean Zombie Standard Limit Orders
+            if all_open_orders:
+                for ord_info in all_open_orders:
+                    o_sym = ord_info.get("symbol")
+                    if o_sym and o_sym not in open_pos_symbols and o_sym not in active_entry_symbols:
+                        cid = str(ord_info.get("clientOrderId", ""))
+                        oid = ord_info.get("orderId")
+                        if (cid and cid in cleaned_cids) or (oid and str(oid) in cleaned_aids):
+                            continue
+                        is_reduce = ord_info.get("reduceOnly") in (True, "true", "True")
+                        is_bot_order = any(cid.startswith(pfx) for pfx in ("sl_", "be_", "trail_", "tp_", "ent_"))
+                        if is_bot_order or is_reduce:
+                            try:
+                                await self.client.cancel_standard_order(o_sym, cid)
+                                report["orphaned_cleaned"] += 1
+                                report["discrepancies"].append(
+                                    f"Đã dọn dẹp lệnh Zombie Limit {cid or oid} của {o_sym} vì vị thế đã đóng hoàn toàn trên sàn."
+                                )
+                            except Exception as ex_clean:
+                                report["discrepancies"].append(f"Không thể hủy lệnh Zombie Limit {cid or oid}: {ex_clean}")
+        except Exception as ex_zombie:
+            report["discrepancies"].append(f"Lỗi kiểm tra lệnh Zombie: {ex_zombie}")
 
         return report

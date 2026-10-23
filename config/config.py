@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
@@ -19,32 +20,31 @@ DEFAULT_8_CHANNELS = DEFAULT_ELITE_CHANNELS
 DEFAULT_22_CHANNELS = DEFAULT_ELITE_CHANNELS
 
 
-# Load local .env if present
-load_dotenv()
-
-
 class TelegramConfig(BaseModel):
-    api_id: Optional[int] = 28680296
-    api_hash: Optional[str] = "927e2da6e7d0ec3d97a79d11cc794e46"
+    api_id: Optional[int] = None
+    api_hash: Optional[str] = None
     phone: Optional[str] = None
     session_name: str = "./data/telegram_user"
     allowed_chat_ids: List[int] = Field(default_factory=lambda: list(DEFAULT_22_CHANNELS))
+    admin_sender_ids: List[int] = Field(default_factory=list)
     reconnect_max_backlog_seconds: int = 300
     sanitize_input: bool = True
+    remote_channels_url: Optional[str] = None
 
 
 class BinanceConfig(BaseModel):
     testnet_base_url: str = "https://demo-fapi.binance.com"
     live_base_url: str = "https://fapi.binance.com"
     recv_window: int = 5000
-    request_timeout_seconds: int = 10
+    request_timeout_seconds: int = 15
     max_retries: int = 3
-    testnet_api_key: Optional[str] = "74OJJEcThtPKbWegQ8qNf4O4Ojav0oSExUnpvlo1Ud2z0LML9mUpQfLfHGKZlftb"
-    testnet_api_secret: Optional[str] = "9C4cEFHbBgH6RtLPW37QkRJmKw6IjnJagYTmmkLB2AxRepl7opleMfxZmoPstbUF"
+    testnet_api_key: Optional[str] = None
+    testnet_api_secret: Optional[str] = None
     live_api_key: Optional[str] = None
     live_api_secret: Optional[str] = None
     algo_order_endpoint: str = "/fapi/v1/algoOrder"
     standard_order_endpoint: str = "/fapi/v1/order"
+    live_user_stream_ws_url: str = "wss://fstream.binance.com/ws"
 
 
 class NotificationsConfig(BaseModel):
@@ -55,17 +55,47 @@ class NotificationsConfig(BaseModel):
     notification_chat_id: Optional[int] = None
 
 
+class GeminiAIConfig(BaseModel):
+    enabled: bool = False
+    api_key: Optional[str] = None
+    preferred_model: str = "gemini-3.6-flash"
+    scan_interval_minutes: int = 15
+    min_confidence: int = 75
+    watchlist: List[str] = Field(default_factory=lambda: [
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+        "DOGEUSDT", "SUIUSDT", "NEARUSDT", "AVAXUSDT", "PEPEUSDT",
+    ])
+
+
 class AppConfig(BaseModel):
-    mode: ExecutionMode = ExecutionMode.TESTNET
+    mode: ExecutionMode = ExecutionMode.READ_ONLY
     live_trading_enabled: bool = False
     data_dir: str = "./data"
     database_file: str = "./data/trading_state.db"
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     binance: BinanceConfig = Field(default_factory=BinanceConfig)
+    ai: GeminiAIConfig = Field(default_factory=GeminiAIConfig)
     risk: RiskPolicy = Field(default_factory=RiskPolicy)
     execution: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     sources: Dict[int, SourcePolicyOverride] = Field(default_factory=dict)
+
+
+def exchange_writes_enabled(config: AppConfig) -> bool:
+    """Return whether automatic exchange mutations are allowed for this config."""
+    return config.mode == ExecutionMode.TESTNET or (
+        config.mode == ExecutionMode.LIVE and config.live_trading_enabled
+    )
+
+
+def is_safe_testnet_url(config: AppConfig) -> bool:
+    """Reject testnet writes pointed at the live Binance host."""
+    testnet_host = (urlsplit(config.binance.testnet_base_url).hostname or "").lower()
+    live_host = (urlsplit(config.binance.live_base_url).hostname or "").lower()
+    return bool(testnet_host) and testnet_host != live_host and testnet_host in {
+        "demo-fapi.binance.com",
+        "testnet.binancefuture.com",
+    }
 
 
 def load_config(config_path: Optional[str] = None) -> AppConfig:
@@ -78,8 +108,6 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         os.path.join(os.path.dirname(sys.executable), ".env"),
         os.path.join(os.path.dirname(sys.executable), "resources", ".env"),
         ".env",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
-        r"e:\TOOL DUNG CODE\bottradecrypto\.env",
     ]
     for env_p in env_candidates:
         if env_p and os.path.exists(env_p):
@@ -114,6 +142,10 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
         with open(actual_path, "r", encoding="utf-8") as f:
             yaml_data = yaml.safe_load(f) or {}
             data.update(yaml_data)
+
+    # A config file must explicitly opt into live trading; missing flag stays safe.
+    if data.get("mode") == ExecutionMode.LIVE.value and data.get("live_trading_enabled") is None:
+        data["live_trading_enabled"] = False
 
     # If allowed_chat_ids is empty in loaded yaml, keep default 22 channels
     tg_data = data.setdefault("telegram", {})
@@ -151,6 +183,10 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             notif_data["notification_chat_id"] = int(os.environ["NOTIFICATION_CHAT_ID"].strip())
         except ValueError:
             pass
+
+    ai_data = data.setdefault("ai", {})
+    if os.getenv("GEMINI_API_KEY") and not ai_data.get("api_key"):
+        ai_data["api_key"] = os.environ["GEMINI_API_KEY"].strip()
 
     return AppConfig.model_validate(data)
 

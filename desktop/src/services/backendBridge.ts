@@ -57,7 +57,7 @@ export async function getBackendInfo(forceRefresh = false): Promise<BackendInfo>
           cachedInfo = {
             host: data.host || host,
             port: data.port || port,
-            session_token: data.session_token || "dev_insecure_token",
+            session_token: data.session_token || "",
             status: "READY",
           };
           return cachedInfo;
@@ -71,7 +71,10 @@ export async function getBackendInfo(forceRefresh = false): Promise<BackendInfo>
         : window.location.port
         ? parseInt(window.location.port)
         : 8000;
-      const envToken = import.meta.env.VITE_SESSION_TOKEN || "dev_insecure_token";
+      const envToken = import.meta.env.VITE_SESSION_TOKEN;
+      if (!envToken) {
+        throw new Error("Backend handshake unavailable; set VITE_SESSION_TOKEN only for explicit development.");
+      }
 
       cachedInfo = {
         host: "127.0.0.1",

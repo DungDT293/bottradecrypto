@@ -73,24 +73,29 @@ class TradingService:
         only_allowed: bool = True,
     ) -> List[Dict[str, Any]]:
         with self.db.get_connection() as conn:
-            query = "SELECT * FROM signals WHERE symbol IS NOT NULL AND symbol != '' AND symbol != 'UNKNOWN' AND symbol != 'None'"
+            query = """
+                SELECT s.*, m.telegram_timestamp AS telegram_time
+                FROM signals s
+                LEFT JOIN messages m ON s.chat_id = m.chat_id AND s.message_id = m.message_id
+                WHERE s.symbol IS NOT NULL AND s.symbol != '' AND s.symbol != 'UNKNOWN' AND s.symbol != 'None'
+            """
             params: List[Any] = []
 
             allowed_ids = getattr(self.config.telegram, "allowed_chat_ids", [])
             if only_allowed and allowed_ids:
                 placeholders = ",".join("?" for _ in allowed_ids)
-                query += f" AND chat_id IN ({placeholders})"
+                query += f" AND (s.chat_id IN ({placeholders}) OR s.chat_id = -999001 OR s.signal_id LIKE 'sig_ai_%')"
                 params.extend(allowed_ids)
 
             if state_filter and state_filter != "ALL":
-                query += " AND state = ?"
+                query += " AND s.state = ?"
                 params.append(state_filter)
 
             if symbol_search:
-                query += " AND symbol LIKE ?"
+                query += " AND s.symbol LIKE ?"
                 params.append(f"%{symbol_search.strip().upper()}%")
 
-            query += " ORDER BY created_at DESC LIMIT ?"
+            query += " ORDER BY COALESCE(m.telegram_timestamp, s.created_at) DESC LIMIT ?"
             params.append(limit)
 
             rows = conn.execute(query, params).fetchall()
@@ -99,7 +104,16 @@ class TradingService:
             for r in rows:
                 item = self.signal_repo._format_signal_row(r)
                 if item:
-                    item["channel_name"] = KNOWN_CHANNELS.get(item.get("chat_id"), "Khác")
+                    # Sync telegram_timestamp so frontend displays exact post time
+                    item["telegram_timestamp"] = item.get("telegram_time") or item.get("telegram_timestamp") or item.get("created_at")
+                    chat_id = item.get("chat_id")
+                    sig_id = str(item.get("signal_id", ""))
+                    if chat_id == -999001 or sig_id.startswith("sig_ai_"):
+                        item["channel_name"] = "🤖 AI Quant (Argon 4)"
+                        item["source_type"] = "AI"
+                    else:
+                        item["channel_name"] = KNOWN_CHANNELS.get(chat_id, "Khác")
+                        item["source_type"] = "TELEGRAM"
                     formatted.append(item)
             return formatted
 
@@ -122,6 +136,9 @@ class TradingService:
         timeline = self.signal_repo.get_timeline(signal_id)
         orders = self.order_repo.get_orders_for_signal(signal_id)
 
+        from services.channel_analytics_service import KNOWN_CHANNELS
+        sig["channel_name"] = KNOWN_CHANNELS.get(sig.get("chat_id"), "Khác")
+
         return {
             "signal": sig,
             "raw_message": dict(msg_row) if msg_row else {},
@@ -130,9 +147,14 @@ class TradingService:
             "orders": [o.model_dump() for o in orders],
         }
 
-    def get_open_positions(self, binance_positions: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    def get_open_positions(
+        self,
+        binance_positions: Optional[List[Dict[str, Any]]] = None,
+        binance_orders: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Retrieves active positions from Binance (if available) or DB and assesses protection status.
+        Cross-checks both local DB orders and live Binance open/algo orders.
         """
         if binance_positions is not None:
             results = []
@@ -150,7 +172,11 @@ class TradingService:
                     mtype = str(bp.get("marginType", "isolated")).upper()
 
                     sl_id = None
+                    sl_price = None
                     tp_ids = []
+                    source_type = "MANUAL"
+                    source_label = "👤 Thủ công"
+
                     with self.db.get_connection() as conn:
                         sl_rows = conn.execute(
                             "SELECT client_order_id, trigger_price FROM orders WHERE symbol = ? AND is_algo = 1 AND status IN ('NEW', 'PARTIALLY_FILLED')",
@@ -158,6 +184,8 @@ class TradingService:
                         ).fetchall()
                         if sl_rows:
                             sl_id = sl_rows[0]["client_order_id"]
+                            if sl_rows[0]["trigger_price"]:
+                                sl_price = str(sl_rows[0]["trigger_price"])
 
                         tp_rows = conn.execute(
                             "SELECT client_order_id FROM orders WHERE symbol = ? AND is_reduce_only = 1 AND is_algo = 0 AND status IN ('NEW', 'PARTIALLY_FILLED')",
@@ -165,17 +193,97 @@ class TradingService:
                         ).fetchall()
                         tp_ids = [r["client_order_id"] for r in tp_rows]
 
+                        # Detect signal origin (AI vs Telegram vs Manual)
+                        from services.channel_analytics_service import KNOWN_CHANNELS
+                        sig_row = conn.execute(
+                            """
+                            SELECT s.signal_id, s.chat_id, o.client_order_id
+                            FROM orders o
+                            LEFT JOIN signals s ON o.signal_id = s.signal_id
+                            WHERE o.symbol = ?
+                            ORDER BY o.created_at DESC LIMIT 1
+                            """,
+                            (sym,),
+                        ).fetchone()
+                        if not sig_row:
+                            sig_row = conn.execute(
+                                "SELECT signal_id, chat_id FROM signals WHERE symbol = ? ORDER BY created_at DESC LIMIT 1",
+                                (sym,),
+                            ).fetchone()
+
+                        if sig_row:
+                            cid = str(sig_row["client_order_id"] or "")
+                            s_id = str(sig_row["signal_id"] or "")
+                            c_id = sig_row["chat_id"]
+                            if c_id == -999001 or s_id.startswith("sig_ai_") or "sig_ai_" in cid:
+                                source_type = "AI"
+                                source_label = "🤖 AI Quant (Argon 4)"
+                            elif c_id in KNOWN_CHANNELS:
+                                source_type = "TELEGRAM"
+                                source_label = f"📢 {KNOWN_CHANNELS[c_id]}"
+                            elif c_id:
+                                source_type = "TELEGRAM"
+                                source_label = "📢 Telegram"
+
+                    # Real-time reconciliation with live Binance orders
+                    if binance_orders is not None:
+                        live_sl = None
+                        live_sl_price = None
+                        live_tps = []
+                        for bo in binance_orders:
+                            if bo.get("symbol") == sym:
+                                o_type = str(bo.get("type", "")).upper()
+                                cid = str(bo.get("clientOrderId", "") or bo.get("clientAlgoId", ""))
+                                oid = str(bo.get("orderId", "") or bo.get("algoId", ""))
+
+                                is_sl = "STOP" in o_type or cid.startswith("sl_") or cid.startswith("be_") or cid.startswith("trail_")
+                                is_tp = "TAKE_PROFIT" in o_type or cid.startswith("tp_") or (bo.get("reduceOnly") and not is_sl and ("LIMIT" in o_type or "TAKE_PROFIT" in o_type))
+
+                                if is_sl:
+                                    live_sl = cid or oid
+                                    trig_px = bo.get("triggerPrice") or bo.get("stopPrice") or bo.get("price") or bo.get("activatePrice")
+                                    if trig_px and float(trig_px) > 0:
+                                        live_sl_price = str(trig_px)
+                                elif is_tp:
+                                    live_tps.append(cid or oid)
+
+                                # Check clientOrderId signature directly
+                                if "sig_ai_" in cid:
+                                    source_type = "AI"
+                                    source_label = "🤖 AI Quant (Argon 4)"
+                                elif "sig_-100" in cid and source_type == "MANUAL":
+                                    source_type = "TELEGRAM"
+                                    source_label = "📢 Telegram"
+
+                        if live_sl:
+                            sl_id = live_sl
+                        if live_sl_price:
+                            sl_price = live_sl_price
+                        # Always reflect true live orders on exchange
+                        if live_tps or binance_orders:
+                            tp_ids = live_tps
+
+                    margin_val = float(bp.get("initialMargin") or (abs(amt) * float(entry_p) / max(lev, 1)))
+                    notional_val = float(bp.get("notional") or (abs(amt) * float(entry_p)))
+                    roe_val = (float(unpnl) / margin_val * 100.0) if margin_val > 0 else 0.0
+
                     results.append({
                         "symbol": sym,
                         "side": side,
                         "amount": f"{abs(amt):.4f}".rstrip("0").rstrip("."),
+                        "initial_margin": f"{margin_val:.2f}",
+                        "notional": f"{notional_val:.2f}",
                         "entry_price": entry_p,
                         "mark_price": mark_p,
                         "unrealized_pnl": unpnl,
+                        "roe_pct": f"{roe_val:+.2f}%",
                         "leverage": lev,
                         "margin_type": mtype,
                         "sl_order_id": sl_id,
+                        "sl_price": sl_price,
                         "tp_order_ids": tp_ids,
+                        "source_type": source_type,
+                        "source_label": source_label,
                     })
                 except Exception:
                     pass
@@ -186,6 +294,12 @@ class TradingService:
             positions = []
             for r in rows:
                 pos = dict(r)
+                q_val = float(pos.get("quantity") or 0)
+                ep_val = float(pos.get("entry_price") or 0)
+                lev_val = int(pos.get("leverage") or 1)
+                pos["amount"] = f"{abs(q_val):.4f}".rstrip("0").rstrip(".")
+                pos["initial_margin"] = f"{(abs(q_val) * ep_val / max(lev_val, 1)):.2f}"
+                pos["notional"] = f"{(abs(q_val) * ep_val):.2f}"
                 algo_orders = conn.execute(
                     """
                     SELECT * FROM orders
@@ -200,6 +314,12 @@ class TradingService:
                 else:
                     pos["protection_status"] = ProtectionStatus.MISSING.value
                     pos["sl_price"] = "N/A"
+
+                pos_margin = float(pos.get("initial_margin") or 1)
+                unpnl_val = float(pos.get("unrealized_pnl") or 0)
+                pos["roe_pct"] = f"{(unpnl_val / pos_margin * 100.0):+.2f}%" if pos_margin > 0 else "+0.00%"
+                pos["source_type"] = "TELEGRAM"
+                pos["source_label"] = "📢 Telegram"
 
                 positions.append(pos)
             return positions
@@ -258,7 +378,7 @@ class TradingService:
             try:
                 sig_time = datetime.fromisoformat(sig["created_at"])
                 age_seconds = (datetime.utcnow() - sig_time.replace(tzinfo=None)).total_seconds()
-                max_age = getattr(self.config.execution, "signal_max_age_seconds", 900)
+                max_age = getattr(self.config.risk, "signal_max_age_seconds", 300)
                 if age_seconds > max_age:
                     self.signal_repo.update_signal_state(
                         signal_id, SignalState.REJECTED, f"Tín hiệu đã quá hạn thời gian vào lệnh ({int(age_seconds)}s > {max_age}s)"

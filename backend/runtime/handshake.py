@@ -57,6 +57,7 @@ class HandshakeData(BaseModel):
     session_token: str
     pid: int
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    nonce: str = ""
 
 
 def find_free_port(preferred_port: Optional[int] = None) -> int:
@@ -85,6 +86,7 @@ class HandshakeManager:
         self.handshake_file = os.path.join(self.data_dir, "backend_handshake.json")
         self.instance_id = str(uuid.uuid4())
         self.session_token = secrets.token_urlsafe(32)
+        self.nonce = secrets.token_urlsafe(24)
         self.current_data: Optional[HandshakeData] = None
 
     def _write_file_secure(self, data: HandshakeData) -> None:
@@ -98,6 +100,17 @@ class HandshakeManager:
         fd = os.open(self.handshake_file, flags, mode)
         with os.fdopen(fd, "wb") as f:
             f.write(content)
+
+        # Also write to APPDATA if running from local workspace
+        try:
+            appdata_dir = get_default_data_dir()
+            if os.path.abspath(appdata_dir) != os.path.abspath(self.data_dir):
+                appdata_file = os.path.join(appdata_dir, "backend_handshake.json")
+                fd2 = os.open(appdata_file, flags, mode)
+                with os.fdopen(fd2, "wb") as f2:
+                    f2.write(content)
+        except Exception:
+            pass
 
     def _force_kill_pid(self, pid: int) -> None:
         try:
@@ -136,22 +149,8 @@ class HandshakeManager:
             except Exception:
                 pass
 
-        # 2. Terminate any orphan backend processes on Windows
-        if os.name == "nt":
-            try:
-                import psutil
-                for p in psutil.process_iter(['pid', 'name', 'ppid']):
-                    try:
-                        p_name = (p.info.get('name') or '').lower()
-                        p_pid = p.info.get('pid', 0)
-                        if p_pid != curr_pid and p_pid != parent_pid and ('backend-x86_64-pc-windows-msvc' in p_name or p_name == 'backend.exe'):
-                            if p_pid != parent_pid:
-                                print(f"[HANDSHAKE] Đang dọn dẹp tiến trình backend thừa (PID {p_pid})...")
-                                psutil.Process(p_pid).kill()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+        # Process cleanup is limited to PID recorded in our own handshake file.
+        # Never kill unrelated processes by image name.
 
     def init_starting(self, port: int) -> HandshakeData:
         """Initializes metadata in STARTING state before server bind."""
@@ -164,6 +163,7 @@ class HandshakeManager:
             port=port,
             session_token=self.session_token,
             pid=os.getpid(),
+            nonce=self.nonce,
         )
         self.current_data = data
         self._write_file_secure(data)
@@ -178,6 +178,7 @@ class HandshakeManager:
             port=actual_port,
             session_token=self.session_token,
             pid=os.getpid(),
+            nonce=self.nonce,
         )
         self.current_data = data
         self._write_file_secure(data)

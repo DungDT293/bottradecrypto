@@ -50,7 +50,10 @@ def get_binance_symbols() -> Set[str]:
 
 async def fetch_and_sync_telegram_history(cutoff_dt: datetime):
     print(f"\n📡 BẮT ĐẦU ĐỒNG BỘ TIN NHẮN TỪ TELEGRAM TRONG VÒNG NỬA NĂM (TỪ {cutoff_dt.strftime('%Y-%m-%d')} ĐẾN NAY)...")
-    client = TelegramClient("data/telegram_user", 28680296, "927e2da6e7d0ec3d97a79d11cc794e46")
+    cfg = load_config()
+    if not cfg.telegram.api_id or not cfg.telegram.api_hash:
+        raise RuntimeError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in local .env")
+    client = TelegramClient("data/telegram_user", cfg.telegram.api_id, cfg.telegram.api_hash)
     await client.connect()
     if not await client.is_user_authorized():
         print("Telegram client not authorized!")

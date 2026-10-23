@@ -29,6 +29,7 @@ struct HandshakeFile {
     port: u16,
     session_token: String,
     pid: Option<u32>,
+    nonce: Option<String>,
 }
 
 pub struct AppState {
@@ -83,32 +84,13 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
     let config_in_data = data_dir.join("config.yaml");
     if !config_in_data.exists() {
         let default_config_candidates = vec![
-            root.join("config.yaml"),
             exe_dir.join("config.yaml"),
             exe_dir.join("resources").join("config.yaml"),
             root.join("config.example.yaml"),
-            PathBuf::from(r"e:\TOOL DUNG CODE\bottradecrypto\config.yaml"),
         ];
         for cand in default_config_candidates {
             if cand.exists() {
                 let _ = fs::copy(&cand, &config_in_data);
-                break;
-            }
-        }
-    }
-
-    // Ensure default .env exists in data_dir
-    let env_in_data = data_dir.join(".env");
-    if !env_in_data.exists() {
-        let default_env_candidates = vec![
-            root.join(".env"),
-            exe_dir.join(".env"),
-            exe_dir.join("resources").join(".env"),
-            PathBuf::from(r"e:\TOOL DUNG CODE\bottradecrypto\.env"),
-        ];
-        for cand in default_env_candidates {
-            if cand.exists() {
-                let _ = fs::copy(&cand, &env_in_data);
                 break;
             }
         }
@@ -125,7 +107,6 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
         root.join("telegram_user.session"),
         exe_dir.join("data").join("telegram_user.session"),
         exe_dir.join("telegram_user.session"),
-        PathBuf::from(r"e:\TOOL DUNG CODE\bottradecrypto\data\telegram_user.session"),
     ];
     for cand in session_candidates {
         if cand.exists() {
@@ -147,7 +128,6 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
         root.join("trading_state.db"),
         exe_dir.join("data").join("trading_state.db"),
         exe_dir.join("trading_state.db"),
-        PathBuf::from(r"e:\TOOL DUNG CODE\bottradecrypto\data\trading_state.db"),
     ];
     for cand in db_candidates {
         if cand.exists() {
@@ -234,14 +214,19 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
         if handshake_path.exists() {
             if let Ok(content) = fs::read_to_string(&handshake_path) {
                 if let Ok(hs) = serde_json::from_str::<HandshakeFile>(&content) {
-                    if hs.status == "READY" && hs.port > 0 {
-                        let actual_pid = hs.pid.or(Some(child_pid));
+                    if hs.status == "READY"
+                        && hs.host == "127.0.0.1"
+                        && hs.port > 0
+                        && hs.pid.unwrap_or(0) > 0
+                        && hs.instance_id.as_deref().map(|v| !v.is_empty()).unwrap_or(false)
+                        && !hs.session_token.is_empty()
+                    {
                         let info = BackendInfo {
                             instance_id: hs.instance_id.unwrap_or_default(),
                             host: hs.host,
                             port: hs.port,
                             session_token: hs.session_token,
-                            pid: actual_pid,
+                            pid: hs.pid,
                             status: "READY".to_string(),
                         };
                         return Ok((child, info));
@@ -252,6 +237,9 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
         thread::sleep(Duration::from_millis(250));
     }
 
+    let mut child = child;
+    let _ = child.kill();
+    let _ = child.wait();
     Err("Hết thời gian chờ backend sẵn sàng (Handshake Timeout)".to_string())
 }
 
@@ -329,20 +317,6 @@ fn exit_application(state: State<AppState>, _app: tauri::AppHandle) -> Result<()
     };
 
     graceful_shutdown_backend(&state.child_process, current_info);
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let _ = std::process::Command::new("taskkill")
-            .args(&["/F", "/IM", "backend.exe", "/T"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-        let _ = std::process::Command::new("taskkill")
-            .args(&["/F", "/IM", "backend-x86_64-pc-windows-msvc.exe", "/T"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-    }
 
     std::process::exit(0);
 }
@@ -581,19 +555,6 @@ pub fn run() {
                     guard.as_ref().map(|i| (i.port, i.session_token.clone()))
                 };
                 graceful_shutdown_backend(&child_for_shutdown, current_info);
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::process::CommandExt;
-                    const CREATE_NO_WINDOW: u32 = 0x08000000;
-                    let _ = std::process::Command::new("taskkill")
-                        .args(&["/F", "/IM", "backend.exe", "/T"])
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .output();
-                    let _ = std::process::Command::new("taskkill")
-                        .args(&["/F", "/IM", "backend-x86_64-pc-windows-msvc.exe", "/T"])
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .output();
-                }
             }
             _ => {}
         });

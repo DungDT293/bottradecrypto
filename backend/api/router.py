@@ -1,19 +1,22 @@
 import asyncio
+import time
 from decimal import Decimal
 import hashlib
 import json
+import math
 import os
+import urllib.request
 import signal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
 
 from backend.api.auth_middleware import make_error_response
 from backend.events.event_bus import event_bus
-from config.config import AppConfig, save_config
+from config.config import AppConfig, exchange_writes_enabled, save_config
 from config.policy_defaults import ExecutionPolicyConfig
-from core.enums import ExecutionMode, OrderSide, OrderType, SignalState, UpdateType
+from core.enums import EntryRangePolicy, ExecutionMode, MarginMode, MultiTPWeightMode, OrderSide, OrderType, SignalState, UpdateType
 from core.models import SourceMetadata
 from parser.normalizer import normalize_text
 from parser.signal_parser import SignalParser
@@ -23,9 +26,10 @@ from services.alert_service import AlertLevel, AlertService
 from services.binance_service import BinanceService
 from services.channel_analytics_service import ChannelAnalyticsService
 from services.license_service import LicenseService
-from services.stats_service import StatsService
+from services.stats_service import StatsService, VN_TZ
 from services.telegram_service import TelegramService
 from services.trading_service import EngineStatus, TradingService
+from services.gemini_autonomous_trader import GeminiAutonomousTrader
 from storage.database import DatabaseManager, OrderRepository, SignalRepository
 from exchange.binance_client import BinanceFuturesClient
 from execution.order_manager import OrderManager
@@ -60,6 +64,7 @@ def create_api_router(
     signal_repo = SignalRepository(db)
     order_repo = OrderRepository(db)
     parser = SignalParser()
+    last_income_sync: Dict[str, float] = {"time": 0.0}
     validator = SignalValidator(config)
     update_parser = ChannelUpdateParser()
 
@@ -82,6 +87,44 @@ def create_api_router(
     )
     trading_svc._reconciler = reconciler
 
+    # Instantiate Gemini Autonomous AI Trader
+    ai_trader = GeminiAutonomousTrader(
+        config=config,
+        binance_client=binance_client,
+        order_manager=order_manager,
+        risk_engine=risk_engine,
+        signal_repo=signal_repo,
+        db=db,
+        entry_enabled_provider=trading_svc.is_entry_enabled,
+        engine_status_provider=trading_svc.get_engine_status,
+    )
+    trading_svc._ai_trader = ai_trader
+
+    # Autonomous AI Market Scanner Background Worker
+    async def run_ai_trader_worker():
+        if getattr(trading_svc, "_ai_worker_started", False):
+            return
+        trading_svc._ai_worker_started = True
+        await asyncio.sleep(12.0)  # Initial wait for server readiness
+        while True:
+            try:
+                if ai_trader.enabled and exchange_writes_enabled(config) and binance_svc.has_credentials():
+                    res = await ai_trader.scan_and_auto_trade()
+                    if res.get("executed") and res["executed"].get("status") == "SUCCESS":
+                        t_info = res["executed"]
+                        alert_svc.add_alert(
+                            AlertLevel.INFO,
+                            "AI Quant Tự Động Khớp Lệnh",
+                            f"🤖 AI Quant vừa khớp lệnh {t_info.get('side')} {t_info.get('quantity')} {t_info.get('symbol')} @ {t_info.get('entry_price')}. Lý do: {t_info.get('rationale')}",
+                            "AI_TRADER",
+                        )
+            except Exception:
+                pass
+            interval = max(3, getattr(ai_trader, "scan_interval_minutes", 15))
+            await asyncio.sleep(interval * 60)
+
+    router.ai_trader_task_starter = run_ai_trader_worker
+
     # Active Reconciliation Background Worker (Guarded against duplicate execution)
     async def run_reconciliation_worker():
         if getattr(trading_svc, "_reconciliation_started", False):
@@ -89,7 +132,7 @@ def create_api_router(
         trading_svc._reconciliation_started = True
         while True:
             try:
-                if binance_svc.has_credentials():
+                if exchange_writes_enabled(config) and binance_svc.has_credentials():
                     from exchange.binance_client import BinanceFuturesClient
                     if BinanceFuturesClient.is_rate_limited():
                         await asyncio.sleep(5.0)
@@ -122,7 +165,8 @@ def create_api_router(
                 db_manager=db,
                 order_manager=order_manager,
                 position_manager=pos_manager,
-                is_shadow=False,
+                is_shadow=config.mode in (ExecutionMode.READ_ONLY, ExecutionMode.SHADOW, ExecutionMode.PAPER),
+                entry_enabled_provider=trading_svc.is_entry_enabled,
             )
             trading_svc._listener = listener
             trading_svc.set_engine_status(EngineStatus.RUNNING_LISTEN)
@@ -171,7 +215,7 @@ def create_api_router(
         # Clean health check: NEVER exposes session token
         return {
             "status": "HEALTHY",
-            "version": "1.3.0",
+            "version": "1.3.7",
             "mode": config.mode.value,
             "live_trading_enabled": config.live_trading_enabled,
             "engine_status": trading_svc.get_engine_status().value,
@@ -180,18 +224,18 @@ def create_api_router(
 
     @router.get("/handshake")
     async def get_handshake():
+        if os.environ.get("TBCE_ALLOW_BROWSER_HANDSHAKE") != "1":
+            raise HTTPException(status_code=404, detail="Handshake unavailable")
         return {
             "status": "READY",
             "host": "127.0.0.1",
+            "port": int(os.environ.get("TBCE_BACKEND_PORT", "0") or 0),
             "session_token": session_token,
         }
 
     @router.get("/snapshot", dependencies=[Depends(verify_token)])
     async def get_snapshot():
         telemetry = stats_svc.get_telegram_telemetry()
-        pnl_today = stats_svc.get_pnl_summary(0)
-        pnl_7d = stats_svc.get_pnl_summary(6)
-        recent_alerts = alert_svc.get_alerts(limit=20)
         account = binance_svc.get_cached_snapshot()
         if binance_svc.has_credentials():
             try:
@@ -199,8 +243,25 @@ def create_api_router(
             except Exception:
                 account = binance_svc.get_cached_snapshot()
 
+            # Periodic background sync of realized PnL from Binance income
+            if time.time() - last_income_sync["time"] > 60.0:
+                try:
+                    c = BinanceFuturesClient(config)
+                    await stats_svc.sync_binance_income(c, days_back=30)
+                    last_income_sync["time"] = time.time()
+                    await c.close()
+                except Exception:
+                    pass
 
-        positions = trading_svc.get_open_positions(binance_positions=account.open_positions)
+        pnl_today = stats_svc.get_pnl_summary(0)
+        pnl_7d = stats_svc.get_pnl_summary(6)
+        recent_alerts = alert_svc.get_alerts(limit=20)
+
+
+        positions = trading_svc.get_open_positions(
+            binance_positions=account.open_positions,
+            binance_orders=account.active_orders,
+        )
         orders = trading_svc.get_active_orders(binance_orders=account.active_orders)
 
         return {
@@ -308,6 +369,7 @@ def create_api_router(
     @router.post("/telegram/allowlist", dependencies=[Depends(verify_token)])
     async def update_allowlist(body: AllowlistUpdateModel):
         config.telegram.allowed_chat_ids = body.allowed_chat_ids
+        save_config(config)
         alert_svc.add_alert(
             AlertLevel.INFO,
             "Cập nhật danh sách theo dõi",
@@ -425,7 +487,7 @@ def create_api_router(
                 raw_text = m.get("raw_text") or ""
                 has_media = bool(m.get("media_kind") or m.get("has_media") or m.get("photo"))
                 if has_media:
-                    from services.admin_evidence import classify_media_claim
+                    from services.admin_evidence import classify_media_claim, is_brag_media_claim
                     evidence = classify_media_claim(raw_text, str(m.get("media_kind") or "photo"))
                     signal_repo.save_admin_evidence(
                         m["chat_id"], m["message_id"],
@@ -433,7 +495,8 @@ def create_api_router(
                         evidence,
                         sender_id=m.get("sender_id"),
                     )
-                    continue
+                    if is_brag_media_claim(raw_text):
+                        continue
                 if not raw_text.strip():
                     continue
 
@@ -711,6 +774,19 @@ def create_api_router(
         )
         return res
 
+    @router.post("/binance/credentials/remove", dependencies=[Depends(verify_token)])
+    async def remove_binance_credentials(target: str = Query("all", pattern="^(testnet|live|all)$")):
+        res = binance_svc.remove_credentials(target=target)
+        save_config(config)
+        await event_bus.publish("binance_status_changed", {"disconnected": True, "target": target})
+        alert_svc.add_alert(
+            AlertLevel.WARNING,
+            "Gỡ bỏ Binance API Key",
+            f"Đã gỡ bỏ khóa API Binance ({target.upper()}) thành công.",
+            "USER",
+        )
+        return res
+
     @router.get("/binance/status", dependencies=[Depends(verify_token)])
     async def get_binance_status():
         snapshot = binance_svc.get_cached_snapshot()
@@ -737,7 +813,7 @@ def create_api_router(
     async def get_signals(
         state: Optional[str] = Query(None),
         symbol: Optional[str] = Query(None),
-        limit: int = Query(200),
+        limit: int = Query(200, ge=1, le=500),
     ):
         return trading_svc.get_signals(state_filter=state, symbol_search=symbol, limit=limit)
 
@@ -757,12 +833,31 @@ def create_api_router(
 
     @router.post("/signals/{signal_id}/resolve", dependencies=[Depends(verify_token)])
     async def resolve_signal(signal_id: str, body: ResolveSignalModel):
+        reason = body.reason.strip()
+        if not reason:
+            raise HTTPException(
+                status_code=422,
+                detail=make_error_response("RESOLVE_REASON_REQUIRED", "Lý do xử lý không được để trống."),
+            )
         try:
-            target_state = SignalState(body.new_state)
+            target_state = SignalState(body.new_state.strip().upper())
         except ValueError:
-            raise HTTPException(status_code=400, detail="Trạng thái không hợp lệ.")
+            raise HTTPException(status_code=400, detail=make_error_response("INVALID_STATE", "Trạng thái không hợp lệ."))
+        if target_state not in (SignalState.VALIDATED, SignalState.REJECTED):
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response("INVALID_RESOLUTION_STATE", "Chỉ được chuyển sang VALIDATED hoặc REJECTED."),
+            )
+        current = trading_svc.signal_repo.get_signal(signal_id)
+        if not current:
+            raise HTTPException(status_code=404, detail=make_error_response("SIGNAL_NOT_FOUND", "Không tìm thấy tín hiệu."))
+        if current.get("state") not in (SignalState.NEEDS_REVIEW.value, SignalState.NEEDS_POLICY.value):
+            raise HTTPException(
+                status_code=409,
+                detail=make_error_response("RESOLVE_STATE_CONFLICT", "Tín hiệu không còn ở trạng thái chờ xử lý."),
+            )
 
-        success = trading_svc.resolve_signal_policy(signal_id, target_state, body.reason)
+        success = trading_svc.resolve_signal_policy(signal_id, target_state, reason)
         if not success:
             raise HTTPException(
                 status_code=400,
@@ -825,7 +920,10 @@ def create_api_router(
                 account = await asyncio.wait_for(binance_svc.sync_account(), timeout=1.5)
             except Exception:
                 account = binance_svc.get_cached_snapshot()
-        return trading_svc.get_open_positions(binance_positions=account.open_positions)
+        return trading_svc.get_open_positions(
+            binance_positions=account.open_positions,
+            binance_orders=account.active_orders,
+        )
 
 
     @router.get("/trading/orders", dependencies=[Depends(verify_token)])
@@ -839,12 +937,27 @@ def create_api_router(
         return trading_svc.get_active_orders(binance_orders=account.active_orders)
 
     @router.get("/trading/trades", dependencies=[Depends(verify_token)])
-    async def get_trading_trades(limit: int = Query(50)):
+    async def get_trading_trades(
+        limit: int = Query(50, ge=1, le=200),
+        days_back: int = Query(0, ge=0, le=3650),
+    ):
         trades_list = []
+        start_utc, end_utc = stats_svc.get_local_day_boundaries(days_back)
+        start_ms = int(start_utc.timestamp() * 1000)
+        end_ms = int(end_utc.timestamp() * 1000)
         if binance_svc.has_credentials():
+            client = None
             try:
                 client = BinanceFuturesClient(config)
-                raw_trades = await client._request("GET", "/fapi/v1/userTrades", params={"limit": limit}, signed=True)
+                raw_trades = await client._request(
+                    "GET",
+                    "/fapi/v1/userTrades",
+                    params={"limit": min(limit, 1000), "startTime": start_ms, "endTime": end_ms},
+                    signed=True,
+                )
+                # Binance returns trades in chronological ascending order; reverse so newest trades come first
+                if raw_trades:
+                    raw_trades = list(reversed(raw_trades))
                 
                 # Pre-fetch order -> signal -> chat_id mapping
                 order_channel_map = {}
@@ -865,9 +978,14 @@ def create_api_router(
 
                 from services.channel_analytics_service import KNOWN_CHANNELS
 
-                for tr in (raw_trades or []):
+                for tr in (raw_trades or [])[:limit]:
                     time_ms = tr.get("time") or 0
-                    t_str = datetime.fromtimestamp(time_ms / 1000).strftime("%d/%m/%Y %H:%M:%S") if time_ms else "—"
+                    t_str = (
+                        datetime.fromtimestamp(time_ms / 1000, tz=timezone.utc)
+                        .astimezone(VN_TZ)
+                        .strftime("%d/%m/%Y %H:%M:%S")
+                        if time_ms else "—"
+                    )
                     pnl_val = float(tr.get("realizedPnl", 0))
                     ord_id = str(tr.get("orderId", ""))
                     chat_id = order_channel_map.get(ord_id)
@@ -886,9 +1004,63 @@ def create_api_router(
                         "channel_name": channel_name,
                         "chat_id": chat_id,
                     })
-                await client.close()
             except Exception:
                 pass
+            finally:
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
+
+        # Fallback to local SQLite database if Binance API call failed or returned empty
+        if not trades_list:
+            from services.channel_analytics_service import KNOWN_CHANNELS
+            try:
+                with db.get_connection() as conn:
+                    c = conn.cursor()
+                    c.execute("""
+                        SELECT o.exchange_order_id, o.client_order_id, o.symbol, o.side, o.price, o.avg_fill_price,
+                               o.quantity, o.filled_quantity, o.created_at, o.updated_at, s.chat_id, o.is_reduce_only
+                        FROM orders o
+                        LEFT JOIN signals s ON o.signal_id = s.signal_id
+                        WHERE (o.status = 'FILLED' OR (o.filled_quantity IS NOT NULL AND CAST(o.filled_quantity AS REAL) > 0))
+                          AND o.updated_at >= ? AND o.updated_at <= ?
+                        ORDER BY o.created_at DESC
+                        LIMIT ?
+                    """, (start_utc.isoformat(), end_utc.isoformat(), limit))
+                    for r in c.fetchall():
+                        exch_id = str(r[0] or r[1])
+                        sym = str(r[2])
+                        side_str = "MUA (BUY)" if str(r[3]).upper() == "BUY" else "BÁN (SELL)"
+                        fill_p = str(r[5] or r[4] or "0")
+                        fill_q = str(r[7] or r[6] or "0")
+                        t_raw = r[9] or r[8] or ""
+                        try:
+                            dt_obj = datetime.fromisoformat(str(t_raw).replace("Z", "+00:00"))
+                            if dt_obj.tzinfo is None:
+                                dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+                            t_str = dt_obj.astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M:%S")
+                        except Exception:
+                            t_str = str(t_raw)[:19]
+                        chat_id = r[10]
+                        channel_name = KNOWN_CHANNELS.get(chat_id, "Thủ công / Khác") if chat_id else "Thủ công / Khác"
+                        trades_list.append({
+                            "id": exch_id,
+                            "order_id": exch_id,
+                            "symbol": sym,
+                            "side": side_str,
+                            "price": fill_p,
+                            "qty": fill_q,
+                            "commission": "0.0000 USDT",
+                            "realized_pnl": 0.0,
+                            "time": t_str,
+                            "channel_name": channel_name,
+                            "chat_id": chat_id,
+                        })
+            except Exception:
+                pass
+
         return trades_list
 
     class ToggleEntryModel(BaseModel):
@@ -909,10 +1081,17 @@ def create_api_router(
     class ClosePositionModel(BaseModel):
         symbol: str
 
+    def require_live_close_confirmation(x_confirm_live: Optional[str]) -> None:
+        if config.mode == ExecutionMode.LIVE and x_confirm_live != "CONFIRM_CLOSE_POSITION":
+            raise HTTPException(
+                status_code=403,
+                detail=make_error_response("LIVE_CONFIRMATION_REQUIRED", "Thao tác đóng vị thế LIVE yêu cầu X-Confirm-Live: CONFIRM_CLOSE_POSITION."),
+            )
+
     @router.post("/trading/close-position", dependencies=[Depends(verify_token)])
-    async def close_position(body: ClosePositionModel):
+    async def close_position(body: ClosePositionModel, x_confirm_live: Optional[str] = Header(None)):
         # Strict validation: Backend rejects write operations when in READ_ONLY or LIVE without confirmation
-        if config.mode == ExecutionMode.READ_ONLY or (config.mode == ExecutionMode.LIVE and not config.live_trading_enabled):
+        if not exchange_writes_enabled(config):
             raise HTTPException(
                 status_code=403,
                 detail=make_error_response(
@@ -920,6 +1099,7 @@ def create_api_router(
                     "Hệ thống đang ở chế độ READ_ONLY. Thao tác đóng lệnh sàn thật bị chặn hoàn toàn.",
                 ),
             )
+        require_live_close_confirmation(x_confirm_live)
         try:
             client = BinanceFuturesClient(config)
             # 1. Cancel all limit orders and algo orders for this symbol on Binance FIRST
@@ -937,6 +1117,10 @@ def create_api_router(
                     quantity=amt,
                     reduce_only=True,
                 )
+            remaining_pos = await client.get_position(body.symbol)
+            remaining_amt = abs(Decimal(str(remaining_pos.get("positionAmt", "0")))) if remaining_pos else Decimal("0")
+            if remaining_amt != Decimal("0"):
+                raise RuntimeError(f"Vị thế {body.symbol} vẫn còn {remaining_amt} sau lệnh đóng")
             await client.close()
 
             # Update local orders and signal state
@@ -967,8 +1151,8 @@ def create_api_router(
             raise HTTPException(status_code=500, detail=make_error_response("CLOSE_FAILED", str(e)))
 
     @router.post("/trading/close-all-bot", dependencies=[Depends(verify_token)])
-    async def close_all_bot_positions():
-        if config.mode == ExecutionMode.READ_ONLY or (config.mode == ExecutionMode.LIVE and not config.live_trading_enabled):
+    async def close_all_bot_positions(x_confirm_live: Optional[str] = Header(None)):
+        if not exchange_writes_enabled(config):
             raise HTTPException(
                 status_code=403,
                 detail=make_error_response(
@@ -976,9 +1160,16 @@ def create_api_router(
                     "Hệ thống đang ở chế độ READ_ONLY. Thao tác đóng tất cả vị thế bị chặn hoàn toàn.",
                 ),
             )
+        require_live_close_confirmation(x_confirm_live)
         try:
             client = BinanceFuturesClient(config)
-            positions = await client.get_open_positions()
+            owned_symbols = {
+                row["symbol"]
+                for row in db.get_connection().execute(
+                    "SELECT DISTINCT symbol FROM signals WHERE state IN ('ENTRY_PENDING','PARTIALLY_FILLED','OPEN_PROTECTED','EXITING')"
+                ).fetchall()
+            }
+            positions = [p for p in await client.get_open_positions() if p.get("symbol") in owned_symbols]
             closed_symbols = []
             for pos in positions:
                 sym = pos.get("symbol")
@@ -994,7 +1185,14 @@ def create_api_router(
                         reduce_only=True,
                     )
                 except Exception as ce:
-                    print(f"Error market closing {sym}: {ce}")
+                    raise RuntimeError(f"Không thể gửi lệnh đóng {sym}: {ce}") from ce
+                try:
+                    current = await client.get_position(sym)
+                    remaining = abs(Decimal(str(current.get("positionAmt", "0")))) if current else Decimal("0")
+                except Exception as ce:
+                    raise RuntimeError(f"Không thể xác minh vị thế {sym} sau khi đóng: {ce}") from ce
+                if remaining != Decimal("0"):
+                    raise RuntimeError(f"Vị thế {sym} vẫn còn {remaining} sau lệnh đóng")
                 order_repo.cancel_open_orders_for_symbol(sym)
                 active_sig = signal_repo.get_active_signal_for_symbol(sym)
                 if active_sig:
@@ -1040,45 +1238,45 @@ def create_api_router(
     # 6. Statistics & Performance
     # -------------------------------------------------------------
     @router.get("/stats/pnl", dependencies=[Depends(verify_token)])
-    async def get_stats_pnl(days_back: int = Query(0)):
-        summary = stats_svc.get_pnl_summary(days_back=days_back)
-        # If daily_pnl table is empty/unpopulated, aggregate live from Binance userTrades
-        raw_pnl = float(summary.get("realized_pnl") or 0)
-        if (not summary.get("has_data") or raw_pnl == 0) and binance_svc.has_credentials():
-            try:
-                client = BinanceFuturesClient(config)
-                raw_trades = await client._request("GET", "/fapi/v1/userTrades", params={"limit": 200}, signed=True)
-                funding_fee = 0.0
+    async def get_stats_pnl(days_back: int = Query(0, ge=0, le=3650)):
+        if binance_svc.has_credentials():
+            # Sync if last sync was > 30s ago
+            if time.time() - last_income_sync["time"] > 30.0:
+                client = None
                 try:
-                    income_records = await client._request("GET", "/fapi/v1/income", params={"incomeType": "FUNDING_FEE", "limit": 100}, signed=True)
-                    funding_fee = sum(float(inc.get("income", 0)) for inc in (income_records or []))
+                    client = BinanceFuturesClient(config)
+                    await stats_svc.sync_binance_income(client, days_back=max(days_back, 30))
+                    last_income_sync["time"] = time.time()
                 except Exception:
                     pass
+                finally:
+                    if client is not None:
+                        try:
+                            await client.close()
+                        except Exception:
+                            pass
 
-                if raw_trades or funding_fee != 0.0:
-                    realized = sum(float(tr.get("realizedPnl", 0)) for tr in (raw_trades or []))
-                    commissions = sum(float(tr.get("commission", 0)) for tr in (raw_trades or []))
-                    closed = [tr for tr in (raw_trades or []) if float(tr.get("realizedPnl", 0)) != 0]
-                    wins = [tr for tr in closed if float(tr.get("realizedPnl", 0)) > 0]
-                    win_rate = round(len(wins) / len(closed) * 100, 1) if closed else 0.0
-                    net_pnl = realized - commissions + funding_fee
-                    summary["realized_pnl"] = f"{realized:.2f}"
-                    summary["commission"] = f"{commissions:.2f}"
-                    summary["funding_fee"] = f"{funding_fee:.2f}"
-                    summary["net_pnl"] = f"{net_pnl:.2f}"
-                    summary["gross_realized_pnl"] = realized
-                    summary["fees_paid"] = commissions
-                    summary["net_realized_pnl"] = net_pnl
-                    summary["total_closed_trades"] = len(closed)
-                    summary["win_count"] = len(wins)
-                    summary["loss_count"] = len(closed) - len(wins)
-                    summary["win_rate_pct"] = win_rate
-                    summary["has_data"] = True
-                    summary["data_completeness"] = "FULL"
-                await client.close()
-            except Exception:
-                pass
+        summary = stats_svc.get_pnl_summary(days_back=days_back)
         return summary
+
+    @router.post("/stats/sync", dependencies=[Depends(verify_token)])
+    async def post_sync_stats():
+        if not binance_svc.has_credentials():
+            return {"success": False, "message": "Chưa kết nối Binance API."}
+        client = None
+        try:
+            client = BinanceFuturesClient(config)
+            res = await stats_svc.sync_binance_income(client, days_back=30)
+            last_income_sync["time"] = time.time()
+            return {"success": True, "details": res, "message": "Đã đồng bộ thành công dữ liệu PnL từ Binance."}
+        except Exception as e:
+            return {"success": False, "message": f"Đồng bộ thất bại: {e}"}
+        finally:
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
     @router.get("/stats/telemetry", dependencies=[Depends(verify_token)])
     async def get_stats_telemetry():
@@ -1107,12 +1305,13 @@ def create_api_router(
             "risk_per_signal_pct": float(config.risk.risk_per_signal_pct),
             "max_daily_loss_pct": float(config.risk.max_daily_loss_pct),
             "max_leverage": int(config.risk.max_leverage),
-            "margin_mode": config.risk.margin_mode,
-            "entry_range_policy": config.execution.entry_range_policy,
-            "multi_tp_default_weight_mode": config.execution.multi_tp_default_weight_mode,
+            "margin_mode": config.risk.margin_mode.value,
+            "entry_range_policy": config.execution.entry_range_policy.value,
+            "multi_tp_default_weight_mode": config.execution.multi_tp_default_weight_mode.value,
             "tp1_target_weight_pct": float(getattr(config.execution, "tp1_target_weight_pct", Decimal("60.0"))),
             "breakeven_after_tp1": bool(config.risk.breakeven_after_tp1_default),
             "sl_buffer_pct": float(getattr(config.risk, "sl_buffer_pct", Decimal("1.0"))),
+            "max_active_signals": int(getattr(config.risk, "max_active_signals", 15)),
         }
 
     class UpdateSettingsModel(BaseModel):
@@ -1123,16 +1322,24 @@ def create_api_router(
         max_leverage: int
         entry_range_policy: str
         multi_tp_default_weight_mode: str
+        margin_mode: Optional[str] = "CROSSED"
         tp1_target_weight_pct: Optional[float] = 60.0
         breakeven_after_tp1: Optional[bool] = True
         sl_buffer_pct: Optional[float] = 1.0
+        max_active_signals: Optional[int] = 15
 
     @router.post("/settings", dependencies=[Depends(verify_token)])
     async def update_settings(
         body: UpdateSettingsModel,
         x_confirm_live: Optional[str] = Header(None),
     ):
-        target_mode = body.mode.upper()
+        target_mode = body.mode.strip().upper()
+        if not math.isfinite(body.risk_per_signal_pct) or not math.isfinite(body.max_daily_loss_pct):
+            raise HTTPException(status_code=422, detail=make_error_response("INVALID_RISK_SETTINGS", "Risk phải là số hữu hạn."))
+        if body.tp1_target_weight_pct is not None and not math.isfinite(body.tp1_target_weight_pct):
+            raise HTTPException(status_code=422, detail=make_error_response("INVALID_TP_WEIGHT", "TP1 weight phải là số hữu hạn."))
+        if body.sl_buffer_pct is not None and not math.isfinite(body.sl_buffer_pct):
+            raise HTTPException(status_code=422, detail=make_error_response("INVALID_SL_BUFFER", "SL buffer phải là số hữu hạn."))
 
         # Strict LIVE gating: Cannot enable LIVE without valid Binance credentials and explicit confirmation
         if target_mode == "LIVE" or body.live_trading_enabled:
@@ -1154,32 +1361,200 @@ def create_api_router(
                 )
 
         try:
-            config.mode = ExecutionMode(target_mode)
+            target_mode_enum = ExecutionMode(target_mode)
         except ValueError:
             raise HTTPException(
                 status_code=400,
                 detail=make_error_response("INVALID_MODE", f"Chế độ thực thi không hợp lệ: {target_mode}"),
             )
 
+        if target_mode == "LIVE" and not body.live_trading_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response("INVALID_MODE_COMBINATION", "LIVE yêu cầu live_trading_enabled=true."),
+            )
+        if target_mode != "LIVE" and body.live_trading_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response("INVALID_MODE_COMBINATION", "live_trading_enabled chỉ hợp lệ với LIVE."),
+            )
+        if body.risk_per_signal_pct <= 0 or body.risk_per_signal_pct > 10 or body.max_daily_loss_pct <= 0 or body.max_daily_loss_pct > 20 or body.max_leverage <= 0 or body.max_leverage > 125:
+            raise HTTPException(
+                status_code=400,
+                detail=make_error_response("INVALID_RISK_SETTINGS", "Risk và leverage phải lớn hơn 0."),
+            )
+
+        config.mode = target_mode_enum
         config.live_trading_enabled = body.live_trading_enabled
         config.risk.risk_per_signal_pct = Decimal(str(min(body.risk_per_signal_pct, 10.0)))
         config.risk.max_daily_loss_pct = Decimal(str(min(body.max_daily_loss_pct, 20.0)))
-        config.risk.max_leverage = min(body.max_leverage, 125)
-        config.execution.entry_range_policy = ExecutionPolicyConfig.normalize_entry_range(body.entry_range_policy)
-        config.execution.multi_tp_default_weight_mode = ExecutionPolicyConfig.normalize_multi_tp(body.multi_tp_default_weight_mode)
+        config.risk.max_leverage = body.max_leverage
+        margin_mode = str(body.margin_mode or "CROSSED").strip().upper()
+        if margin_mode in ("CROSS", "CROSSED"):
+            config.risk.margin_mode = MarginMode.CROSSED
+        elif margin_mode == "ISOLATED":
+            config.risk.margin_mode = MarginMode.ISOLATED
+        else:
+            raise HTTPException(status_code=400, detail=make_error_response("INVALID_MARGIN_MODE", "Margin mode phải là ISOLATED hoặc CROSSED."))
+        entry_policy = ExecutionPolicyConfig.normalize_entry_range(body.entry_range_policy)
+        if not isinstance(entry_policy, EntryRangePolicy) or entry_policy == EntryRangePolicy.NEEDS_POLICY:
+            raise HTTPException(status_code=400, detail=make_error_response("INVALID_ENTRY_RANGE_POLICY", "Entry range policy không hợp lệ."))
+        tp_policy = ExecutionPolicyConfig.normalize_multi_tp(body.multi_tp_default_weight_mode)
+        if not isinstance(tp_policy, MultiTPWeightMode) or tp_policy == MultiTPWeightMode.NEEDS_POLICY:
+            raise HTTPException(status_code=400, detail=make_error_response("INVALID_TP_POLICY", "Multi-TP policy không hợp lệ."))
+        config.execution.entry_range_policy = entry_policy
+        config.execution.multi_tp_default_weight_mode = tp_policy
         if body.tp1_target_weight_pct is not None:
-            clamped_tp1 = min(max(float(body.tp1_target_weight_pct), 10.0), 90.0)
-            config.execution.tp1_target_weight_pct = Decimal(str(clamped_tp1))
+            config.execution.tp1_target_weight_pct = Decimal(str(body.tp1_target_weight_pct))
         if body.breakeven_after_tp1 is not None:
             config.risk.breakeven_after_tp1_default = bool(body.breakeven_after_tp1)
         if body.sl_buffer_pct is not None:
-            clamped_buffer = min(max(float(body.sl_buffer_pct), 0.0), 5.0)
-            config.risk.sl_buffer_pct = Decimal(str(clamped_buffer))
+            config.risk.sl_buffer_pct = Decimal(str(body.sl_buffer_pct))
+        if body.max_active_signals is not None:
+            if body.max_active_signals < 1 or body.max_active_signals > 50:
+                raise HTTPException(status_code=400, detail=make_error_response("INVALID_ACTIVE_SIGNALS", "max_active_signals phải trong khoảng 1-50."))
+            config.risk.max_active_signals = body.max_active_signals
 
         save_config(config)
 
         await event_bus.publish("backend_status_changed", {"mode": config.mode.value, "live": config.live_trading_enabled})
-        return {"success": True, "settings": body.model_dump()}
+        return {
+            "success": True,
+            "settings": {
+                "mode": config.mode.value,
+                "live_trading_enabled": config.live_trading_enabled,
+                "risk_per_signal_pct": float(config.risk.risk_per_signal_pct),
+                "max_daily_loss_pct": float(config.risk.max_daily_loss_pct),
+                "max_leverage": int(config.risk.max_leverage),
+                "margin_mode": config.risk.margin_mode.value,
+                "entry_range_policy": config.execution.entry_range_policy.value,
+                "multi_tp_default_weight_mode": config.execution.multi_tp_default_weight_mode.value,
+                "tp1_target_weight_pct": float(config.execution.tp1_target_weight_pct),
+                "breakeven_after_tp1": bool(config.risk.breakeven_after_tp1_default),
+                "sl_buffer_pct": float(config.risk.sl_buffer_pct),
+                "max_active_signals": int(config.risk.max_active_signals),
+            },
+        }
+
+    # -------------------------------------------------------------
+    # 8b. Gemini Autonomous AI & Quant Trader Endpoints
+    # -------------------------------------------------------------
+    class AIConfigModel(BaseModel):
+        enabled: Optional[bool] = None
+        gemini_api_key: Optional[str] = None
+        preferred_model: Optional[str] = None
+        scan_interval_minutes: Optional[int] = None
+        min_confidence: Optional[int] = None
+        watchlist: Optional[List[str]] = None
+
+    class AIExecuteModel(BaseModel):
+        setup: Dict[str, Any]
+
+    @router.get("/ai/status", dependencies=[Depends(verify_token)])
+    async def get_ai_status():
+        key = ai_trader.gemini_api_key
+        key_masked = None
+        if key and len(key) >= 8:
+            key_masked = f"{key[:4]}...{key[-4:]}"
+        return {
+            "enabled": ai_trader.enabled,
+            "has_gemini_key": bool(key),
+            "gemini_key_masked": key_masked,
+            "preferred_model": getattr(ai_trader, "preferred_model", "gemini-3.6-flash"),
+            "scan_interval_minutes": ai_trader.scan_interval_minutes,
+            "min_confidence": ai_trader.min_confidence,
+            "watchlist": ai_trader.watchlist,
+            "last_scan_time": ai_trader.last_scan_time,
+            "last_scan_results": ai_trader.last_scan_results,
+            "last_scan_skipped_symbols": getattr(ai_trader, "last_scan_skipped_symbols", []),
+            "last_scan_symbol_validation_error": getattr(ai_trader, "last_scan_symbol_validation_error", None),
+            "is_scanning": getattr(ai_trader, "_is_scanning", False),
+            "quota_status": getattr(ai_trader, "_quota_status", "NORMAL"),
+            "cooldown_remaining_seconds": ai_trader.get_cooldown_remaining(),
+            "daily_api_calls": getattr(ai_trader, "_daily_api_calls", 0),
+        }
+
+    @router.post("/ai/config", dependencies=[Depends(verify_token)])
+    async def update_ai_config(body: AIConfigModel):
+        if body.enabled is not None:
+            ai_trader.enabled = body.enabled
+            config.ai.enabled = body.enabled
+        if body.gemini_api_key is not None:
+            clean_key = body.gemini_api_key.strip()
+            ai_trader.gemini_api_key = clean_key if clean_key else None
+            ai_trader._gemini_key_invalid = False
+            config.ai.api_key = clean_key if clean_key else None
+            os.environ["GEMINI_API_KEY"] = clean_key
+        if body.preferred_model is not None:
+            clean_m = body.preferred_model.strip()
+            ai_trader.preferred_model = clean_m
+            config.ai.preferred_model = clean_m
+        if body.scan_interval_minutes is not None:
+            val = max(1, body.scan_interval_minutes)
+            ai_trader.scan_interval_minutes = val
+            config.ai.scan_interval_minutes = val
+        if body.min_confidence is not None:
+            val = max(50, min(100, body.min_confidence))
+            ai_trader.min_confidence = val
+            config.ai.min_confidence = val
+        if body.watchlist is not None:
+            clean_list = [s.upper().strip() for s in body.watchlist if s.strip()]
+            ai_trader.watchlist = clean_list
+            config.ai.watchlist = clean_list
+
+        save_config(config)
+        key = ai_trader.gemini_api_key
+        key_masked = f"{key[:4]}...{key[-4:]}" if key and len(key) >= 8 else None
+        return {
+            "success": True,
+            "enabled": ai_trader.enabled,
+            "has_gemini_key": bool(key),
+            "gemini_key_masked": key_masked,
+            "scan_interval_minutes": ai_trader.scan_interval_minutes,
+            "min_confidence": ai_trader.min_confidence,
+            "watchlist": ai_trader.watchlist,
+        }
+
+    @router.post("/ai/scan-now", dependencies=[Depends(verify_token)])
+    async def trigger_ai_scan():
+        if not ai_trader.gemini_api_key and not ai_trader.enabled:
+            return {"success": False, "count": 0, "setups": [], "message": "AI trader đang tắt"}
+        if getattr(ai_trader, "_is_scanning", False):
+            return {
+                "success": False,
+                "message": "Quá trình quét thị trường đang diễn ra...",
+                "setups": ai_trader.last_scan_results,
+            }
+        try:
+            ai_trader._is_scanning = True
+            setups = await ai_trader.scan_market()
+            return {
+                "success": True,
+                "count": len(setups),
+                "setups": setups,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        finally:
+            ai_trader._is_scanning = False
+
+    @router.post("/ai/execute-setup", dependencies=[Depends(verify_token)])
+    async def execute_ai_setup(body: AIExecuteModel):
+        if not exchange_writes_enabled(config):
+            raise HTTPException(
+                status_code=403,
+                detail=make_error_response("EXCHANGE_WRITE_BLOCKED", "AI execution bị chặn trong mode hiện tại."),
+            )
+        res = await ai_trader.execute_setup(body.setup)
+        if res.get("status") == "SUCCESS":
+            alert_svc.add_alert(
+                AlertLevel.INFO,
+                "Khớp Lệnh Theo AI Thành Công",
+                f"Vào lệnh {res.get('side')} {res.get('symbol')} khối lượng {res.get('quantity')} @ {res.get('entry_price')}.",
+                "AI_TRADER",
+            )
+            return {"success": True, "result": res}
+        else:
+            return {"success": False, "reason": res.get("reason", "Lỗi không xác định")}
 
     # -------------------------------------------------------------
     # 9. Graceful Shutdown Endpoint

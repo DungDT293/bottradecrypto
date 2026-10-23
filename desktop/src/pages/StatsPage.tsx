@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
+import { RefreshCw } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 
 export const StatsPage: React.FC = () => {
-  const { snapshot } = useApp();
+  const { addToast, snapshot } = useApp();
   const [telemetry, setTelemetry] = useState<any | null>(null);
   const [daysBack, setDaysBack] = useState<number>(0);
   const [pnlSummary, setPnlSummary] = useState<any | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const fetchStats = async () => {
     try {
@@ -19,12 +21,29 @@ export const StatsPage: React.FC = () => {
     }
   };
 
+  const handleSyncFromBinance = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.syncPnL();
+      if (res.success) {
+        addToast(res.message || "Đã đồng bộ PnL từ Binance thành công!", "success");
+        await fetchStats();
+      } else {
+        addToast(res.message || "Đồng bộ thất bại.", "error");
+      }
+    } catch (err: any) {
+      addToast(err?.message || "Lỗi khi gọi đồng bộ Binance.", "error");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   useEffect(() => {
     fetchStats();
   }, [daysBack]);
 
   const currentTelemetry = telemetry || snapshot?.telemetry;
-  const currentPnl = pnlSummary || snapshot?.pnl_today;
+  const currentPnl = pnlSummary;
   const benchmark = currentTelemetry?.benchmark_accuracy;
 
   return (
@@ -100,31 +119,74 @@ export const StatsPage: React.FC = () => {
           </div>
           <div style={{ textAlign: "right" }}>
             <span style={{ fontSize: "24px", fontWeight: 700, color: "var(--color-success)" }} className="mono">
-              {benchmark ? `${benchmark.accuracy_pct}%` : "100%"}
+              {benchmark ? `${benchmark.accuracy_pct}%` : "Chưa có dữ liệu"}
             </span>
             <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-              {benchmark ? `${benchmark.passed_cases}/${benchmark.test_cases} tests PASS` : "9/9 tests PASS"}
+              {benchmark ? `${benchmark.passed_cases}/${benchmark.test_cases} tests PASS` : "Chưa chạy benchmark"}
             </div>
           </div>
         </div>
       </div>
 
       {/* 3. PnL Breakdown Section */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", marginTop: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", marginTop: "16px", flexWrap: "wrap", gap: "8px" }}>
         <h3 style={{ fontSize: "15px", color: "var(--text-secondary)" }}>
           2. Báo Cáo Chi Tiết Lãi/Lỗ (PnL Breakdown)
         </h3>
-        <select
-          className="form-input"
-          style={{ width: "auto" }}
-          value={daysBack}
-          onChange={(e) => setDaysBack(parseInt(e.target.value))}
-        >
-          <option value={0}>Hôm nay (00:00 - Hiện tại)</option>
-          <option value={6}>7 ngày qua</option>
-          <option value={29}>30 ngày qua</option>
-        </select>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <select
+            className="form-input"
+            style={{ width: "auto" }}
+            value={daysBack}
+            onChange={(e) => setDaysBack(parseInt(e.target.value))}
+          >
+            <option value={0}>Hôm nay (00:00 - Hiện tại)</option>
+            <option value={6}>7 ngày qua</option>
+            <option value={29}>30 ngày qua</option>
+          </select>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSyncFromBinance}
+            disabled={syncing}
+            title="Đồng bộ dữ liệu Realized PnL và phí trực tiếp từ Binance"
+          >
+            <RefreshCw size={13} className={syncing ? "spin" : ""} />
+            <span>{syncing ? "Đang đồng bộ..." : "Đồng bộ Binance"}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Trade Win/Loss Summary Bar */}
+      {currentPnl?.has_data && (
+        <div
+          style={{
+            display: "flex",
+            gap: "16px",
+            background: "var(--bg-secondary)",
+            padding: "10px 16px",
+            borderRadius: "8px",
+            marginBottom: "12px",
+            fontSize: "13px",
+            alignItems: "center",
+            flexWrap: "wrap",
+            border: "1px solid var(--border-color)",
+          }}
+        >
+          <span>
+            Tổng lệnh đã đóng: <strong className="mono" style={{ color: "#fff" }}>{currentPnl.total_closed_trades || (currentPnl.win_count + currentPnl.loss_count)}</strong>
+          </span>
+          <span>
+            Lệnh thắng: <strong className="mono text-success">{currentPnl.win_count || 0}</strong>
+          </span>
+          <span>
+            Lệnh thua: <strong className="mono text-danger">{currentPnl.loss_count || 0}</strong>
+          </span>
+          <span>
+            Tỷ lệ thắng (Win Rate): <strong className="mono" style={{ color: "var(--color-accent)", fontWeight: 700 }}>{currentPnl.win_rate_pct ?? 0}%</strong>
+          </span>
+        </div>
+      )}
 
       <div className="card-grid">
         <div className="card">
@@ -176,7 +238,7 @@ export const StatsPage: React.FC = () => {
               <span className="text-muted" style={{ fontSize: "16px" }}>Chưa có dữ liệu</span>
             )}
           </div>
-          <div className="card-subtitle">Net = Realized - Commission - Funding</div>
+          <div className="card-subtitle">Net = Realized - Commission + signed Funding</div>
         </div>
       </div>
 

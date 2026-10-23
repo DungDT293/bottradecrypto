@@ -1,0 +1,720 @@
+﻿Total Telegram messages received since 00:00 21/10: 51
+
+================================================================================
+#1 | Received: 2026-10-20T17:59:38.287800 (Telegram: 2026-10-20T17:36:22)
+Chat ID: -1002052872813 | Msg ID: #38088
+Signal ID: sig_-1002052872813_38088_6bffeb | State: REJECTED
+Reason: Kh├┤ng thß╗â x├íc minh thß╗ï gi├í IOSTUSDT tr├¬n Binance (Binance IP dang bi tam khoa de bao ve tai khoan (con 440s). Way too many requests; IP(171.225.184.208) banned until 1792519619097. Please use the websocket for live updates to avoid bans.). Tß╗½ chß╗æi ─æß╗â bß║úo vß╗ç vß╗æn.
+Parsed: IOSTUSDT SHORT 20x | SL: 0.0009829400 | Entries: ["0.0009300", "0.0009350"] | TPs: ["0.0009100", "0.0008999", "0.0008500"]
+--- RAW TEXT ---
+#IOST ┬á ┬á /USDT (SHORT) ≡ƒö╜≡ƒö╜
+
+Γî¢LEVERAGE : 20X TO 75X
+
+≡ƒôè Short BELOW (0.0009300)(0.0009350)
+
+
+≡ƒ¬Ö TARGETS 
+
+≡ƒÑç┬á 0.0009100
+
+≡ƒÑê┬á 0.0008999
+
+≡ƒÑë 0.0008500
+
+
+
+┬á ΓÜá∩╕Å STOPLOSS : 0.0009800
+
+≡ƒôúBE A PART OF TEAM LEOPARD
+┬á┬á┬á┬á┬á┬á┬á┬á┬á┬á┬á┬á BITUNIX PRO 
+
+≡ƒÆÑUse only 1%margin of your total portfolioΓ¥ñ∩╕Å≡ƒÿÿ≡ƒÿç
+
+================================================================================
+#2 | Received: 2026-10-20T17:59:38.432026 (Telegram: 2026-10-20T17:47:01)
+Chat ID: -1001756316676 | Msg ID: #79069
+Signal ID: None | State: None
+--- RAW TEXT ---
+Does everyone have 20 USDT? ≡ƒÆ▓
+
+Let's start a FREE marathon!
+Strat: $20 | Target 1.000$
+
+Take part Γ₧í∩╕Å┬á┬áFREE SIGNALS 
+
+
+Take part Γ₧í∩╕Å┬á 3 VIP SIGNALS
+
+================================================================================
+#3 | Received: 2026-10-20T17:59:38.684882 (Telegram: 2026-10-20T17:39:53)
+Chat ID: -1001552004524 | Msg ID: #76450
+Signal ID: sig_-1001552004524_76450_9e7c1f | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: ASRUSDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+#≡¥ÉÇ≡¥ÉÆ≡¥Éæ/≡¥Éö≡¥ÉÆ≡¥Éâ≡¥Éô
+
+≡ƒÜÇ≡ƒÜÇ≡ƒÜÇ-≡¥ƒÉ≡¥ƒô≡¥Éù≡ƒæç≡ƒæç
+
+https://t.me/+KacfkVSBR0tkNzI0
+
+Γ£ö∩╕ÅΓ£ö∩╕Å
+
+================================================================================
+#4 | Received: 2026-10-20T19:55:18.937369 (Telegram: 2026-10-20T19:40:16)
+Chat ID: -1002052872813 | Msg ID: #38091
+Signal ID: sig_-1002052872813_38091_991063 | State: REJECTED
+Reason: Gi├í thß╗ï tr╞░ß╗¥ng (0.2076000) ─æ├ú giß║úm thß║Ñp h╞ín v├╣ng Entry (0.2125) > 1.0%. Bß╗Å qua.
+Parsed: ICNTUSDT SHORT 20x | SL: 0.2339999 | Entries: ["0.2125", "0.2150"] | TPs: ["0.2075", "0.2025", "0.1900"]
+--- RAW TEXT ---
+#ICNT  ┬á /USDT (SHORT) ≡ƒö╜≡ƒö╜
+
+Γî¢LEVERAGE : 20X TO 75X
+
+≡ƒôè Short BELOW (0.2125)(0.2150)
+
+
+≡ƒ¬Ö TARGETS 
+
+≡ƒÑç┬á 0.2075
+
+≡ƒÑê┬á 0.2025
+
+≡ƒÑë 0.1900
+
+
+
+┬á ΓÜá∩╕Å STOPLOSS : 0.2333
+
+≡ƒôúBE A PART OF TEAM LEOPARD
+┬á┬á┬á┬á┬á┬á┬á┬á┬á┬á┬á┬á BITUNIX PRO 
+
+≡ƒÆÑUse only 1%margin of your total portfolioΓ¥ñ∩╕Å≡ƒÿÿ≡ƒÿç
+
+================================================================================
+#5 | Received: 2026-10-20T19:55:19.092075 (Telegram: 2026-10-20T19:45:13)
+Chat ID: -1002052872813 | Msg ID: #38092
+Signal ID: None | State: None
+--- RAW TEXT ---
+SOOOOOOOOOOOOPPPPPPRRRRRR 
+LEOPARD WATCHING MARKET CLOSELY 
+YOU SHOULD UNDERSTAND NOW...
+
+================================================================================
+#6 | Received: 2026-10-20T19:55:19.436318 (Telegram: 2026-10-20T19:39:42)
+Chat ID: -1001756316676 | Msg ID: #79072
+Signal ID: sig_-1001756316676_79072_64450b | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: DOGEUSDT None Nonex | SL: None | Entries: [] | TPs: ["1"]
+--- RAW TEXT ---
+#DOGE/USDT Take-Profit target 1 Γ£à
+Profit: 43.4734% ≡ƒôê
+Period:  43 min ΓÅ░
+
+================================================================================
+#7 | Received: 2026-10-20T19:55:20.045727 (Telegram: 2026-10-20T19:45:23)
+Chat ID: -1002007658025 | Msg ID: #53252
+Signal ID: sig_-1002007658025_53252_9c9d93 | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: JCTUSDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+#WOLF_VIP_SIGNAL ≡ƒææ
+
+MASSIVE ≡ƒæì PROFIT ALHAMDULILAH
+
+≡ƒÆ╡#JCT/USDT +1475.65% PROFIT ≡ƒôê ALHAMDULILAH 
+
+≡ƒæì THAT'S A PREMIUM SCALPING SIGNAL MAN ≡ƒÿÄ
+
+JOIN VIP @WolfscalperadminΓ£à
+
+≡ƒÆÑ WOLF IS UNSTOPPABLE ≡ƒÆÑ
+
+CLICK TO JOIN BITUNIX NOW
+
+#WE_STAND_FOR_PALESTINE
+
+================================================================================
+#8 | Received: 2026-10-20T19:55:20.079763 (Telegram: 2026-10-20T19:50:25)
+Chat ID: -1002007658025 | Msg ID: #53253
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒæìTHE WOLF (CRYPTO) ≡ƒæì
+
+TRADE RESULTS (20-10-26)
+
+1∩╕ÅΓâú#APR≡ƒƒ░+403%PROFIT(PROOF)
+
+2∩╕ÅΓâú#DOOD≡ƒƒ░+3354%PROFIT(PROOF)
+
+3∩╕ÅΓâú#BAT≡ƒƒ░+1068%PROFIT(PROOF)
+
+4∩╕ÅΓâú#JCT≡ƒƒ░+1475% PROFIT(PROOF)
+
+5∩╕ÅΓâú#BTW≡ƒƒ░+70%PROFIT(PROOF)
+
+6∩╕ÅΓâú#CTR≡ƒƒ░+241%PROFIT(PROOF)
+
+
+
+IN THIS SLOW MARKET WE EARNED +6611% ALHAMDULILAH
+
+Γ£àFOR ANY INQUIRYCLICK HERE
+
+#WE_STAND_WITH_PALESTINE
+
+REACTION?
+
+================================================================================
+#9 | Received: 2026-10-20T19:56:20.224857 (Telegram: 2026-10-20T19:00:57)
+Chat ID: -1002052872813 | Msg ID: #38090
+Signal ID: None | State: None
+--- RAW TEXT ---
+WELL DONE ≡ƒæìΓ£à≡ƒæì
+
+================================================================================
+#10 | Received: 2026-10-20T19:56:20.455310 (Telegram: 2026-10-20T17:01:33)
+Chat ID: -1002007658025 | Msg ID: #53249
+Signal ID: None | State: None
+--- RAW TEXT ---
+Booooommm Wowwwww MassiveΓ£à
+
+ALHAMDULILAH
+
+================================================================================
+#11 | Received: 2026-10-20T19:56:20.492354 (Telegram: 2026-10-20T17:16:38)
+Chat ID: -1002007658025 | Msg ID: #53250
+Signal ID: sig_-1002007658025_53250_afe00f | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: DOODUSDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+#WOLF_VIP_SIGNAL ≡ƒææ
+
+MASSIVE ≡ƒæì PROFIT ALHAMDULILAH
+
+≡ƒÆ╡#DOOD/USDT +3354.75% PROFIT ≡ƒôê ALHAMDULILAH 
+
+≡ƒæì THAT'S A PREMIUM SCALPING SIGNAL MAN ≡ƒÿÄ
+
+JOIN VIP @WolfscalperadminΓ£à
+
+≡ƒÆÑ WOLF IS UNSTOPPABLE ≡ƒÆÑ
+
+CLICK TO JOIN BITUNIX NOW
+
+#WE_STAND_FOR_PALESTINE
+
+================================================================================
+#12 | Received: 2026-10-20T19:56:20.544918 (Telegram: 2026-10-20T18:33:37)
+Chat ID: -1002007658025 | Msg ID: #53251
+Signal ID: sig_-1002007658025_53251_054477 | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: APRUSDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+#WOLF_VIP_SIGNAL ≡ƒæì
+
+≡ƒæìWOLF VIP TRADE RESULT
+
+≡ƒÆ╡#APR/USDT Take-Profit Target 2≡ƒæìAchieved ALHAMDULILAH with the Profit of:┬á+403.32% CLOSE┬á90% NOW≡ƒôê
+Period: 03 Hours 40 MinutesΓÅ░
+
+JOIN BITUNIX NOWW≡ƒæì
+
+≡ƒææ @Wolfscalperadmin Γ£à
+
+#WE_STAND_WITH_PALESTINE
+
+================================================================================
+#13 | Received: 2026-10-20T19:56:20.676064 (Telegram: 2026-10-20T18:37:01)
+Chat ID: -1001552004524 | Msg ID: #76453
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒà░∩╕Å≡ƒà░∩╕Å≡ƒà░∩╕Å ≡ƒöñ≡ƒöñ≡ƒöñ ≡ƒà░∩╕Å≡ƒà░∩╕Å≡ƒà░∩╕Å≡ƒà░∩╕Å
+           ≡ƒÿä≡ƒÿä≡ƒÿä≡ƒÿä≡ƒÿä
+
+≡ƒöñ≡ƒöñ≡ƒöñ
+
+https://t.me/+Lm1U2fhCreFmNDky
+
+https://t.me/+KpQxl55bLTY3NmFl
+
+================================================================================
+#14 | Received: 2026-10-20T19:56:20.690087 (Telegram: 2026-10-20T18:57:56)
+Chat ID: -1001552004524 | Msg ID: #76455
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒôîLAST 1 DAY PREMIUM REPORT≡ƒôî
+
+1) TIA - 126%Γ£à
+2) CELO - 67%Γ£à
+3) VET - 53%Γ£à
+4) RPL - 112%Γ£à
+5) SKHYNIX - 61%Γ£à
+6) POLYX - 63%Γ£à
+7) BTC┬á - 104%Γ£à
+8) OP - 71%Γ£à
+9) WLD - 162%Γ£à
+10) METIS - 64%Γ£à
+11) NEAR - 227%Γ£à
+
+Total Profit : 1110% with 20x Leverage≡ƒñæ
+
+Our Exact 1Day Accuracy : 100%≡ƒæî≡ƒÅ╗ 
+
+You all can recheck each signal for your satisfaction ≡ƒÜÇΓ£¿
+
+What else you do you need.? 
+
+WoahΓÇ╝∩╕ÅJust Make Your Money (11X In 1D) With Us ≡ƒÿ¡
+
+≡ƒç»≡ƒç╡ Premium
+@CryptoMonkJapanΓ£à
+
+================================================================================
+#15 | Received: 2026-10-20T19:56:20.704598 (Telegram: 2026-10-20T18:58:03)
+Chat ID: -1001552004524 | Msg ID: #76458
+Signal ID: None | State: None
+--- RAW TEXT ---
+Are You A Working Professional? Always Stay Busy With Work? But Want To Make Money On The Other Side? 
+
+Automate Your Trading With High Quality Signal With Our Proper Setup Guide ≡ƒñæ
+
+≡ƒç»≡ƒç╡PREMIUM 
+@CryptoMonkJapanΓ£à
+
+================================================================================
+#16 | Received: 2026-10-20T19:56:20.720630 (Telegram: 2026-10-20T19:05:51)
+Chat ID: -1001552004524 | Msg ID: #76460
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒæÇDo You Want????Γ¥ò
+
+≡ƒæÇ1 MONTH PREMIUM FREE TRAIL ≡ƒÿ▒
+
+https://t.me/+KacfkVSBR0tkNzI0
+
+================================================================================
+#17 | Received: 2026-10-20T20:21:09.037463 (Telegram: 2026-10-20T19:53:53)
+Chat ID: -1002052872813 | Msg ID: #38093
+Signal ID: None | State: None
+--- RAW TEXT ---
+https://t.me/+a00rVfOSKeI4ZjU0
+
+================================================================================
+#18 | Received: 2026-10-20T20:46:24.161180 (Telegram: 2026-10-20T20:41:01)
+Chat ID: -1001756316676 | Msg ID: #79073
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒîÖΓ¥ñ∩╕Å ≡¥Éå≡¥ÉÄ≡¥ÉÄ≡¥Éâ ≡¥Éì≡¥Éê≡¥Éå≡¥Éç≡¥Éô,
+ ≡¥Éü≡¥Éü≡¥Éü≡¥É│ ≡¥Éà≡¥ÉÇ≡¥Éî≡¥Éê≡¥Éï≡¥ÉÿΓ¥ñ∩╕Å≡ƒîÖ
+
+Γ£¿ ≡¥Éæ≡¥Éä≡¥ÉÆ≡¥Éô ≡¥Éû≡¥Éä≡¥Éï≡¥Éï, ≡¥ÉÆ≡¥Éô≡¥ÉÇ≡¥Éÿ ≡¥Éà≡¥ÉÄ≡¥Éé≡¥Éö≡¥ÉÆ≡¥Éä≡¥Éâ & ≡¥Éè≡¥Éä≡¥Éä≡¥ÉÅ ≡¥Éü≡¥Éä≡¥Éï≡¥Éê≡¥Éä≡¥Éò≡¥Éê≡¥Éì≡¥Éå≡ƒÆ»≡ƒöÑ
+
+≡ƒÜÇ ≡¥Éô≡¥ÉÄ≡¥Éî≡¥ÉÄ≡¥Éæ≡¥Éæ≡¥ÉÄ≡¥Éû ≡¥Éû≡¥Éä ≡¥Éé≡¥ÉÄ≡¥Éî≡¥Éä ≡¥Éü≡¥ÉÇ≡¥Éé≡¥Éè ≡¥ÉÆ≡¥Éô≡¥Éæ≡¥ÉÄ≡¥Éì≡¥Éå≡¥Éä≡¥ÉæΓ¥ñ∩╕ÅΓÇì≡ƒöÑ
+
+≡ƒîÖ ≡¥ÉÆ≡¥Éû≡¥Éä≡¥Éä≡¥Éô ≡¥Éâ≡¥Éæ≡¥Éä≡¥ÉÇ≡¥Éî≡¥ÉÆ, ≡¥Éü≡¥Éü≡¥Éü≡¥É│ ≡¥Éà≡¥ÉÇ≡¥Éî≡¥Éê≡¥Éï≡¥Éÿ≡ƒÆñΓ¥ñ∩╕Å
+
+
+≡¥Éà≡¥É¿≡¥É½ ≡¥Éò≡¥Éê≡¥ÉÅ & ≡¥Éö≡¥É⌐≡¥É¥≡¥ÉÜ≡¥É¡≡¥É₧≡¥É¼≡ƒæç
+ΓÿÄ∩╕Å @BBB_Support_Team ≡ƒÜÇ
+
+================================================================================
+#19 | Received: 2026-10-20T21:11:51.391795 (Telegram: 2026-10-20T21:11:48)
+Chat ID: -1001756316676 | Msg ID: #79074
+Signal ID: None | State: None
+--- RAW TEXT ---
+VIP is for free (only for first 40 Members ≡ƒÆÑ)
+
+Γ£à
+https://t.me/+n5N2aXPU5Y42MTNk
+
+================================================================================
+#20 | Received: 2026-10-20T21:30:08.119654 (Telegram: 2026-10-20T21:30:06)
+Chat ID: -1002007658025 | Msg ID: #53254
+Signal ID: None | State: None
+--- RAW TEXT ---
+Reacts!!
+
+================================================================================
+#21 | Received: 2026-10-20T22:22:03.409168 (Telegram: 2026-10-20T22:22:01)
+Chat ID: -1001756316676 | Msg ID: #79075
+Signal ID: sig_-1001756316676_79075_04e458 | State: REJECTED
+Reason: Khong co muc gia entry
+Parsed: DEXEUSDT SHORT Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+SHORT #DEXE/USDT ≡ƒôë
+
+Full Setup Details Here Join Fast
+
+================================================================================
+#22 | Received: 2026-10-20T22:29:58.172863 (Telegram: 2026-10-20T22:29:56)
+Chat ID: -1002052872813 | Msg ID: #38094
+Signal ID: None | State: None
+--- RAW TEXT ---
+KNOCK KNOCK
+
+================================================================================
+#23 | Received: 2026-10-20T23:59:03.408027 (Telegram: 2026-10-20T23:59:01)
+Chat ID: -1001756316676 | Msg ID: #79076
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒƒóHe will post recovery signal in 1 hours 
+
+≡ƒöù https://t.me/+KuxEpUEZJjBkNWM0
+
+Join him Fast ≡ƒÉÖ just 5 More members accepted
+
+================================================================================
+#24 | Received: 2026-10-21T03:16:09.128505 (Telegram: 2026-10-21T03:06:46)
+Chat ID: -1001756316676 | Msg ID: #79082
+Signal ID: None | State: None
+--- RAW TEXT ---
+JOIN┬á ≡ƒæì≡ƒæì≡ƒæì
+
+CLICK NOW
+
+================================================================================
+#25 | Received: 2026-10-21T03:16:09.153535 (Telegram: 2026-10-21T03:16:01)
+Chat ID: -1001756316676 | Msg ID: #79083
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒîà ≡¥Éå≡¥ÉÄ≡¥ÉÄ≡¥Éâ ≡¥Éî≡¥ÉÄ≡¥Éæ≡¥Éì≡¥Éê≡¥Éì≡¥Éå
+
+≡¥Éü≡¥Éü≡¥Éü≡¥É│ ≡¥Éà≡¥ÉÇ≡¥Éî≡¥Éê≡¥Éï≡¥Éÿ Γ¥ñ∩╕Å≡ƒÿì
+
+================================================================================
+#26 | Received: 2026-10-21T03:16:09.367613 (Telegram: 2026-10-21T02:53:48)
+Chat ID: -1001552004524 | Msg ID: #76467
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒöÑ Want FREE Bitcoin? ≡ƒÆ░ Join now! ≡ƒÄ» Only 20 winners! ≡ƒÆ░
+
+https://t.me/+Sr5YZREg-0kzZWEy
+
+================================================================================
+#27 | Received: 2026-10-21T03:16:09.383581 (Telegram: 2026-10-21T03:13:01)
+Chat ID: -1001552004524 | Msg ID: #76468
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒÆ░ Claim your FREE Bitcoin! ≡ƒ¬Ö Limited to the first 20 members! ≡ƒÄ»
+
+https://t.me/+VYHFIIyDQag2NDBk
+
+================================================================================
+#28 | Received: 2026-10-21T03:17:09.462633 (Telegram: 2026-10-21T01:25:46)
+Chat ID: -1002052872813 | Msg ID: #38095
+Signal ID: None | State: None
+--- RAW TEXT ---
+GOOD MORNING ΓÿÇ∩╕ÅΓÿÇ∩╕ÅΓÿÇ∩╕Å
+
+ARE YOU READY TO EARN TODAY LET ME KNOW WITH YOUR REACTIONS
+
+================================================================================
+#29 | Received: 2026-10-21T03:17:09.520127 (Telegram: 2026-10-21T01:17:01)
+Chat ID: -1001756316676 | Msg ID: #79078
+Signal ID: sig_-1001756316676_79078_963966 | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: 10USDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+≡¥ƒÖ≡¥ƒÿ≡¥òî≡¥òè≡¥ö╗≡¥òï ≡¥ö╜≡¥òåΓä¥ ≡¥ƒÖ≡¥ƒÿ ≡¥ò¥≡¥òª≡¥òö≡¥ò£≡¥ò¬ ≡¥òä≡¥ö╝≡¥òä≡¥ö╣≡¥ö╝Γä¥≡¥òè ≡ƒÑ│
+
+https://t.me/+WVRC4FEmJCs0ZTBk 
+
+https://t.me/+AKcjTEF0YVZhOWU0
+
+≡¥òü≡¥òå≡¥òÇΓäò ≡¥ö╜≡¥ö╕≡¥òè≡¥òï ≡ƒÉÖ≡ƒÉÖ≡ƒÉÖ
+
+================================================================================
+#30 | Received: 2026-10-21T03:17:09.690513 (Telegram: 2026-10-21T02:27:20)
+Chat ID: -1002007658025 | Msg ID: #53258
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒÿìTrading  isnΓÇÖt hard when the signals are this accurate! ≡ƒÿ╡Γåù∩╕ÅΓ£ö∩╕Å≡ƒÿäΓ¥ñ∩╕Å
+
+https://t.me/+lBx7BGAjD4wxY2I5
+
+================================================================================
+#31 | Received: 2026-10-21T03:17:09.756605 (Telegram: 2026-10-21T01:20:05)
+Chat ID: -1001552004524 | Msg ID: #76462
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒæ⌐ΓÇì≡ƒª░ ≡¥òè≡¥òÖ≡¥òû ≡¥òÆ≡¥òö≡¥òö≡¥òû≡¥òí≡¥òÑ ≡¥ƒÖ≡¥ƒÿ ≡¥òí≡¥òû≡¥òá≡¥òí≡¥ò¥≡¥òû ≡¥ò¿≡¥òÜ≡¥òÑ≡¥òÖ≡¥òá≡¥òª≡¥òÑ ≡¥ò₧≡¥òá≡¥òƒ≡¥òû≡¥ò¬Γ£à≡ƒæç
+
+┬á≡ƒåÿ≡¥òâ≡¥òÇΓäò≡¥òé ≡¥ƒÖ≡ƒöô┬á
+
+https://t.me/+Lm1U2fhCreFmNDky
+
+https://t.me/+KpQxl55bLTY3NmFl
+
+≡ƒÆ¬≡ƒæå≡ƒæåΓÿ¥∩╕ÅΓÿ¥∩╕Å≡ƒæë≡ƒæê
+
+================================================================================
+#32 | Received: 2026-10-21T03:17:09.770119 (Telegram: 2026-10-21T01:45:50)
+Chat ID: -1001552004524 | Msg ID: #76463
+Signal ID: None | State: None
+--- RAW TEXT ---
+TODAY'S FEAR & GREED INDEX ≡ƒÜ¿ BE LIKE ≡ƒöÑ
+
+================================================================================
+#33 | Received: 2026-10-21T03:17:09.789665 (Telegram: 2026-10-21T02:32:56)
+Chat ID: -1001552004524 | Msg ID: #76466
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒöÑAre You ≡ƒ½╡≡ƒÅ╗ All Ready For Free Call of The Day.? 
+
+Join Above Links And Support Aggressively ≡ƒñæ 
+
+Please Boost Our Channel ≡ƒöÑ
+
+https://t.me/boost?c=1552004524
+
+================================================================================
+#34 | Received: 2026-10-21T03:28:37.758844 (Telegram: 2026-10-21T03:28:36)
+Chat ID: -1001756316676 | Msg ID: #79084
+Signal ID: None | State: None
+--- RAW TEXT ---
+Elite signals waiting for YOU
+
+≡ƒæë Tap to enter
+
+https://t.me/+SKOyOw8Wby83MTI0
+
+================================================================================
+#35 | Received: 2026-10-21T03:59:02.878782 (Telegram: 2026-10-21T03:59:01)
+Chat ID: -1001756316676 | Msg ID: #79085
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒôêI am giving ≡ƒ¬Ö0.012 btc to first Γ£à 20 members who will join my┬áchannel. 
+
+https://t.me/+KuxEpUEZJjBkNWM0
+
+================================================================================
+#36 | Received: 2026-10-21T04:03:54.846476 (Telegram: 2026-10-21T04:03:53)
+Chat ID: -1001552004524 | Msg ID: #76469
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒæ⌐ΓÇì≡ƒª░ ≡¥òè≡¥òÖ≡¥òû ≡¥òÆ≡¥òö≡¥òö≡¥òû≡¥òí≡¥òÑ ≡¥ƒÖ≡¥ƒÿ ≡¥òí≡¥òû≡¥òá≡¥òí≡¥ò¥≡¥òû ≡¥ò¿≡¥òÜ≡¥òÑ≡¥òÖ≡¥òá≡¥òª≡¥òÑ ≡¥ò₧≡¥òá≡¥òƒ≡¥òû≡¥ò¬Γ£à≡ƒæç
+
+┬á≡ƒåÿ≡¥òâ≡¥òÇΓäò≡¥òé ≡¥ƒÖ≡ƒöô┬á
+
+https://t.me/+Lm1U2fhCreFmNDky
+
+https://t.me/+KpQxl55bLTY3NmFl
+
+≡ƒÆ¬≡ƒæå≡ƒæåΓÿ¥∩╕ÅΓÿ¥∩╕Å≡ƒæë≡ƒæê
+
+================================================================================
+#37 | Received: 2026-10-21T04:17:03.847933 (Telegram: 2026-10-21T04:17:01)
+Chat ID: -1001756316676 | Msg ID: #79086
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒÜ¿ Γäì≡¥òÜ≡¥òò≡¥òò≡¥òû≡¥òƒ ≡¥ƒÖ≡¥ƒÿ≡¥ƒÿ≡¥ò⌐ ≡¥ö╛≡¥ö╝≡¥òä ≡¥ò¢≡¥òª≡¥òñ≡¥òÑ ≡¥òù≡¥òá≡¥òª≡¥òƒ≡¥òò
+        ≡¥òü≡¥òá≡¥òÜ≡¥òƒ ≡¥òô≡¥òû≡¥òù≡¥òá≡¥òú≡¥òû ≡¥òÑ≡¥òÖ≡¥òû ≡¥òí≡¥òª≡¥ò₧≡¥òí ≡ƒÜÇ
+
+Γ£à≡ƒôÑ
+https://t.me/+WVRC4FEmJCs0ZTBk
+
+https://t.me/+AKcjTEF0YVZhOWU0
+
+≡¥òâ≡¥òå≡¥òÄ ≡¥òä≡¥ö╕Γä¥≡¥òé≡¥ö╝≡¥òï Γäé≡¥ö╕ΓäÖ !!!!!
+Γäì≡¥òî≡¥ö╛≡¥ö╝ ΓäÖ≡¥òå≡¥òï≡¥ö╝Γäò≡¥òï≡¥òÇ≡¥ö╕≡¥òâ !!!
+
+================================================================================
+#38 | Received: 2026-10-21T04:21:46.872646 (Telegram: 2026-10-21T04:21:46)
+Chat ID: -1001552004524 | Msg ID: #76470
+Signal ID: sig_-1001552004524_76470_5ff5a9 | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: ASRUSDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+#≡¥ÉÇ≡¥ÉÆ≡¥Éæ/≡¥Éö≡¥ÉÆ≡¥Éâ≡¥Éô
+
+≡ƒÜÇ≡ƒÜÇ≡ƒÜÇ-≡¥ƒÉ≡¥ƒô≡¥Éù≡ƒæç≡ƒæç
+
+https://t.me/+VYHFIIyDQag2NDBk
+
+Γ£ö∩╕ÅΓ£ö∩╕Å
+
+================================================================================
+#39 | Received: 2026-10-21T04:22:54.877125 (Telegram: 2026-10-21T04:22:53)
+Chat ID: -1002007658025 | Msg ID: #53259
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒÜ¿!! alert, !! alert, !! alert !!∩╕Å≡ƒÜ¿
+
+Biggest whale channel is going to leak a 5000% coinΓÜá∩╕Å
+
+https://t.me/+nO1Kqj2y_BU2NmIx
+
+LIMITED TIME LINK
+
+================================================================================
+#40 | Received: 2026-10-21T04:25:48.121485 (Telegram: 2026-10-21T04:25:46)
+Chat ID: -1001756316676 | Msg ID: #79087
+Signal ID: sig_-1001756316676_79087_91fe46 | State: REJECTED
+Reason: Khong co muc gia entry
+Parsed: BTCUSDT SHORT Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+≡ƒî╣ #BTC/USDT
+
+≡ƒö┤ SHORT
+
+https://t.me/+RjXo1alkIeFlMzNl
+
+Γ£à Entry: (Click And Join)
+
+================================================================================
+#41 | Received: 2026-10-21T04:31:02.899288 (Telegram: 2026-10-21T04:31:01)
+Chat ID: -1001552004524 | Msg ID: #76471
+Signal ID: sig_-1001552004524_76471_d97a38 | State: CLOSED
+Reason: ─Éß╗æi chiß║┐u: Vß╗ï thß║┐ ─æ├ú ─æ├│ng tr├¬n s├án Binance
+Parsed: DOODUSDT LONG 20x | SL: 0.002707852 | Entries: ["0.002838"] | TPs: ["0.002879", "0.002929", "0.002987", "0.003044", "0.003129"]
+--- RAW TEXT ---
+#LONG ≡ƒƒó≡ƒöñ≡ƒöñ≡ƒöñ≡ƒöñ≡ƒöñ
+
+#DOOD/USDT
+
+Margin Mode : Isolated ≡ƒÆÄ
+
+Signal Type : Scalp Trade≡ƒöÑ
+
+BUY :
+
+1) 0.002838 - 100%┬á
+
+Take Profit Targets : 
+1)≡ƒƒ⌐ 0.002879
+2)≡ƒƒ⌐ 0.002929
+3)≡ƒƒ⌐ 0.002987
+4)≡ƒƒ⌐ 0.003044
+5)≡ƒƒ⌐ 0.003129
+
+≡ƒƒÑ SL : 0.002716 - 100% ┬á 
+
+≡ƒôè LEV : 20X
+
+≡ƒç»≡ƒç╡Premium 
+@CryptoMonkJapanΓ£à
+
+================================================================================
+#42 | Received: 2026-10-21T04:31:58.870232 (Telegram: 2026-10-21T04:31:55)
+Chat ID: -1002007658025 | Msg ID: #53260
+Signal ID: sig_-1002007658025_53260_838db5 | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: FUTURESUSDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+ALT COIN FUTURES SIGNALS≡ƒöÑ≡ƒöÑ
+
+LINK OPEN FOR 10 SEC ONLY
+Join Fast Γ¼ç∩╕Å
+
+https://t.me/+aGlZ-ahGpE04NTJl
+
+================================================================================
+#43 | Received: 2026-10-21T04:33:38.873911 (Telegram: 2026-10-21T04:33:34)
+Chat ID: -1001756316676 | Msg ID: #79088
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒÜ¿STOP BUYING VIP SIGNALS≡ƒÜ¿
+
+We accept 50 more people without moneyΓ£àΓ¼ç∩╕Å
+
+https://t.me/+hsyj-2HsntY2Nzlk
+
+================================================================================
+#44 | Received: 2026-10-21T04:47:03.346283 (Telegram: 2026-10-21T04:47:01)
+Chat ID: -1001552004524 | Msg ID: #76472
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒÆ░ Claim your FREE Bitcoin! ≡ƒ¬Ö Limited to the first 20 members! ≡ƒÄ»
+
+https://t.me/+Sr5YZREg-0kzZWEy
+
+================================================================================
+#45 | Received: 2026-10-21T04:56:00.108236 (Telegram: 2026-10-21T04:55:55)
+Chat ID: -1002007658025 | Msg ID: #53261
+Signal ID: sig_-1002007658025_53261_83f426 | State: REJECTED
+Reason: Khong xac dinh duoc huong lenh (LONG/SHORT)
+Parsed: FUTURESUSDT None Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+ALT COIN FUTURES SIGNALS≡ƒöÑ≡ƒöÑ
+
+LINK OPEN FOR 10 MINT ONLY
+
+Join Fast Γ¼ç∩╕Å
+
+https://t.me/+nO1Kqj2y_BU2NmIx
+
+================================================================================
+#46 | Received: 2026-10-21T05:02:02.881770 (Telegram: 2026-10-21T05:02:01)
+Chat ID: -1001756316676 | Msg ID: #79089
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒö╕Free Premium ≡ƒö╣
+
+≡ƒôîOnly for first 35 members ≡ƒôê≡ƒôë
+
+https://t.me/+RjXo1alkIeFlMzNl
+
+Join ΓÜí∩╕ÅΓÜí∩╕ÅΓÜí∩╕ÅΓÜí∩╕Å
+
+================================================================================
+#47 | Received: 2026-10-21T05:13:55.922446 (Telegram: 2026-10-21T05:13:54)
+Chat ID: -1002007658025 | Msg ID: #53262
+Signal ID: sig_-1002007658025_53262_bdc02d | State: REJECTED
+Reason: Khong co muc gia entry
+Parsed: ZEROUSDT LONG Nonex | SL: None | Entries: [] | TPs: []
+--- RAW TEXT ---
+#ZEROUSDT ≡ƒÑ░
+Position: Long≡ƒöÑ
+
+Leverage & Entry ≡ƒæç≡ƒæç 
+
+https://t.me/+nO1Kqj2y_BU2NmIx
+
+================================================================================
+#48 | Received: 2026-10-21T05:34:36.456619 (Telegram: 2026-10-21T05:34:34)
+Chat ID: -1001552004524 | Msg ID: #76473
+Signal ID: None | State: None
+--- RAW TEXT ---
+
+
+================================================================================
+#49 | Received: 2026-10-21T05:34:36.478136 (Telegram: 2026-10-21T05:34:35)
+Chat ID: -1001552004524 | Msg ID: #76474
+Signal ID: None | State: None
+--- RAW TEXT ---
+#CELO≡ƒÜÇ
+
+≡ƒæë≡ƒÅ╗ TARGET : 1∩╕ÅΓâú2∩╕ÅΓâú3∩╕ÅΓâú ≡ƒÿÄ
+≡ƒæë≡ƒÅ╗ PROFIT : 106% ≡ƒñªΓÇìΓÖé∩╕Å
+≡ƒæë≡ƒÅ╗ DURATION : 1D 22HRS 40MINS
+
+≡ƒç»≡ƒç╡PREMIUM 
+@CryptoMonkJapanΓ£à
+
+================================================================================
+#50 | Received: 2026-10-21T05:50:54.853597 (Telegram: 2026-10-21T05:50:51)
+Chat ID: -1001552004524 | Msg ID: #76475
+Signal ID: None | State: None
+--- RAW TEXT ---
+#DOOD Came To Eat Our SL Only ≡ƒñ╖≡ƒÅ╗ΓÇìΓÖé And It Pumped 11.5% Raw Γ£à Part of Trading. 
+
+≡ƒç»≡ƒç╡PREMIUM 
+@CryptoMonkJapanΓ£à
+
+================================================================================
+#51 | Received: 2026-10-21T05:54:44.179154 (Telegram: 2026-10-21T05:54:42)
+Chat ID: -1001552004524 | Msg ID: #76476
+Signal ID: None | State: None
+--- RAW TEXT ---
+≡ƒæ⌐ΓÇì≡ƒª░ ≡¥òè≡¥òÖ≡¥òû ≡¥òÆ≡¥òö≡¥òö≡¥òû≡¥òí≡¥òÑ ≡¥ƒÖ≡¥ƒÿ ≡¥òí≡¥òû≡¥òá≡¥òí≡¥ò¥≡¥òû ≡¥ò¿≡¥òÜ≡¥òÑ≡¥òÖ≡¥òá≡¥òª≡¥òÑ ≡¥ò₧≡¥òá≡¥òƒ≡¥òû≡¥ò¬Γ£à≡ƒæç
+
+┬á≡ƒåÿ≡¥òâ≡¥òÇΓäò≡¥òé ≡¥ƒÖ≡ƒöô┬á
+
+https://t.me/+Lm1U2fhCreFmNDky
+
+https://t.me/+KpQxl55bLTY3NmFl
+
+≡ƒÆ¬≡ƒæå≡ƒæåΓÿ¥∩╕ÅΓÿ¥∩╕Å≡ƒæë≡ƒæê
+

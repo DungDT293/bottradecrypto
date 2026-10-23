@@ -125,7 +125,8 @@ def test_settings_live_gates_reject_unauthorized_live(mock_app):
         "risk_per_signal_pct": 2.0,
         "max_daily_loss_pct": 5.0,
         "max_leverage": 20,
-        "entry_range_policy": "MID",
+        "margin_mode": "CROSSED",
+        "entry_range_policy": "MID_POINT",
         "multi_tp_default_weight_mode": "EQUAL",
     }
     resp = client.post("/settings", headers=headers, json=live_payload)
@@ -139,7 +140,8 @@ def test_settings_live_gates_reject_unauthorized_live(mock_app):
         "risk_per_signal_pct": 2.5,
         "max_daily_loss_pct": 5.0,
         "max_leverage": 20,
-        "entry_range_policy": "MID",
+        "margin_mode": "CROSSED",
+        "entry_range_policy": "MID_POINT",
         "multi_tp_default_weight_mode": "EQUAL",
     }
     resp_safe = client.post("/settings", headers=headers, json=shadow_payload)

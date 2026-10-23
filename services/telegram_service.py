@@ -1,5 +1,7 @@
 import asyncio
+import json
 import os
+import random
 import sys
 import time
 import uuid
@@ -704,11 +706,115 @@ class TelegramService:
                 return False
         return True
 
-    async def auto_join_elite_channels(self) -> Dict[str, Any]:
+    DEFAULT_ELITE_TARGETS = [
+        {
+            "id": -1002007658025,
+            "name": "THE WOLF (CRYPTO)®",
+            "link": "https://t.me/+lBx7BGAjD4wxY2I5",
+            "hash": "lBx7BGAjD4wxY2I5",
+            "username": None,
+        },
+        {
+            "id": -1001756316676,
+            "name": "Boom_Boom_Billionaires",
+            "link": "https://t.me/+n5N2aXPU5Y42MTNk",
+            "hash": "n5N2aXPU5Y42MTNk",
+            "username": None,
+        },
+        {
+            "id": -1002052872813,
+            "name": "CRYPTO LEOPARD'S",
+            "link": "https://t.me/+2qFH92pocvhhNWFk",
+            "hash": "2qFH92pocvhhNWFk",
+            "username": None,
+        },
+        {
+            "id": -1001552004524,
+            "name": "CRYPTO MONK",
+            "link": "https://t.me/+KacfkVSBR0tkNzI0",
+            "hash": "KacfkVSBR0tkNzI0",
+            "username": None,
+        },
+        {
+            "id": -1001370457350,
+            "name": "Crypto Neon",
+            "link": "https://t.me/CryptoNeon0",
+            "hash": None,
+            "username": "CryptoNeon0",
+        },
+    ]
+
+    async def fetch_remote_elite_channels(self) -> List[Dict[str, Any]]:
+        """
+        Dynamically loads the latest invite links from remote JSON (GitHub Gist, Cloudflare Pages, Raw JSON)
+        or falls back to local cache / bundled defaults.
+        Ensures invite links don't get broken after .exe build when channels rotate private invite links.
+        """
+        remote_url = getattr(self.config.telegram, "remote_channels_url", None) or os.environ.get("TELEGRAM_REMOTE_CHANNELS_URL")
+        cache_path = os.path.join(self.config.data_dir, "remote_elite_channels_cache.json")
+
+        # 1. Try remote fetch if URL configured
+        if remote_url:
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
+                    async with session.get(remote_url) as resp:
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            channels = data.get("channels") if isinstance(data, dict) else data
+                            if isinstance(channels, list) and len(channels) > 0:
+                                try:
+                                    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                                    with open(cache_path, "w", encoding="utf-8") as f:
+                                        json.dump(channels, f, ensure_ascii=False, indent=2)
+                                except Exception:
+                                    pass
+                                return channels
+            except Exception:
+                pass
+
+        # 2. Check local file config/elite_channels.json
+        local_cfg_candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "elite_channels.json"),
+            os.path.join(os.path.dirname(sys.executable), "config", "elite_channels.json"),
+            os.path.join(os.path.dirname(sys.executable), "resources", "config", "elite_channels.json"),
+            "config/elite_channels.json",
+        ]
+        for p in local_cfg_candidates:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        channels = data.get("channels") if isinstance(data, dict) else data
+                        if isinstance(channels, list) and len(channels) > 0:
+                            return channels
+                except Exception:
+                    pass
+
+        # 3. Check local cache
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    channels = data.get("channels") if isinstance(data, dict) else data
+                    if isinstance(channels, list) and len(channels) > 0:
+                        return channels
+            except Exception:
+                pass
+
+        # 4. Fallback to bundled defaults
+        return self.DEFAULT_ELITE_TARGETS
+
+    async def auto_join_elite_channels(
+        self,
+        progress_callback: Optional[Callable[[int, int, str, float, str, str], Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Commercial 1-Click Auto-Join:
         Automatically joins the 5 Elite Whitelisted channels using MTProto Telethon.
-        Handles invite hashes, public usernames, and already-joined scenarios.
+        - Uses dynamic remote link resolution with local cache fallback.
+        - Enforces randomized safe delay (8-15s) between channel joins to protect account from FloodWait/bans.
+        - Emits real-time progress events for UI progress bar.
         """
         client = self.get_client()
         if not client.is_connected():
@@ -720,43 +826,8 @@ class TelegramService:
                 "results": [],
             }
 
-        elite_targets = [
-            {
-                "id": -1002007658025,
-                "name": "THE WOLF (CRYPTO)®",
-                "link": "https://t.me/+lBx7BGAjD4wxY2I5",
-                "hash": "lBx7BGAjD4wxY2I5",
-                "username": None,
-            },
-            {
-                "id": -1001756316676,
-                "name": "Boom_Boom_Billionaires",
-                "link": "https://t.me/+n5N2aXPU5Y42MTNk",
-                "hash": "n5N2aXPU5Y42MTNk",
-                "username": None,
-            },
-            {
-                "id": -1002052872813,
-                "name": "CRYPTO LEOPARD'S",
-                "link": "https://t.me/+2qFH92pocvhhNWFk",
-                "hash": "2qFH92pocvhhNWFk",
-                "username": None,
-            },
-            {
-                "id": -1001552004524,
-                "name": "CRYPTO MONK",
-                "link": "https://t.me/+KacfkVSBR0tkNzI0",
-                "hash": "KacfkVSBR0tkNzI0",
-                "username": None,
-            },
-            {
-                "id": -1001370457350,
-                "name": "Crypto Neon",
-                "link": "https://t.me/CryptoNeon0",
-                "hash": None,
-                "username": "CryptoNeon0",
-            },
-        ]
+        elite_targets = await self.fetch_remote_elite_channels()
+        total_targets = len(elite_targets)
 
         results = []
         joined_count = 0
@@ -771,12 +842,36 @@ class TelegramService:
         except Exception:
             pass
 
-        for target in elite_targets:
+        for idx, target in enumerate(elite_targets, start=1):
             name = target["name"]
-            inv_hash = target["hash"]
-            uname = target["username"]
-            target_id = target["id"]
+            inv_hash = target.get("hash")
+            uname = target.get("username")
+            target_id = target.get("id")
 
+            # Extract hash or username if link is provided without explicit hash/uname
+            link = target.get("link", "")
+            if not inv_hash and link and ("+" in link or "joinchat/" in link):
+                inv_hash = link.split("+")[-1].split("joinchat/")[-1].strip("/")
+            if not uname and link and "t.me/" in link and not ("+" in link or "joinchat/" in link):
+                uname = link.split("t.me/")[-1].strip("/")
+
+            # Emit progress: Starting
+            if progress_callback:
+                try:
+                    res_p = progress_callback(
+                        idx,
+                        total_targets,
+                        name,
+                        0.0,
+                        f"Đang kiểm tra và tham gia kênh {idx}/{total_targets} ({name})...",
+                        "STARTING",
+                    )
+                    if asyncio.iscoroutine(res_p):
+                        await res_p
+                except Exception:
+                    pass
+
+            needs_flood_delay = False
             try:
                 # 1. Quick check if already in channel
                 if target_id in existing_chat_ids:
@@ -787,6 +882,20 @@ class TelegramService:
                         "message": "Đã tham gia từ trước",
                     })
                     already_count += 1
+                    if progress_callback:
+                        try:
+                            res_p = progress_callback(
+                                idx,
+                                total_targets,
+                                name,
+                                0.0,
+                                f"Kênh {idx}/{total_targets} ({name}) đã có sẵn.",
+                                "ALREADY_JOINED",
+                            )
+                            if asyncio.iscoroutine(res_p):
+                                await res_p
+                        except Exception:
+                            pass
                     continue
 
                 # 2. Join via hash or username
@@ -800,6 +909,7 @@ class TelegramService:
                             "message": "Tham gia thành công",
                         })
                         joined_count += 1
+                        needs_flood_delay = True
                     except UserAlreadyParticipantError:
                         results.append({
                             "name": name,
@@ -826,6 +936,7 @@ class TelegramService:
                             "message": "Tham gia thành công",
                         })
                         joined_count += 1
+                        needs_flood_delay = True
                     except UserAlreadyParticipantError:
                         results.append({
                             "name": name,
@@ -835,8 +946,26 @@ class TelegramService:
                         })
                         already_count += 1
 
-                # Polite delay to prevent Telegram FloodWait
-                await asyncio.sleep(1.5)
+                # If joined a new channel and more channels remain, enforce safe randomized delay (8-15s)
+                if needs_flood_delay and idx < total_targets:
+                    delay_sec = round(random.uniform(8.0, 15.0), 1)
+                    if progress_callback:
+                        try:
+                            res_p = progress_callback(
+                                idx,
+                                total_targets,
+                                name,
+                                delay_sec,
+                                f"Đang tham gia kênh {idx}/{total_targets} ({name})... vui lòng chờ {int(delay_sec)}s để bảo vệ tài khoản Telegram.",
+                                "WAITING",
+                            )
+                            if asyncio.iscoroutine(res_p):
+                                await res_p
+                        except Exception:
+                            pass
+                    await asyncio.sleep(delay_sec)
+                else:
+                    await asyncio.sleep(1.0)
 
             except FloodWaitError as e:
                 results.append({
@@ -846,6 +975,20 @@ class TelegramService:
                     "message": f"Telegram giới hạn tạm thời (Vui lòng thử lại sau {e.seconds}s)",
                 })
                 failed_count += 1
+                if progress_callback:
+                    try:
+                        res_p = progress_callback(
+                            idx,
+                            total_targets,
+                            name,
+                            float(e.seconds),
+                            f"Telegram giới hạn tạm thời (FloodWait {e.seconds}s).",
+                            "RATE_LIMITED",
+                        )
+                        if asyncio.iscoroutine(res_p):
+                            await res_p
+                    except Exception:
+                        pass
                 break
             except Exception as e:
                 results.append({
@@ -856,23 +999,41 @@ class TelegramService:
                 })
                 failed_count += 1
 
-        # Automatically ensure all 5 IDs are in allowed_chat_ids in config
-        try:
-            from config.config import save_config
-            top5_ids = [-1002007658025, -1001756316676, -1002052872813, -1001552004524, -1001370457350]
-            current_allowed = list(getattr(self.config.telegram, "allowed_chat_ids", []))
-            updated_allowed = list(set(current_allowed + top5_ids))
-            self.config.telegram.allowed_chat_ids = updated_allowed
-            save_config(self.config, "config.yaml")
-        except Exception:
-            pass
+        # Automatically ensure all IDs from targets are in allowed_chat_ids in config
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                from config.config import load_config, save_config
+                cfg_disk = load_config()
+                top_ids = [t["id"] for t in elite_targets if t.get("id")]
+                current_allowed = list(getattr(cfg_disk.telegram, "allowed_chat_ids", []))
+                updated_allowed = list(set(current_allowed + top_ids))
+                cfg_disk.telegram.allowed_chat_ids = updated_allowed
+                save_config(cfg_disk)
+            except Exception:
+                pass
+
+        # Final completion progress notification
+        if progress_callback:
+            try:
+                res_p = progress_callback(
+                    total_targets,
+                    total_targets,
+                    "ALL",
+                    0.0,
+                    f"Hoàn tất: Tham gia mới {joined_count} nhóm, đã có sẵn {already_count} nhóm.",
+                    "DONE",
+                )
+                if asyncio.iscoroutine(res_p):
+                    await res_p
+            except Exception:
+                pass
 
         return {
             "success": True,
             "joined_count": joined_count,
             "already_count": already_count,
             "failed_count": failed_count,
-            "total_channels": len(elite_targets),
+            "total_channels": total_targets,
             "message": f"Hoàn tất: Tham gia mới {joined_count} nhóm, đã có sẵn {already_count} nhóm.",
             "results": results,
         }
