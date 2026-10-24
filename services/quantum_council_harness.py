@@ -566,6 +566,62 @@ class RedTeamSkepticAgent:
         self.agent_name = "Red Team Skeptic (Devil's Advocate)"
         self.role = "Bắt bẫy giá cá mập, quét lỗi logic & Giơ thẻ đỏ bảo vệ vốn"
 
+    def _count_directional_positions(self, market_data: Dict[str, Any]) -> Tuple[int, int]:
+        """
+        Đếm số lượng vị thế LONG và SHORT đang mở đồng thời.
+        Hỗ trợ:
+        - open_shorts / open_longs được truyền trực tiếp trong market_data.
+        - Danh sách open_positions / positions từ Binance Futures client.
+        """
+        if "open_longs" in market_data and "open_shorts" in market_data:
+            try:
+                return int(market_data["open_longs"]), int(market_data["open_shorts"])
+            except (ValueError, TypeError):
+                pass
+
+        positions = market_data.get("open_positions") or market_data.get("positions") or []
+        open_longs = 0
+        open_shorts = 0
+
+        for p in positions:
+            if isinstance(p, dict):
+                amt_val = p.get("positionAmt", p.get("amount", p.get("qty")))
+                if amt_val is not None:
+                    try:
+                        amt_f = float(amt_val)
+                        if amt_f > 0:
+                            open_longs += 1
+                        elif amt_f < 0:
+                            open_shorts += 1
+                        continue
+                    except (ValueError, TypeError):
+                        pass
+                side_str = str(p.get("positionSide", p.get("side", ""))).upper()
+                if side_str in ("LONG", "BUY"):
+                    open_longs += 1
+                elif side_str in ("SHORT", "SELL"):
+                    open_shorts += 1
+            else:
+                amt_val = getattr(p, "position_amt", getattr(p, "quantity", None))
+                if amt_val is not None:
+                    try:
+                        amt_f = float(amt_val)
+                        if amt_f > 0:
+                            open_longs += 1
+                        elif amt_f < 0:
+                            open_shorts += 1
+                        continue
+                    except (ValueError, TypeError):
+                        pass
+                side_val = getattr(p, "side", getattr(p, "position_side", None))
+                side_str = str(getattr(side_val, "value", side_val) or "").upper()
+                if side_str in ("LONG", "BUY"):
+                    open_longs += 1
+                elif side_str in ("SHORT", "SELL"):
+                    open_shorts += 1
+
+        return open_longs, open_shorts
+
     async def evaluate(
         self,
         symbol: str,
@@ -578,6 +634,80 @@ class RedTeamSkepticAgent:
         """
         start_t = time.perf_counter()
         dir_upper = direction.upper()
+
+        # -------------------------------------------------------------
+        # CHECK 0: GIỚI HẠN TỶ TRỌNG CÙNG CHIỀU (Directional Exposure Cap / Anti-Skew Shield)
+        # (Tối đa không quá 3 vị thế cùng chiều mở đồng thời: Max 3 SHORTs, Max 3 LONGs)
+        # -------------------------------------------------------------
+        open_longs, open_shorts = self._count_directional_positions(market_data)
+        if dir_upper in ("SHORT", "SELL") and open_shorts >= 3:
+            elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+            red_flag = (
+                "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế SHORT. "
+                "Chặn để phòng ngừa rủi ro Short Squeeze khi thị trường đảo chiều!"
+            )
+            return AgentOpinion(
+                agent_id=self.agent_id,
+                agent_name=self.agent_name,
+                role=self.role,
+                vote=CouncilVote.VETO,
+                confidence=0,
+                rationale=red_flag,
+                key_metrics={"open_shorts": open_shorts, "max_cap": 3, "check": "directional_cap"},
+                red_flag=red_flag,
+                execution_time_ms=elapsed_ms,
+            )
+
+        if dir_upper in ("LONG", "BUY") and open_longs >= 3:
+            elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+            red_flag = (
+                "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế LONG. "
+                "Chặn để phòng ngừa rủi ro Long Squeeze khi thị trường đảo chiều!"
+            )
+            return AgentOpinion(
+                agent_id=self.agent_id,
+                agent_name=self.agent_name,
+                role=self.role,
+                vote=CouncilVote.VETO,
+                confidence=0,
+                rationale=red_flag,
+                key_metrics={"open_longs": open_longs, "max_cap": 3, "check": "directional_cap"},
+                red_flag=red_flag,
+                execution_time_ms=elapsed_ms,
+            )
+
+        # -------------------------------------------------------------
+        # CHECK COOLDOWN: BỘ ĐỆM LÀM NGUỘI THỊ TRƯỜNG (Per-Symbol Market Cooldown)
+        # (Sau khi đóng vị thế đồng coin X, cấm vào lại trong ít nhất 30 phút = 1800s)
+        # -------------------------------------------------------------
+        last_closed_val = market_data.get("last_closed_at")
+        if last_closed_val is not None:
+            try:
+                if isinstance(last_closed_val, (int, float)):
+                    closed_ts = float(last_closed_val)
+                else:
+                    closed_ts = datetime.fromisoformat(str(last_closed_val).replace("Z", "+00:00")).timestamp()
+                time_since_close = time.time() - closed_ts
+                if 0 <= time_since_close < 1800:
+                    remaining_s = int(1800 - time_since_close)
+                    elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                    red_flag = (
+                        f"COOLDOWN_VETO: Đồng {symbol} vừa đóng vị thế trong vòng {int(time_since_close)}s (< 1800s). "
+                        f"Kích hoạt bộ đệm làm nguội để chống Revenge Trading!"
+                    )
+                    return AgentOpinion(
+                        agent_id=self.agent_id,
+                        agent_name=self.agent_name,
+                        role=self.role,
+                        vote=CouncilVote.VETO,
+                        confidence=0,
+                        rationale=red_flag,
+                        key_metrics={"time_since_close_s": time_since_close, "remaining_s": remaining_s, "check": "per_symbol_cooldown"},
+                        red_flag=red_flag,
+                        execution_time_ms=elapsed_ms,
+                    )
+            except Exception as e_cd:
+                logger.debug(f"Per-symbol cooldown check error: {e_cd}")
         vol_r = float(market_data.get("vol_ratio", 1.0))
         chg_24h = float(market_data.get("change_24h", 0.0))
 
@@ -753,6 +883,17 @@ class QuantumCouncilArbiter:
         self.macro_agent = MacroRegimeAgent(regime_shield=regime_shield)
         self.sentiment_agent = SentimentSentinelAgent(sentiment_guardian=sentiment_guardian)
         self.red_team_agent = RedTeamSkepticAgent()
+        self.symbol_last_closed: Dict[str, float] = {}
+        self.last_trade_opened_at: float = 0.0
+
+    def record_position_closed(self, symbol: str, closed_at: Optional[float] = None) -> None:
+        """Ghi nhận thời điểm đóng vị thế của coin X để kích hoạt Market Cooldown Buffer 30m."""
+        sym = symbol.upper().replace("/", "").replace(":", "")
+        self.symbol_last_closed[sym] = closed_at or time.time()
+
+    def record_trade_opened(self, symbol: str, opened_at: Optional[float] = None) -> None:
+        """Ghi nhận thời điểm mở vị thế mới để kiểm soát Global Trade Interval 15m."""
+        self.last_trade_opened_at = opened_at or time.time()
 
     async def deliberate(
         self,
@@ -772,6 +913,22 @@ class QuantumCouncilArbiter:
         5. Xuất biên bản Telegram transcript.
         """
         start_t = time.perf_counter()
+        clean_sym = symbol.upper().replace("/", "").replace(":", "")
+
+        # Tự động nạp trạng thái cooldown và thời điểm trade gần nhất từ Arbiter nếu chưa có
+        if "last_closed_at" not in market_data and clean_sym in self.symbol_last_closed:
+            market_data["last_closed_at"] = self.symbol_last_closed[clean_sym]
+        if "last_trade_opened_at" not in market_data and self.last_trade_opened_at > 0:
+            market_data["last_trade_opened_at"] = self.last_trade_opened_at
+
+        # Tự động nạp vị thế từ Binance client nếu chưa có trong market_data
+        if "open_positions" not in market_data and "positions" not in market_data and self.client:
+            try:
+                positions = await self.client.get_open_positions()
+                if positions:
+                    market_data["open_positions"] = positions
+            except Exception as e_pos:
+                logger.debug(f"Council arbiter get_open_positions notice: {e_pos}")
 
         # 1. Technical Scout đánh giá kỹ thuật và thiết lập tham số ban đầu
         tech_opinion, trade_params = await self.technical_scout.evaluate(symbol, market_data)
@@ -831,6 +988,26 @@ class QuantumCouncilArbiter:
             else:
                 is_approved = False
                 veto_reason = f"Điểm đồng thuận hội đồng ({consensus_score}/100) chưa đạt ngưỡng phê duyệt >= 85"
+
+            # Kiểm tra Quy tắc 2: Global Trade Interval (Khoảng cách tối thiểu 15 phút = 900s)
+            # Trừ khi setup có điểm consensus >= 9.2 (>= 92/100) từ Hội đồng AI
+            if is_approved:
+                last_trade_val = market_data.get("last_trade_opened_at", self.last_trade_opened_at)
+                if last_trade_val is not None:
+                    try:
+                        last_ts = float(last_trade_val) if isinstance(last_trade_val, (int, float)) else datetime.fromisoformat(str(last_trade_val).replace("Z", "+00:00")).timestamp()
+                        if last_ts > 0:
+                            elapsed_trade = time.time() - last_ts
+                            if 0 <= elapsed_trade < 900 and consensus_score < 92:
+                                is_approved = False
+                                rem_gap = int(900 - elapsed_trade)
+                                veto_reason = (
+                                    f"GLOBAL_INTERVAL_VETO: Khoảng cách giữa 2 lần mở vị thế ({int(elapsed_trade)}s) "
+                                    f"chưa đủ 15 phút (còn {rem_gap}s) và điểm đồng thuận ({consensus_score}/100) "
+                                    f"chưa đạt ngưỡng đặc cách >= 92 (9.2)."
+                                )
+                    except Exception as e_int:
+                        logger.debug(f"Global trade interval check error: {e_int}")
 
         # 4. Tích hợp Risk Engine: Điều chỉnh ATR Volatility & Đòn bẩy an toàn nếu lệnh được duyệt
         if is_approved:

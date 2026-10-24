@@ -704,12 +704,29 @@ class ReconciliationEngine:
                             if (has_moon_or_tp1 or price_gain_pct >= Decimal("6.0")) and mark_p > Decimal("0") and len(tps_raw) >= 2:
                                 tp2_price = Decimal(str(tps_raw[1]))
                                 ref_sl = current_sl_px or (entry_p if is_at_least_be else Decimal("0"))
+
+                                # Dynamic ATR / Volatility trailing distance (2.0% - 4.5%, mặc định an toàn 2.5% - 3.0%)
+                                # Tránh bị quét non đối với các coin râu nến dài (ERA, DOS, etc.)
+                                atr_distance_pct = Decimal("2.8")
+                                initial_sl_raw = row.get("stop_loss")
+                                if initial_sl_raw is not None and entry_p > Decimal("0"):
+                                    try:
+                                        init_sl = Decimal(str(initial_sl_raw))
+                                        if init_sl > Decimal("0"):
+                                            # Ước lượng độ biến động qua cự ly SL ban đầu (khoảng 0.8x khoảng cách SL)
+                                            sl_span_pct = (abs(entry_p - init_sl) / entry_p) * Decimal("100")
+                                            calculated_trail = sl_span_pct * Decimal("0.8")
+                                            atr_distance_pct = max(Decimal("2.0"), min(Decimal("4.5"), calculated_trail))
+                                    except Exception:
+                                        pass
+
                                 should_trail, new_sl_price, trail_reason = self.trailing_mgr.calculate_trailing_stop(
                                     side=PositionSide.LONG if is_long else PositionSide.SHORT,
                                     reference_price=tp2_price,
                                     current_mark_price=mark_p,
                                     current_sl=ref_sl,
                                     key=sig_id,
+                                    atr_distance_pct=atr_distance_pct,
                                 )
                                 if should_trail and new_sl_price:
                                     if target_trail_px is None or ((new_sl_price > target_trail_px) if is_long else (new_sl_price < target_trail_px)):

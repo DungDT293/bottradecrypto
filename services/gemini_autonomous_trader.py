@@ -146,6 +146,7 @@ class GeminiAutonomousTrader:
         self.sentiment_guardian = MarketSentimentNewsGuardian(config=self.config)
         self.council_arbiter = QuantumCouncilArbiter(
             config=self.config,
+            binance_client=self.client,
             quantum_engine=self.quantum_engine,
             sentiment_guardian=self.sentiment_guardian,
         )
@@ -154,6 +155,89 @@ class GeminiAutonomousTrader:
         self._daily_api_calls: int = 0
         self._daily_calls_reset_date: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self._running_task: Optional[asyncio.Task] = None
+
+        # V2.3 Market Cooldown Buffer & Trade Interval Tracking
+        self.symbol_last_closed: Dict[str, float] = {}
+        self.last_trade_opened_at: float = self._get_last_trade_from_db()
+        if hasattr(self, "council_arbiter") and self.council_arbiter:
+            self.council_arbiter.last_trade_opened_at = self.last_trade_opened_at
+
+    def _get_last_closed_from_db(self, symbol: str) -> float:
+        """Truy vấn thời điểm đóng vị thế gần nhất của symbol từ Database."""
+        if not self.db:
+            return 0.0
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT updated_at FROM signals WHERE symbol = ? AND state = 'CLOSED' ORDER BY updated_at DESC LIMIT 1",
+                    (symbol,)
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    dt = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+                    return dt.timestamp()
+        except Exception as e:
+            logger.debug(f"Error querying last closed from DB for {symbol}: {e}")
+        return 0.0
+
+    def _get_last_trade_from_db(self) -> float:
+        """Truy vấn thời điểm mở lệnh gần nhất toàn hệ thống từ Database."""
+        if not self.db:
+            return 0.0
+        try:
+            with self.db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT created_at FROM signals ORDER BY created_at DESC LIMIT 1"
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    dt = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+                    return dt.timestamp()
+        except Exception as e:
+            logger.debug(f"Error querying last trade from DB: {e}")
+        return 0.0
+
+    def record_position_closed(self, symbol: str, closed_at: Optional[float] = None) -> None:
+        """Ghi nhận thời điểm đóng vị thế cho coin X để kích hoạt Market Cooldown Buffer 30m."""
+        sym = symbol.upper().replace("/", "").replace(":", "")
+        ts = closed_at or time.time()
+        self.symbol_last_closed[sym] = ts
+        if hasattr(self, "council_arbiter") and self.council_arbiter:
+            self.council_arbiter.record_position_closed(sym, ts)
+
+    def record_trade_opened(self, symbol: str, opened_at: Optional[float] = None) -> None:
+        """Ghi nhận thời điểm mở vị thế mới để kiểm soát Global Trade Interval 15m."""
+        ts = opened_at or time.time()
+        self.last_trade_opened_at = ts
+        if hasattr(self, "council_arbiter") and self.council_arbiter:
+            self.council_arbiter.record_trade_opened(symbol, ts)
+
+    def get_symbol_cooldown_remaining(self, symbol: str) -> int:
+        """Trả về số giây làm nguội còn lại của coin X (30 phút = 1800s kể từ lúc đóng vị thế)."""
+        sym = symbol.upper().replace("/", "").replace(":", "")
+        last_closed = self.symbol_last_closed.get(sym, 0.0)
+        if last_closed <= 0.0 and self.db:
+            last_closed = self._get_last_closed_from_db(sym)
+            if last_closed > 0.0:
+                self.symbol_last_closed[sym] = last_closed
+        elapsed = time.time() - last_closed
+        if 0 <= elapsed < 1800:
+            return int(1800 - elapsed)
+        return 0
+
+    def get_global_trade_interval_remaining(self) -> int:
+        """Trả về số giây khoảng cách còn lại giữa 2 lần mở vị thế bất kỳ (15 phút = 900s)."""
+        last_trade = self.last_trade_opened_at
+        if last_trade <= 0.0 and self.db:
+            last_trade = self._get_last_trade_from_db()
+            if last_trade > 0.0:
+                self.last_trade_opened_at = last_trade
+        elapsed = time.time() - last_trade
+        if 0 <= elapsed < 900:
+            return int(900 - elapsed)
+        return 0
 
     def get_cooldown_remaining(self) -> int:
         remaining = self._api_cooldown_until - time.time()
@@ -731,10 +815,27 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
                     setups.append(q_setup)
 
         # Phase 4: Quantum Council Deliberation (Adversarial Multi-Agent Review)
+        current_positions = []
+        if self.client:
+            try:
+                current_positions = await self.client.get_open_positions()
+            except Exception as e_pos:
+                logger.debug(f"Unable to fetch positions for council deliberation: {e_pos}")
+
         validated_setups: List[Dict[str, Any]] = []
         for s in setups:
             sym = s.get("symbol", "")
+            # Check per-symbol cooldown (Anti-Revenge Trading Buffer 30m)
+            cd_rem = self.get_symbol_cooldown_remaining(sym)
+            if cd_rem > 0:
+                logger.info(f"[COOLDOWN SKIP] Bỏ qua {sym} vì đang trong thời gian làm nguội ({cd_rem}s còn lại)")
+                skipped_symbols.append(sym)
+                continue
+
             try:
+                s["open_positions"] = current_positions
+                s["last_closed_at"] = self.symbol_last_closed.get(sym) or self._get_last_closed_from_db(sym)
+                s["last_trade_opened_at"] = self.last_trade_opened_at
                 deliberation = await self.council_arbiter.deliberate(sym, s)
                 if not deliberation.is_approved:
                     logger.warning(
@@ -827,6 +928,22 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         if direction not in ("LONG", "SHORT"):
             return {"status": "ERROR", "reason": "Hướng giao dịch không hợp lệ"}
 
+        # Check Per-symbol Cooldown (30 phút = 1800s kể từ lúc đóng vị thế)
+        sym_cd_rem = self.get_symbol_cooldown_remaining(sym)
+        if sym_cd_rem > 0:
+            return {
+                "status": "SKIPPED",
+                "reason": f"SYMBOL_COOLDOWN: Đồng {sym} vừa đóng vị thế trong vòng 30 phút (còn {sym_cd_rem}s làm nguội) để tránh bẫy trả thù lệnh (Revenge trading)",
+            }
+
+        # Check Global Trade Interval (15 phút = 900s giữa 2 lần mở vị thế)
+        global_cd_rem = self.get_global_trade_interval_remaining()
+        if global_cd_rem > 0 and confidence < 92:
+            return {
+                "status": "SKIPPED",
+                "reason": f"GLOBAL_INTERVAL: Khoảng cách giữa 2 lần mở vị thế chưa đủ 15 phút (còn {global_cd_rem}s) và điểm consensus ({confidence}/100) chưa đạt ngưỡng đặc cách >= 92",
+            }
+
         # Sentinel Black-Swan Gate
         try:
             sent_gate = await self.sentiment_guardian.analyze_symbol_sentiment(sym, direction)
@@ -856,6 +973,20 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             active_count = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) != 0])
             if active_count >= limit:
                 return {"status": "SKIPPED", "reason": f"Đã đạt hạn mức an toàn tối đa {limit} vị thế đồng thời ({active_count}/{limit}) để bảo toàn ký quỹ"}
+
+            # Directional Exposure Cap (Tối đa không quá 3 vị thế cùng chiều: Max 3 SHORTs, Max 3 LONGs)
+            open_longs = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) > 0])
+            open_shorts = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) < 0])
+            if direction == "SHORT" and open_shorts >= 3:
+                return {
+                    "status": "SKIPPED",
+                    "reason": "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế SHORT. Chặn để phòng ngừa rủi ro Short Squeeze khi thị trường đảo chiều!",
+                }
+            if direction == "LONG" and open_longs >= 3:
+                return {
+                    "status": "SKIPPED",
+                    "reason": "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế LONG. Chặn để phòng ngừa rủi ro Long Squeeze khi thị trường đảo chiều!",
+                }
         except Exception as e:
             return {"status": "ERROR", "reason": f"Khong the kiem tra vi the: {e}"}
 
@@ -1254,6 +1385,9 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             )
         except Exception:
             pass
+
+        # Ghi nhận thời điểm mở lệnh để áp dụng Global Trade Interval 15m
+        self.record_trade_opened(sym)
 
         return {
             "status": "SUCCESS",

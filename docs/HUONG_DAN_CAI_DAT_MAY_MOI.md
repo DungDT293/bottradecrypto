@@ -1,8 +1,8 @@
 # HƯỚNG DẪN CÀI ĐẶT & SỬ DỤNG TRÊN MÁY TÍNH MỚI
-## DỰ ÁN QUANTUM AI TRADING BOT (v2.2.0 ENTERPRISE)
-**Phiên bản cài đặt:** `telegram-binance-signal-executor_2.2.0_x64-setup.exe`  
+## DỰ ÁN QUANTUM AI TRADING BOT (v2.2.1 ENTERPRISE)
+**Phiên bản cài đặt:** `telegram-binance-signal-executor_2.2.1_x64-setup.exe`  
 **Dung lượng:** ~97.7 MB  
-**Vị trí file cài đặt:** `release/telegram-binance-signal-executor_2.2.0_x64-setup.exe`
+**Vị trí file cài đặt:** `release/telegram-binance-signal-executor_2.2.1_x64-setup.exe`
 
 ---
 
@@ -17,7 +17,7 @@
 ## II. QUY TRÌNH CÀI ĐẶT NHANH (CHO NGƯỜI DÙNG MỚI)
 
 ### Bước 1: Chạy file cài đặt
-1. Chép file `telegram-binance-signal-executor_2.2.0_x64-setup.exe` (trong thư mục `release/` hoặc tải từ GitHub Releases) sang máy tính mới (qua USB, Google Drive, hoặc Telegram).
+1. Chép file `telegram-binance-signal-executor_2.2.1_x64-setup.exe` (trong thư mục `release/` hoặc tải từ GitHub Releases) sang máy tính mới (qua USB, Google Drive, hoặc Telegram).
 2. Nhấp đúp chuột vào file `.exe` để tiến hành cài đặt.
 3. Nhấn **Next** $\rightarrow$ **Install** $\rightarrow$ **Finish**.
 4. Biểu tượng ứng dụng **Telegram Binance Signal Executor** sẽ xuất hiện trên màn hình Desktop và Start Menu.
@@ -67,7 +67,7 @@ Nếu bạn muốn chuyển toàn bộ phiên đăng nhập Telegram, lịch s�
      + `data/trading_state.db` (hoặc file `trading_state.db` ở thư mục gốc)
 
 2. **Trên máy mới:**
-   - Cài đặt ứng dụng bằng file `telegram-binance-signal-executor_2.2.0_x64-setup.exe`.
+   - Cài đặt ứng dụng bằng file `telegram-binance-signal-executor_2.2.1_x64-setup.exe`.
    - Nhấn `Windows + R`, gõ:
      ```
      %APPDATA%\telegram_binance_signal_executor
@@ -77,9 +77,13 @@ Nếu bạn muốn chuyển toàn bộ phiên đăng nhập Telegram, lịch s�
 
 ---
 
-## V. TÍNH NĂNG MỚI ĐỘC QUYỀN TRÊN BẢN v2.2.0 ENTERPRISE
+## V. TÍNH NĂNG MỚI ĐỘC QUYỀN TRÊN BẢN v2.2.1 ENTERPRISE
 
-1. **Hội Đồng Lượng Tử Đa Tác Nhân (Quantum Council Multi-Agent System):**
+1. **Triple-Armor Defense Shield (Bộ 3 Cơ Chế Phòng Vệ Cốt Lõi V2.3):**
+   - **Directional Exposure Cap:** Khóa cứng tối đa không quá 3 vị thế cùng chiều (`Max 3 SHORTs`, `Max 3 LONGs`), triệt tiêu 100% rủi ro bị bão Short Squeeze.
+   - **Market Cooldown Buffer:** 30 phút làm nguội cho cùng 1 đồng coin và 15 phút giãn cách giữa các lệnh mở mới (chống Overtrading / bão giao dịch).
+   - **Dynamic ATR Trailing Stop:** Co giãn cự ly trailing SL an toàn 2.5% - 3.2% theo độ biến động giá, chống bị quét non râu nến.
+2. **Hội Đồng Lượng Tử Đa Tác Nhân (Quantum Council Multi-Agent System):**
    - 4 Đặc vụ AI chạy 100% nội bộ Python (`Technical Scout`, `Macro Regime`, `Sentiment Sentinel`, `Red Team Skeptic`) thẩm định đa chiều mọi tín hiệu với độ trễ $\le 0.5\text{ms}$.
    - Tự động kích hoạt cơ chế Local Fallback nếu Google Gemini Cloud hết credit trả trước (HTTP 402), giúp bot không bao giờ bị dừng hoạt động.
 
