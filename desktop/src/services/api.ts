@@ -199,6 +199,10 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ entry_enabled: enabled }),
   }),
+  toggleFerrariMode: (enabled: boolean) => request<{ success: boolean; ferrari_mode_enabled: boolean; message: string }>("/trading/toggle-ferrari-mode", {
+    method: "POST",
+    body: JSON.stringify({ ferrari_mode_enabled: enabled }),
+  }),
   getTradeHistory: (limit = 100, daysBack = 0) => {
     const params = new URLSearchParams({ limit: String(limit), days_back: String(daysBack) });
     return request<TradeRecord[]>(`/trading/trades?${params.toString()}`);
@@ -292,4 +296,39 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ setup }),
   }),
+
+  // 13. Market Regime & Smart Queue (Trụ Cột 1 & 6)
+  getMarketRegime: () => request<{
+    status: string;
+    btc_price: number;
+    btc_4h_ema20: number;
+    btc_4h_ema50: number;
+    btc_1h_rsi: number;
+    reason: string;
+    timestamp: number;
+  }>("/market-regime"),
+  getSmartQueue: () => request<{
+    items: Array<{
+      signal_id: string;
+      symbol: string;
+      side: string;
+      chat_id: number;
+      channel_name: string;
+      priority: number;
+      enqueued_at: number;
+      remaining_seconds: number;
+    }>;
+    count: number;
+  }>("/trading/smart-queue"),
+  getCapitalStage: () => request<{
+    stage: number;
+    label: string;
+    current_equity: number;
+    max_positions: number;
+    recommended_risk_pct: number;
+    max_total_risk_pct: number;
+    target_equity: number;
+    progress_pct: number;
+    mission: string;
+  }>("/capital-stage"),
 };

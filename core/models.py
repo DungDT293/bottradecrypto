@@ -70,6 +70,7 @@ class ValidatedSignal(BaseModel):
     risk_pct: Decimal
     metadata: SourceMetadata
     entry_range: Optional[Tuple[Decimal, Decimal]] = None
+    warnings: List[str] = Field(default_factory=list)
 
 
 class Order(BaseModel):

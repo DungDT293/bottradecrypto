@@ -716,10 +716,10 @@ export const ApiGuideModal: React.FC<ApiGuideModalProps> = ({
                       3
                     </div>
                     <div style={{ fontSize: "13px" }}>
-                      <strong style={{ color: "#34d399" }}>1-Click Tự Động Tham Gia 5 Kênh Tinh Hoa:</strong>
+                      <strong style={{ color: "#34d399" }}>1-Click Tự Động Tham Gia 8 Kênh Tinh Hoa:</strong>
                       <p style={{ margin: "4px 0 0 0", color: "var(--text-secondary)", fontSize: "12px" }}>
-                        Sau khi đăng nhập xong, chỉ cần bấm nút <strong>"Tham Gia 5 Kênh Ngay"</strong>.
-                        Bot sẽ tự động join và tự động kích hoạt giám sát tín hiệu của 5 kênh thắng lớn nhất (THE WOLF, Leopard, Monk, Neon, Boom Boom).
+                        Sau khi đăng nhập xong, chỉ cần bấm nút <strong>"Tham Gia 8 Kênh Ngay"</strong>.
+                        Bot sẽ tự động join và tự động kích hoạt giám sát tín hiệu của 8 kênh tinh hoa chuẩn mực (Whales Circle, Coin Chief, Leopard, Crypto Devil, The Wolf, Monk, Bitcoin Bulls, Mermaids).
                       </p>
                     </div>
                   </div>

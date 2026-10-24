@@ -68,34 +68,8 @@ export const LeaderboardPage: React.FC = () => {
         marginPct
       );
       if (res.success) {
-        const top5Channels = (res.channels || []).filter((c) =>
-          ELITE_TOP5_CHAT_IDS.includes(Number(c.chat_id))
-        );
-        const updatedSummary = res.summary
-          ? {
-              ...res.summary,
-              total_channels: top5Channels.length,
-              total_pinned_channels: top5Channels.length,
-              active_trading_channels: top5Channels.length,
-              total_signals_validated: top5Channels.reduce(
-                (acc, c) => acc + (c.validated_signals || 0),
-                0
-              ),
-              overall_win_rate_pct:
-                top5Channels.length > 0
-                  ? Math.round(
-                      (top5Channels.reduce(
-                        (acc, c) => acc + (c.performance?.win_rate_pct || 0),
-                        0
-                      ) /
-                        top5Channels.length) *
-                        10
-                    ) / 10
-                  : 0,
-            }
-          : null;
-        setSummary(updatedSummary);
-        setChannels(top5Channels);
+        setSummary(res.summary);
+        setChannels(res.channels || []);
       }
     } catch (err: any) {
       addToast(err?.user_message || err?.message || "Lỗi tải dữ liệu bảng xếp hạng", "error");
@@ -124,14 +98,18 @@ export const LeaderboardPage: React.FC = () => {
     }
   };
 
-  // Filtered channels list - Strictly Elite Top 5 Only
+  // Filtered channels list - Dynamic Tiers & Search
   const filteredChannels = channels
-    .filter((ch) => ELITE_TOP5_CHAT_IDS.includes(Number(ch.chat_id)))
     .filter((ch) => {
       const matchesSearch =
         ch.channel_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         ch.chat_id.toString().includes(searchQuery);
-      const matchesTier = selectedTier === "ALL" || ch.tier === selectedTier;
+      const matchesTier =
+        selectedTier === "ALL" ||
+        ch.tier === selectedTier ||
+        (selectedTier === "ELITE" && (ch.tier === "S" || ch.tier === "TIER_1")) ||
+        (selectedTier === "MUTED" && ch.tier === "MUTED_TEMPORARY") ||
+        (selectedTier === "BLOCKED" && (ch.is_blacklisted || ch.tier === "BLOCKED"));
       return matchesSearch && matchesTier;
     });
 

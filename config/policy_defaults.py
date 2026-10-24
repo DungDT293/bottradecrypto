@@ -56,7 +56,7 @@ class RiskPolicy(BaseModel):
     risk_per_signal_pct: Decimal = Decimal("2.5")
     max_total_open_risk_pct: Decimal = Decimal("10.0")
     max_daily_loss_pct: Decimal = Decimal("10.0")
-    max_active_signals: int = 15
+    max_active_signals: int = 5
     default_leverage: int = 20
     max_leverage: int = 25
     margin_mode: MarginMode = MarginMode.CROSSED
@@ -89,7 +89,8 @@ class ExecutionPolicyConfig(BaseModel):
     breakeven_trigger_tp_index: int = 1
     breakeven_offset_pct: Decimal = Decimal("0.05")
     min_sl_distance_pct: Decimal = Decimal("0.2")
-    max_sl_distance_pct: Decimal = Decimal("30.0")
+    max_sl_distance_pct: Decimal = Decimal("15.0")
+    min_rr_tp1: Decimal = Decimal("0.20")
     sl_failure_emergency_close_timeout_seconds: int = 5
     allow_below_pattern_as_valid: bool = False
 

@@ -29,6 +29,7 @@ Kích hoạt kỹ năng này khi:
 - Công thức đòn bẩy an toàn bắt buộc:
   $$\text{Safe Leverage} = \min\left(25, \left\lfloor \frac{0.75}{\text{Khoảng cách SL \%}} \right\rfloor\right)$$
 - Nếu Admin yêu cầu đòn bẩy 50x nhưng khoảng cách SL là 4%, hệ thống **BẮT BUỘC** tự động hạ đòn bẩy xuống tối đa 18x để triệt tiêu 100% rủi ro bị thanh lý trước khi chạm SL. Khi SL ngắn $\le 3.7\%$, đi đủ **20x – 25x**.
+- **Quy tắc ghìm đòn bẩy khi BTC BEARISH_PANIC:** Khi Bitcoin ở trạng thái BEARISH_PANIC (giá < EMA20 & EMA50 4H hoặc RSI 1H < 40), mọi lệnh LONG Altcoin tự động bị **ghìm trần đòn bẩy tối đa 18x** (kể cả khi Ferrari Mode đang bật). Điều này triệt tiêu hoàn toàn rủi ro rung lắc gây âm ROE lớn cho tài khoản.
 
 ### Điều 2: Tối ưu tỷ lệ R:R dương ($\ge 2.5 : 1$)
 - **Cấm tuyệt đối:** Chốt non phần lớn vị thế ở TP1 và dời SL quá sớm khiến lệnh bị quét hòa vốn hoặc lãi vài xu trong khi chịu rủi ro lỗ nặng khi chạm SL.

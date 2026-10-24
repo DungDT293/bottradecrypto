@@ -87,6 +87,7 @@ class MockBinanceFuturesClient:
             "trend_1h": "BULLISH",
             "trend_diff_pct": 1.35,
             "btc_change_24h": 1.2,
+            "atr_1h": 2.5,
             "market_status": "NORMAL",
         }
 

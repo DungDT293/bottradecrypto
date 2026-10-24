@@ -1,10 +1,35 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { DollarSign, ArrowUpRight, ArrowDownRight, Radio } from "lucide-react";
 import { useApp } from "../context/AppContext";
+import { api } from "../services/api";
 import { formatDateTime } from "../utils/date";
 
 export const OverviewPage: React.FC = () => {
   const { snapshot, setTab } = useApp();
+  const [capitalStage, setCapitalStage] = useState<{
+    stage: number;
+    label: string;
+    current_equity: number;
+    max_positions: number;
+    recommended_risk_pct: number;
+    max_total_risk_pct: number;
+    target_equity: number;
+    progress_pct: number;
+    mission: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    api
+      .getCapitalStage()
+      .then((res) => {
+        if (mounted) setCapitalStage(res);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [snapshot]);
 
   const account = snapshot?.account;
   const pnlToday = snapshot?.pnl_today;
@@ -33,6 +58,63 @@ export const OverviewPage: React.FC = () => {
           Giám sát trạng thái hoạt động thực thi tín hiệu Telegram và tài khoản Binance Futures.
         </p>
       </div>
+
+      {/* Trụ Cột 7: Compounding Capital Growth Banner */}
+      {capitalStage && (
+        <div
+          className="card"
+          style={{
+            marginBottom: "20px",
+            background: "linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%)",
+            border: "1px solid rgba(59, 130, 246, 0.25)",
+            padding: "16px 20px",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <span style={{ fontSize: "18px" }}>📈</span>
+              <span style={{ fontWeight: 700, fontSize: "14px", color: "#60a5fa" }}>
+                {capitalStage.label}
+              </span>
+              <span
+                className="badge"
+                style={{ backgroundColor: "rgba(59, 130, 246, 0.15)", color: "#93c5fd", fontSize: "11px" }}
+              >
+                Trần: {capitalStage.max_positions} vị thế | Rủi ro: {capitalStage.recommended_risk_pct}% NAV/lệnh
+              </span>
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
+              Mục tiêu giai đoạn: <strong style={{ color: "#fff" }}>${capitalStage.target_equity} USDT</strong> (Đạt {capitalStage.progress_pct}%)
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div
+            style={{
+              width: "100%",
+              height: "6px",
+              backgroundColor: "rgba(255, 255, 255, 0.08)",
+              borderRadius: "3px",
+              overflow: "hidden",
+              marginBottom: "8px",
+            }}
+          >
+            <div
+              style={{
+                width: `${capitalStage.progress_pct}%`,
+                height: "100%",
+                background: "linear-gradient(90deg, #3b82f6, #10b981)",
+                transition: "width 0.5s ease",
+              }}
+            />
+          </div>
+
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
+            <span>🎯 Chiến lược: {capitalStage.mission}</span>
+            <span>Vốn hiện tại: <strong>${capitalStage.current_equity?.toFixed(2)} USDT</strong></span>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="card-grid">

@@ -9,16 +9,18 @@ import type { AppSettings } from "../types/api";
 const DEFAULT_SETTINGS: AppSettings = {
   mode: "READ_ONLY",
   live_trading_enabled: false,
+  ferrari_mode_enabled: false,
+  max_total_open_risk_pct: 15.0,
   risk_per_signal_pct: 2.5,
   max_daily_loss_pct: 10.0,
   max_leverage: 25,
   margin_mode: "CROSSED",
   entry_range_policy: "SPLIT_2_LIMITS",
-  multi_tp_default_weight_mode: "FIXED_20_40_40",
-  tp1_target_weight_pct: 20,
+  multi_tp_default_weight_mode: "FIXED_35_35_30",
+  tp1_target_weight_pct: 35,
   breakeven_after_tp1: true,
   sl_buffer_pct: 0.3,
-  max_active_signals: 15,
+  max_active_signals: 20,
 };
 
 const finiteOr = (value: number | undefined, fallback: number | undefined): number =>
@@ -27,6 +29,8 @@ const finiteOr = (value: number | undefined, fallback: number | undefined): numb
 const normalizeSettings = (data: Partial<AppSettings>): AppSettings => ({
   ...DEFAULT_SETTINGS,
   ...data,
+  ferrari_mode_enabled: Boolean(data.ferrari_mode_enabled),
+  max_total_open_risk_pct: finiteOr(data.max_total_open_risk_pct, DEFAULT_SETTINGS.max_total_open_risk_pct),
   risk_per_signal_pct: finiteOr(data.risk_per_signal_pct, DEFAULT_SETTINGS.risk_per_signal_pct),
   max_daily_loss_pct: finiteOr(data.max_daily_loss_pct, DEFAULT_SETTINGS.max_daily_loss_pct),
   max_leverage: finiteOr(data.max_leverage, DEFAULT_SETTINGS.max_leverage),
@@ -236,6 +240,56 @@ export const SettingsPage: React.FC = () => {
                 />
               </div>
             </div>
+
+            {/* Ferrari Mode (No Risk No Ferrari) Toggle Box */}
+            <div
+              style={{
+                padding: "16px",
+                background: settings.ferrari_mode_enabled
+                  ? "linear-gradient(135deg, rgba(239, 68, 68, 0.18), rgba(185, 28, 28, 0.08))"
+                  : "var(--bg-input)",
+                borderRadius: "8px",
+                border: settings.ferrari_mode_enabled ? "1px solid #ef4444" : "1px solid var(--border-color)",
+                marginTop: "14px",
+                boxShadow: settings.ferrari_mode_enabled ? "0 0 15px rgba(239, 68, 68, 0.25)" : "none",
+                transition: "all 0.3s ease",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: settings.ferrari_mode_enabled ? "#ff4d4d" : "#fff", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "16px" }}>🏎️</span>
+                    <span>FERRARI MODE (x35 - x40 & Khớp Mọi Kèo)</span>
+                    {settings.ferrari_mode_enabled && (
+                      <span style={{ fontSize: "10px", background: "#ef4444", color: "#fff", padding: "1px 6px", borderRadius: "10px", fontWeight: 700 }}>
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+                    {settings.ferrari_mode_enabled
+                      ? "ĐANG BẬT: Đòn bẩy x35-40, chốt lời TP1 35% + Breakeven tức thì. Mở khóa toàn bộ kèo Telegram không bị chặn."
+                      : "ĐÃ TẮT: Áp dụng hạn mức chuẩn an toàn."}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.ferrari_mode_enabled ?? false}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setSettings((prev) => ({
+                      ...prev,
+                      ferrari_mode_enabled: enabled,
+                      max_leverage: enabled ? 40 : prev.max_leverage,
+                      multi_tp_default_weight_mode: enabled ? "FIXED_35_35_30" : prev.multi_tp_default_weight_mode,
+                      tp1_target_weight_pct: enabled ? 35 : prev.tp1_target_weight_pct,
+                      max_total_open_risk_pct: enabled ? 150 : 15,
+                    }));
+                  }}
+                  style={{ width: "22px", height: "22px", cursor: "pointer", accentColor: "#ef4444" }}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -288,18 +342,41 @@ export const SettingsPage: React.FC = () => {
             <div className="form-group">
               <label className="form-label" style={{ display: "flex", justifyContent: "space-between" }}>
                 <span>Số lệnh / vị thế tối đa cùng lúc (Max Active Signals)</span>
-                <span style={{ color: "#10b981", fontWeight: 700 }}>{settings.max_active_signals ?? 15} lệnh</span>
+                <span style={{ color: "#10b981", fontWeight: 700 }}>{settings.max_active_signals ?? 20} lệnh</span>
               </label>
               <input
                 type="number"
                 min="1"
                 max="30"
                 className="form-input mono"
-                value={settings.max_active_signals ?? 15}
-                onChange={(e) => setSettings({ ...settings, max_active_signals: parseInt(e.target.value) || 15 })}
+                value={settings.max_active_signals ?? 20}
+                onChange={(e) => setSettings({ ...settings, max_active_signals: parseInt(e.target.value) || 20 })}
               />
               <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                Đã mở khóa giới hạn: Cho phép bot mở tối đa tới 15 vị thế đồng thời khi thị trường có nhiều kèo tiềm năng.
+                Cho phép bot mở tối đa tới 20 vị thế đồng thời khi thị trường có nhiều kèo tiềm năng.
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Trần tổng rủi ro mở cùng lúc (Max Open Risk %)</span>
+                <span style={{ color: settings.ferrari_mode_enabled ? "#ef4444" : "#10b981", fontWeight: 700 }}>
+                  {settings.max_total_open_risk_pct ?? 15}%
+                </span>
+              </label>
+              <input
+                type="number"
+                step="5.0"
+                min="5.0"
+                max="200.0"
+                className="form-input mono"
+                value={settings.max_total_open_risk_pct ?? 15}
+                onChange={(e) => setSettings({ ...settings, max_total_open_risk_pct: parseFloat(e.target.value) || 15 })}
+              />
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                {settings.ferrari_mode_enabled
+                  ? "🏎️ FERRARI MODE: Đã mở trần 150% để vào mọi kèo Telegram liên tục mà không bao giờ bị nghẽn lệnh."
+                  : "Mức trần mở lệnh đồng thời. Đặt >= 100% để tắt hoàn toàn cơ chế chặn lệnh mở."}
               </div>
             </div>
 

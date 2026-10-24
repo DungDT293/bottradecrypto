@@ -84,6 +84,8 @@ def main():
             mc={int(k[0]):(Decimal(str(k[2])),Decimal(str(k[3]))) for k in mark}; vals=[Decimal(str(v)) for v in c['entries']];entry_min=min(vals);entry_max=max(vals);sl=Decimal(str(c['stop_loss']));tp=Decimal(str(c['take_profits'][0]));entered=False; status='UNKNOWN';reason='NO_TERMINAL_HIT'
             for k in sorted(contract,key=lambda z:int(z[0])):
                 t=int(k[0]);hi=Decimal(str(k[2]));lo=Decimal(str(k[3]));mh,ml=mc.get(t,(hi,lo))
+                if t < ts:
+                    continue
                 if not entered:
                     if lo<=entry_max and hi>=entry_min: entered=True
                     else:continue

@@ -35,9 +35,9 @@ def parse_symbol_info(symbol_data: Dict[str, Any]) -> SymbolFilterInfo:
     for f in symbol_data.get("filters", []):
         f_type = f.get("filterType")
         if f_type == "PRICE_FILTER":
-            tick_size = Decimal(f.get("tickSize", "0.01"))
+            tick_size = Decimal(f.get("tickSize", "0.01")).normalize()
         elif f_type == "LOT_SIZE":
-            step_size = Decimal(f.get("stepSize", "0.001"))
+            step_size = Decimal(f.get("stepSize", "0.001")).normalize()
             min_qty = Decimal(f.get("minQty", "0.001"))
             max_qty = Decimal(f.get("maxQty", "1000000"))
         elif f_type in ["MIN_NOTIONAL", "NOTIONAL"]:

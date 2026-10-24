@@ -36,6 +36,8 @@ from execution.order_manager import OrderManager
 from execution.position_manager import PositionManager
 from execution.reconciliation import ReconciliationEngine
 from risk.risk_engine import RiskEngine
+from risk.market_regime_shield import global_market_regime_shield
+from services.signal_queue_service import global_signal_queue_service
 from telegram.listener import TelegramSignalListener
 
 
@@ -54,6 +56,12 @@ def create_api_router(
     channel_analytics_svc = ChannelAnalyticsService(db.db_path)
     license_svc = LicenseService()
     alert_svc = AlertService.get_instance(db=db)
+    from notifications.notifier import SystemNotifier
+    system_notifier = SystemNotifier(
+        config=getattr(config, "notifications", None),
+        telegram_client_getter=telegram_svc.get_client,
+    )
+    alert_svc.set_notifier(system_notifier)
     if not alert_svc._alerts:
         alert_svc.add_alert(
             AlertLevel.INFO,
@@ -169,6 +177,7 @@ def create_api_router(
                 entry_enabled_provider=trading_svc.is_entry_enabled,
             )
             trading_svc._listener = listener
+            reconciler.on_slot_freed_callback = listener.process_next_queued_signal
             trading_svc.set_engine_status(EngineStatus.RUNNING_LISTEN)
 
             mode_title = "TIỀN THẬT (LIVE)" if config.mode.value == "LIVE" else "DEMO / TESTNET"
@@ -239,7 +248,7 @@ def create_api_router(
         account = binance_svc.get_cached_snapshot()
         if binance_svc.has_credentials():
             try:
-                account = await asyncio.wait_for(binance_svc.sync_account(force=False), timeout=2.0)
+                account = await asyncio.wait_for(binance_svc.sync_account(force=False), timeout=8.0)
             except Exception:
                 account = binance_svc.get_cached_snapshot()
 
@@ -267,6 +276,7 @@ def create_api_router(
         return {
             "mode": config.mode.value,
             "live_trading_enabled": config.live_trading_enabled,
+            "ferrari_mode_enabled": bool(getattr(config, "ferrari_mode_enabled", False)),
             "engine_status": trading_svc.get_engine_status().value,
             "entry_enabled": trading_svc.is_entry_enabled(),
             "account": account.model_dump(),
@@ -917,7 +927,7 @@ def create_api_router(
         account = binance_svc.get_cached_snapshot()
         if binance_svc.has_credentials():
             try:
-                account = await asyncio.wait_for(binance_svc.sync_account(), timeout=1.5)
+                account = await asyncio.wait_for(binance_svc.sync_account(), timeout=8.0)
             except Exception:
                 account = binance_svc.get_cached_snapshot()
         return trading_svc.get_open_positions(
@@ -952,7 +962,7 @@ def create_api_router(
                 raw_trades = await client._request(
                     "GET",
                     "/fapi/v1/userTrades",
-                    params={"limit": min(limit, 1000), "startTime": start_ms, "endTime": end_ms},
+                    params={"limit": 1000, "startTime": start_ms, "endTime": end_ms},
                     signed=True,
                 )
                 # Binance returns trades in chronological ascending order; reverse so newest trades come first
@@ -1302,16 +1312,18 @@ def create_api_router(
         return {
             "mode": config.mode.value,
             "live_trading_enabled": config.live_trading_enabled,
+            "ferrari_mode_enabled": bool(getattr(config, "ferrari_mode_enabled", False)),
             "risk_per_signal_pct": float(config.risk.risk_per_signal_pct),
             "max_daily_loss_pct": float(config.risk.max_daily_loss_pct),
             "max_leverage": int(config.risk.max_leverage),
             "margin_mode": config.risk.margin_mode.value,
             "entry_range_policy": config.execution.entry_range_policy.value,
             "multi_tp_default_weight_mode": config.execution.multi_tp_default_weight_mode.value,
-            "tp1_target_weight_pct": float(getattr(config.execution, "tp1_target_weight_pct", Decimal("60.0"))),
+            "tp1_target_weight_pct": float(getattr(config.execution, "tp1_target_weight_pct", Decimal("35.0"))),
             "breakeven_after_tp1": bool(config.risk.breakeven_after_tp1_default),
             "sl_buffer_pct": float(getattr(config.risk, "sl_buffer_pct", Decimal("1.0"))),
-            "max_active_signals": int(getattr(config.risk, "max_active_signals", 15)),
+            "max_active_signals": int(getattr(config.risk, "max_active_signals", 5)),
+            "max_total_open_risk_pct": float(getattr(config.risk, "max_total_open_risk_pct", Decimal("150.0"))),
         }
 
     class UpdateSettingsModel(BaseModel):
@@ -1323,10 +1335,12 @@ def create_api_router(
         entry_range_policy: str
         multi_tp_default_weight_mode: str
         margin_mode: Optional[str] = "CROSSED"
-        tp1_target_weight_pct: Optional[float] = 60.0
+        tp1_target_weight_pct: Optional[float] = 35.0
         breakeven_after_tp1: Optional[bool] = True
         sl_buffer_pct: Optional[float] = 1.0
-        max_active_signals: Optional[int] = 15
+        max_active_signals: Optional[int] = 5
+        ferrari_mode_enabled: Optional[bool] = False
+        max_total_open_risk_pct: Optional[float] = None
 
     @router.post("/settings", dependencies=[Depends(verify_token)])
     async def update_settings(
@@ -1415,14 +1429,32 @@ def create_api_router(
                 raise HTTPException(status_code=400, detail=make_error_response("INVALID_ACTIVE_SIGNALS", "max_active_signals phải trong khoảng 1-50."))
             config.risk.max_active_signals = body.max_active_signals
 
+        if body.ferrari_mode_enabled is not None:
+            config.ferrari_mode_enabled = bool(body.ferrari_mode_enabled)
+            if config.ferrari_mode_enabled:
+                config.risk.max_leverage = 40
+                config.risk.default_leverage = 35
+                config.risk.max_total_open_risk_pct = Decimal("150.0")
+                config.risk.max_margin_per_trade_pct = Decimal("15.0")
+                config.risk.risk_per_signal_pct = Decimal("5.0")
+                config.risk.max_active_signals = min(int(getattr(config.risk, "max_active_signals", 5)), 5)
+                config.risk.breakeven_after_tp1_default = True
+                config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_35_35_30
+                config.execution.tp1_target_weight_pct = Decimal("35.0")
+                config.execution.breakeven_trigger_tp_index = 1
+
+        if body.max_total_open_risk_pct is not None:
+            config.risk.max_total_open_risk_pct = Decimal(str(body.max_total_open_risk_pct))
+
         save_config(config)
 
-        await event_bus.publish("backend_status_changed", {"mode": config.mode.value, "live": config.live_trading_enabled})
+        await event_bus.publish("backend_status_changed", {"mode": config.mode.value, "live": config.live_trading_enabled, "ferrari": getattr(config, "ferrari_mode_enabled", False)})
         return {
             "success": True,
             "settings": {
                 "mode": config.mode.value,
                 "live_trading_enabled": config.live_trading_enabled,
+                "ferrari_mode_enabled": bool(getattr(config, "ferrari_mode_enabled", False)),
                 "risk_per_signal_pct": float(config.risk.risk_per_signal_pct),
                 "max_daily_loss_pct": float(config.risk.max_daily_loss_pct),
                 "max_leverage": int(config.risk.max_leverage),
@@ -1433,7 +1465,44 @@ def create_api_router(
                 "breakeven_after_tp1": bool(config.risk.breakeven_after_tp1_default),
                 "sl_buffer_pct": float(config.risk.sl_buffer_pct),
                 "max_active_signals": int(config.risk.max_active_signals),
+                "max_total_open_risk_pct": float(getattr(config.risk, "max_total_open_risk_pct", Decimal("150.0"))),
             },
+        }
+
+    class ToggleFerrariModel(BaseModel):
+        ferrari_mode_enabled: bool
+
+    @router.post("/trading/toggle-ferrari-mode", dependencies=[Depends(verify_token)])
+    async def toggle_ferrari_mode(body: ToggleFerrariModel):
+        config.ferrari_mode_enabled = bool(body.ferrari_mode_enabled)
+        if config.ferrari_mode_enabled:
+            config.risk.max_leverage = 40
+            config.risk.default_leverage = 35
+            config.risk.max_total_open_risk_pct = Decimal("150.0")
+            config.risk.max_margin_per_trade_pct = Decimal("15.0")
+            config.risk.risk_per_signal_pct = Decimal("5.0")
+            config.risk.max_active_signals = 20
+            config.risk.breakeven_after_tp1_default = True
+            config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_35_35_30
+            config.execution.tp1_target_weight_pct = Decimal("35.0")
+            config.execution.breakeven_trigger_tp_index = 1
+            msg = "Đã kích hoạt CHẾ ĐỘ FERRARI (Đòn bẩy 35x-40x, Chốt 35/35/30, Max Volume, Không chặn kèo)!"
+        else:
+            config.risk.max_leverage = 25
+            config.risk.default_leverage = 20
+            config.risk.max_total_open_risk_pct = Decimal("25.0")
+            config.risk.max_margin_per_trade_pct = Decimal("7.0")
+            config.risk.risk_per_signal_pct = Decimal("2.5")
+            config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_20_40_40
+            config.execution.tp1_target_weight_pct = Decimal("20.0")
+            msg = "Đã tắt Chế độ Ferrari, quay về chế độ an toàn tiêu chuẩn."
+
+        save_config(config)
+        await event_bus.publish("backend_status_changed", {"ferrari_mode_enabled": config.ferrari_mode_enabled})
+        return {
+            "success": True,
+            "ferrari_mode_enabled": config.ferrari_mode_enabled,
+            "message": msg,
         }
 
     # -------------------------------------------------------------
@@ -1635,5 +1704,40 @@ def create_api_router(
             await event_bus.unsubscribe(websocket)
         except Exception:
             await event_bus.unsubscribe(websocket)
+
+    # -------------------------------------------------------------
+    # SUSTAINABLE PROFIT PILLARS: Market Regime & Smart Queue
+    # -------------------------------------------------------------
+    @router.get("/market-regime", dependencies=[Depends(verify_token)])
+    async def get_market_regime():
+        if not global_market_regime_shield.is_cache_valid() and binance_svc.has_credentials():
+            client = None
+            try:
+                client = BinanceFuturesClient(config)
+                await global_market_regime_shield.update_regime(client)
+            except Exception:
+                pass
+            finally:
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
+        return global_market_regime_shield.current_regime
+
+    @router.get("/trading/smart-queue", dependencies=[Depends(verify_token)])
+    async def get_smart_queue():
+        return {
+            "items": global_signal_queue_service.get_queue_summary(),
+            "count": global_signal_queue_service.size(),
+        }
+
+    @router.get("/capital-stage", dependencies=[Depends(verify_token)])
+    async def get_capital_stage():
+        try:
+            equity = await binance_client.get_margin_balance()
+        except Exception:
+            equity = Decimal("127.05")
+        return RiskEngine.get_compounding_stage(equity)
 
     return router

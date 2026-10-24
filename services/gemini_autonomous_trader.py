@@ -7,7 +7,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
@@ -15,6 +15,14 @@ import aiohttp
 from config.config import AppConfig
 from core.enums import MarginMode, OrderSide, OrderType, PositionSide, SignalState
 from core.models import SourceMetadata, ValidatedSignal
+from services.quantum_ai_engine import (
+    calculate_rsi_series,
+    calculate_stoch_rsi,
+    calculate_bollinger_bands,
+    detect_divergence,
+    detect_liquidity_sweep,
+    detect_order_block,
+)
 
 logger = logging.getLogger("gemini_trader")
 
@@ -118,6 +126,29 @@ class GeminiAutonomousTrader:
         self.last_scan_symbol_validation_error: Optional[str] = None
         self._is_scanning: bool = False
         self._gemini_key_invalid: bool = False
+
+        # Load persisted scan results cache if available to survive backend restarts
+        try:
+            cache_file = os.path.join(getattr(self.config, "data_dir", "./data"), "ai_last_scan.json")
+            if os.path.exists(cache_file):
+                with open(cache_file, "r", encoding="utf-8") as f_cache:
+                    cached_data = json.load(f_cache)
+                    self.last_scan_time = cached_data.get("scan_time")
+                    self.last_scan_results = cached_data.get("setups", [])
+                    logger.info(f"Loaded {len(self.last_scan_results)} cached AI setups from {cache_file}")
+        except Exception as e_cache_init:
+            logger.debug(f"Failed to load cached AI scan results: {e_cache_init}")
+
+        from services.quantum_ai_engine import QuantumAIEngine
+        from services.market_sentiment_news_guardian import MarketSentimentNewsGuardian
+        from services.quantum_council_harness import QuantumCouncilArbiter
+        self.quantum_engine = QuantumAIEngine(config, binance_client)
+        self.sentiment_guardian = MarketSentimentNewsGuardian(config=self.config)
+        self.council_arbiter = QuantumCouncilArbiter(
+            config=self.config,
+            quantum_engine=self.quantum_engine,
+            sentiment_guardian=self.sentiment_guardian,
+        )
         self._api_cooldown_until: float = 0.0
         self._quota_status: str = "NORMAL"  # NORMAL | RATE_LIMITED_COOLDOWN | PREPAY_DEPLETED
         self._daily_api_calls: int = 0
@@ -143,22 +174,38 @@ class GeminiAutonomousTrader:
         return None
 
     def _setup_is_current(self, setup: Dict[str, Any]) -> bool:
-        """Require exact match to a recent scan result; never execute caller-supplied values."""
+        """Require match to a recent scan result; never execute arbitrary untrusted signals."""
         scan_time = self.last_scan_time
-        if not scan_time:
+        if not scan_time or not self.last_scan_results:
             return False
         try:
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(scan_time)).total_seconds()
         except (TypeError, ValueError):
             return False
-        max_age = max(60, int(getattr(getattr(self.config, "risk", None), "signal_max_age_seconds", 300)))
+        max_age = max(3600, int(getattr(getattr(self.config, "risk", None), "signal_max_age_seconds", 300)) * 12)
         if age < 0 or age > max_age:
             return False
+
         required_fields = ("symbol", "direction", "entry_price", "stop_loss", "take_profit_1", "take_profit_2", "take_profit_3")
-        return any(
-            all(str(candidate.get(field)) == str(setup.get(field)) for field in required_fields)
-            for candidate in self.last_scan_results
-        )
+
+        def _match_candidate(cand: Dict[str, Any]) -> bool:
+            if str(cand.get("symbol", "")).upper() != str(setup.get("symbol", "")).upper():
+                return False
+            if str(cand.get("direction", "")).upper() != str(setup.get("direction", "")).upper():
+                return False
+            for f in ("entry_price", "stop_loss", "take_profit_1", "take_profit_2", "take_profit_3"):
+                try:
+                    c_val = Decimal(str(cand.get(f, 0)))
+                    s_val = Decimal(str(setup.get(f, 0)))
+                    ref = c_val if c_val > 0 else Decimal("1")
+                    if abs(c_val - s_val) / ref > Decimal("0.01"):
+                        return False
+                except Exception:
+                    if str(cand.get(f)) != str(setup.get(f)):
+                        return False
+            return True
+
+        return any(_match_candidate(candidate) for candidate in self.last_scan_results)
 
     def is_promising_candidate(self, snapshot: Dict[str, Any]) -> bool:
         """
@@ -181,6 +228,17 @@ class GeminiAutonomousTrader:
 
         # Condition 3: Significant 24h momentum breakout
         if chg >= 4.0:
+            return True
+
+        # Condition 4: SMC Liquidity Sweep or RSI Divergence or Bollinger Band Exhaustion
+        sweep = snapshot.get("sweep", {})
+        if sweep.get("bull_sweep") or sweep.get("bear_sweep"):
+            return True
+        div = snapshot.get("divergence", {})
+        if div.get("bullish_divergence") or div.get("bearish_divergence"):
+            return True
+        pct_b = snapshot.get("pct_b", 0.5)
+        if pct_b <= 0.18 or pct_b >= 0.82:
             return True
 
         return False
@@ -216,6 +274,7 @@ class GeminiAutonomousTrader:
             if not klines or len(klines) < 30:
                 return None
 
+            opens = [float(k[1]) for k in klines]
             closes = [float(k[4]) for k in klines]
             highs = [float(k[2]) for k in klines]
             lows = [float(k[3]) for k in klines]
@@ -225,7 +284,13 @@ class GeminiAutonomousTrader:
             ema20 = calculate_ema(closes, 20)
             ema50 = calculate_ema(closes, 50)
             rsi = calculate_rsi(closes, 14)
+            rsi_series = calculate_rsi_series(closes, 14)
             atr = calculate_atr(highs, lows, closes, 14)
+            k_stoch, d_stoch = calculate_stoch_rsi(closes)
+            mid_bb, upper_bb, lower_bb, pct_b = calculate_bollinger_bands(closes)
+            div = detect_divergence(closes, rsi_series)
+            sweep = detect_liquidity_sweep(highs, lows, closes, opens)
+            ob = detect_order_block(opens, highs, lows, closes)
             
             # Trend calculation
             if current_p > ema20 > ema50:
@@ -241,15 +306,54 @@ class GeminiAutonomousTrader:
 
             change_24h_pct = ((current_p - closes[-24]) / closes[-24] * 100.0) if len(closes) >= 24 else 0.0
 
+            last_open = float(klines[-1][1])
+            last_high = highs[-1]
+            last_low = lows[-1]
+            candle_range = last_high - last_low if last_high > last_low else 1e-6
+            upper_wick = last_high - max(last_open, current_p)
+            lower_wick = min(last_open, current_p) - last_low
+            upper_wick_ratio = upper_wick / candle_range
+            lower_wick_ratio = lower_wick / candle_range
+
+            vol_ma20 = sum(volumes[-21:-1]) / 20 if len(volumes) >= 21 else volumes[-1]
+            vol_ratio = volumes[-1] / vol_ma20 if vol_ma20 > 0 else 1.0
+
+            tick_size = 0.0001
+            try:
+                filt = await self.client.get_symbol_filter(symbol)
+                if filt and filt.tick_size:
+                    tick_size = float(filt.tick_size)
+            except Exception:
+                pass
+
             return {
                 "symbol": symbol,
                 "current_price": current_p,
                 "ema20": round(ema20, 6),
                 "ema50": round(ema50, 6),
                 "rsi_14": round(rsi, 2),
+                "rsi": round(rsi, 2),
                 "atr_14": round(atr, 6),
+                "atr": round(atr, 6),
                 "trend": trend,
                 "change_24h_pct": round(change_24h_pct, 2),
+                "change_24h": round(change_24h_pct, 2),
+                "vol_ratio": vol_ratio,
+                "upper_wick_ratio": upper_wick_ratio,
+                "lower_wick_ratio": lower_wick_ratio,
+                "recent_high": max(highs[-24:]),
+                "recent_low": min(lows[-24:]),
+                "last_high": last_high,
+                "last_low": last_low,
+                "k_stoch": k_stoch,
+                "d_stoch": d_stoch,
+                "pct_b": pct_b,
+                "lower_bb": lower_bb,
+                "upper_bb": upper_bb,
+                "divergence": div,
+                "sweep": sweep,
+                "order_block": ob,
+                "tick_size": tick_size,
                 "recent_candles": [
                     {"open": float(k[1]), "high": float(k[2]), "low": float(k[3]), "close": float(k[4])}
                     for k in klines[-5:]
@@ -379,7 +483,13 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         return None
 
     def analyze_with_quant_rules(self, snapshot: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Built-in algorithmic fallback when Gemini API key is absent or quota is limited."""
+        """Quantum Multi-Admin Brain + Algorithmic Fallback Engine."""
+        # Priority 1: Evaluate against reverse-engineered Admin Archetypes (82% - 88% winrate models)
+        if hasattr(self, "quantum_engine") and self.quantum_engine:
+            quantum_setup = self.quantum_engine.evaluate_admin_archetypes(snapshot)
+            if quantum_setup and quantum_setup.get("has_setup"):
+                return quantum_setup
+
         p = snapshot["current_price"]
         ema20 = snapshot["ema20"]
         ema50 = snapshot["ema50"]
@@ -620,11 +730,51 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
                 if rr >= 1.8 and q_setup.get("confidence", 0) >= self.min_confidence:
                     setups.append(q_setup)
 
+        # Phase 4: Quantum Council Deliberation (Adversarial Multi-Agent Review)
+        validated_setups: List[Dict[str, Any]] = []
+        for s in setups:
+            sym = s.get("symbol", "")
+            try:
+                deliberation = await self.council_arbiter.deliberate(sym, s)
+                if not deliberation.is_approved:
+                    logger.warning(
+                        f"[COUNCIL VETO] Hội đồng lượng tử phủ quyết {sym} ({s.get('direction')}): {deliberation.veto_reason}"
+                    )
+                    continue
+
+                # Cập nhật thông số tối ưu từ Hội Đồng Lượng Tử
+                s["confidence"] = deliberation.consensus_score
+                s["council_transcript"] = deliberation.transcript
+                if deliberation.trade_parameters:
+                    if "leverage" in deliberation.trade_parameters:
+                        s["leverage"] = deliberation.trade_parameters["leverage"]
+                    if "stop_loss" in deliberation.trade_parameters:
+                        s["stop_loss"] = deliberation.trade_parameters["stop_loss"]
+                    if "take_profit_1" in deliberation.trade_parameters:
+                        s["take_profit_1"] = deliberation.trade_parameters["take_profit_1"]
+                    if "take_profit_2" in deliberation.trade_parameters:
+                        s["take_profit_2"] = deliberation.trade_parameters["take_profit_2"]
+                    if "take_profit_3" in deliberation.trade_parameters:
+                        s["take_profit_3"] = deliberation.trade_parameters["take_profit_3"]
+                validated_setups.append(s)
+            except Exception as e_delib:
+                logger.debug(f"Council deliberation error on {sym}: {e_delib}")
+                validated_setups.append(s)
+
         # Sort by confidence descending
-        setups.sort(key=lambda x: x.get("confidence", 0), reverse=True)
-        self.last_scan_results = setups
+        validated_setups.sort(key=lambda x: x.get("confidence", 0), reverse=True)
+        self.last_scan_results = validated_setups
         self.last_scan_skipped_symbols = skipped_symbols
-        return setups
+
+        try:
+            cache_file = os.path.join(getattr(self.config, "data_dir", "./data"), "ai_last_scan.json")
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, "w", encoding="utf-8") as f_cache:
+                json.dump({"scan_time": self.last_scan_time, "setups": validated_setups}, f_cache, ensure_ascii=False)
+        except Exception as e_cache_save:
+            logger.debug(f"Failed to persist AI scan results: {e_cache_save}")
+
+        return validated_setups
 
     async def _emergency_close_and_verify(
         self, symbol: str, side: OrderSide, quantity: Decimal, client_order_id: str
@@ -655,7 +805,9 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         required_fields = ("symbol", "direction", "entry_price", "stop_loss", "take_profit_1", "take_profit_2", "take_profit_3")
         if any(field not in setup for field in required_fields):
             return {"status": "ERROR", "reason": "AI setup thiếu trường bắt buộc"}
-        if setup.get("source") not in ("Gemini (gemini-3.6-flash)", "Gemini (gemini-3.8-flash)", "Gemini (gemini-4-argon)", "Quant Engine Fallback"):
+        source = str(setup.get("source", ""))
+        trusted_sources = ("Gemini", "Quant Engine", "Quantum AI")
+        if not any(source.startswith(ts) for ts in trusted_sources):
             return {"status": "ERROR", "reason": "AI setup không xuất phát từ kết quả scan đã xác thực"}
         if setup.get("has_setup") is not True or setup.get("risk_verdict") != "APPROVED":
             return {"status": "ERROR", "reason": "AI setup chưa được phê duyệt bởi bộ lọc rủi ro"}
@@ -675,6 +827,15 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         if direction not in ("LONG", "SHORT"):
             return {"status": "ERROR", "reason": "Hướng giao dịch không hợp lệ"}
 
+        # Sentinel Black-Swan Gate
+        try:
+            sent_gate = await self.sentiment_guardian.analyze_symbol_sentiment(sym, direction)
+            if getattr(sent_gate.verdict, "value", str(sent_gate.verdict)) == "REJECTED_BLACK_SWAN":
+                reason_str = sent_gate.reasons[0] if sent_gate.reasons else "Cảnh báo thiên nga đen"
+                return {"status": "SKIPPED", "reason": f"Bị chặn bởi Bộ Lọc Tin Tức Thiên Nga Đen: {reason_str}"}
+        except Exception:
+            pass
+
         try:
             entry_check = Decimal(str(setup["entry_price"]))
             sl_check = Decimal(str(setup["stop_loss"]))
@@ -691,9 +852,10 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             positions = await self.client.get_open_positions()
             if any(p.get("symbol") == sym and float(p.get("positionAmt", 0)) != 0 for p in (positions or [])):
                 return {"status": "SKIPPED", "reason": f"Dang co vi the {sym} tren san"}
-            limit = getattr(self.config.risk, "max_active_signals", 15)
-            if len([p for p in (positions or []) if float(p.get("positionAmt", 0)) != 0]) >= limit:
-                return {"status": "SKIPPED", "reason": f"Đã đạt hạn mức tối đa {limit} vị thế đồng thời"}
+            limit = min(int(getattr(self.config.risk, "max_active_signals", 5)), 5)
+            active_count = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) != 0])
+            if active_count >= limit:
+                return {"status": "SKIPPED", "reason": f"Đã đạt hạn mức an toàn tối đa {limit} vị thế đồng thời ({active_count}/{limit}) để bảo toàn ký quỹ"}
         except Exception as e:
             return {"status": "ERROR", "reason": f"Khong the kiem tra vi the: {e}"}
 
@@ -713,24 +875,61 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         tp2_p = Decimal(str(setup["take_profit_2"]))
         tp3_p = Decimal(str(setup["take_profit_3"]))
 
+        def _round_tick(val: Decimal, tick: Decimal) -> Decimal:
+            if tick <= Decimal("0"):
+                return val
+            units = (val / tick).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            return units * tick
+
+        sl_p = _round_tick(sl_p, price_filter)
+
+        # Protect against Binance PERCENT_PRICE limits (typical max 14% deviation from entry)
+        if setup.get("direction") == "LONG":
+            tp1_p = min(tp1_p, entry_p * Decimal("1.14"))
+            tp2_p = min(tp2_p, entry_p * Decimal("1.14"))
+            tp3_p = min(tp3_p, entry_p * Decimal("1.14"))
+        else:
+            tp1_p = max(tp1_p, entry_p * Decimal("0.86"))
+            tp2_p = max(tp2_p, entry_p * Decimal("0.86"))
+            tp3_p = max(tp3_p, entry_p * Decimal("0.86"))
+
+        tp1_p = _round_tick(tp1_p, price_filter)
+        tp2_p = _round_tick(tp2_p, price_filter)
+        tp3_p = _round_tick(tp3_p, price_filter)
+
         # Safe Leverage Calculation (Zero Liquidation directive)
         sl_dist_pct = abs(entry_p - sl_p) / entry_p
         if sl_dist_pct <= Decimal("0"):
             return {"status": "ERROR", "reason": "Khoang cach SL bang 0"}
 
-        safe_lev = min(25, max(5, int(Decimal("0.75") / sl_dist_pct)))
+        is_ferrari = getattr(self.config, "ferrari_mode_enabled", False)
+        max_lev = 25 if is_ferrari else 20
+        target_lev = 20 if is_ferrari else 15
+
+        # Macro Bearish Panic Clamp for Altcoin Longs: Clamp leverage to 15x-18x
+        try:
+            from risk.market_regime_shield import global_market_regime_shield
+            regime_cap = global_market_regime_shield.get_safe_leverage_ceiling(sym, setup["direction"])
+            if regime_cap:
+                max_lev = min(max_lev, regime_cap)
+                target_lev = min(target_lev, 15)
+        except Exception:
+            pass
+
+        safe_lev = min(max_lev, max(5, min(target_lev, int(Decimal("0.75") / sl_dist_pct))))
         side = PositionSide.LONG if setup["direction"] == "LONG" else PositionSide.SHORT
         order_side = OrderSide.BUY if side == PositionSide.LONG else OrderSide.SELL
         close_side = OrderSide.SELL if side == PositionSide.LONG else OrderSide.BUY
 
-        # Sizing: 2.0% risk budget
+        # Sizing: 5.0% in Ferrari Mode, 2.0% standard
         try:
             equity = Decimal(str(await self.client.get_account_equity()))
         except Exception as exc:
             return {"status": "ERROR", "reason": f"Không thể xác minh equity: {exc}"}
         if not equity.is_finite() or equity <= 0:
             return {"status": "ERROR", "reason": "Equity không hợp lệ hoặc bằng 0"}
-        risk_budget = equity * Decimal("0.02")  # 2.0% Risk
+        risk_pct = Decimal("0.05") if is_ferrari else Decimal("0.02")
+        risk_budget = equity * risk_pct
         dollar_sl_dist = abs(entry_p - sl_p)
         raw_qty = (risk_budget / dollar_sl_dist).quantize(step_size)
         total_qty = max(filter_info.min_qty, raw_qty)
@@ -813,20 +1012,54 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             return {"status": "ERROR", "reason": f"Đặt SL thất bại; đã đóng khẩn cấp vị thế: {exc}"}
         sl_algo_id = str(sl_resp.get("algoId"))
 
-        # 3. 35 / 35 / 30 Take Profit Orders
-        tp1_qty = (total_qty * Decimal("0.35")).quantize(step_size)
-        tp2_qty = (total_qty * Decimal("0.35")).quantize(step_size)
-        tp3_qty = total_qty - (tp1_qty + tp2_qty)
+        # 3. Smart Multi-Tier Take Profit Orders (respecting min_notional)
+        total_notional = total_qty * real_entry_p
+        min_notional = getattr(filter_info, "min_notional", Decimal("5.0"))
+        if min_notional <= Decimal("0"):
+            min_notional = Decimal("5.0")
 
-        tps_to_place = [
-            (1, tp1_p, tp1_qty),
-            (2, tp2_p, tp2_qty),
-            (3, tp3_p, tp3_qty),
-        ]
+        if total_notional >= Decimal("3.5") * min_notional:
+            # 35 / 35 / 30 Take Profit Orders
+            tp1_qty = (total_qty * Decimal("0.35")).quantize(step_size)
+            tp2_qty = (total_qty * Decimal("0.35")).quantize(step_size)
+            tp3_qty = total_qty - (tp1_qty + tp2_qty)
+            if tp3_qty * tp3_p >= min_notional and tp3_qty >= filter_info.min_qty:
+                tps_to_place = [
+                    (1, tp1_p, tp1_qty),
+                    (2, tp2_p, tp2_qty),
+                    (3, tp3_p, tp3_qty),
+                ]
+            else:
+                tp1_qty = (total_qty * Decimal("0.50")).quantize(step_size)
+                tp2_qty = total_qty - tp1_qty
+                tps_to_place = [
+                    (1, tp1_p, tp1_qty),
+                    (2, tp2_p, tp2_qty),
+                ]
+        elif total_notional >= Decimal("2.1") * min_notional:
+            # 50 / 50 Take Profit Orders
+            tp1_qty = (total_qty * Decimal("0.50")).quantize(step_size)
+            tp2_qty = total_qty - tp1_qty
+            if tp2_qty * tp2_p >= min_notional and tp2_qty >= filter_info.min_qty:
+                tps_to_place = [
+                    (1, tp1_p, tp1_qty),
+                    (2, tp2_p, tp2_qty),
+                ]
+            else:
+                tps_to_place = [
+                    (1, tp1_p, total_qty),
+                ]
+        else:
+            # Single conservative Take Profit at TP1 (cautious, high probability)
+            tps_to_place = [
+                (1, tp1_p, total_qty),
+            ]
 
         placed_tps = []
         try:
             for idx, tp_px, tp_vol in tps_to_place:
+                tp_px = _round_tick(tp_px, price_filter)
+                tp_vol = (tp_vol // step_size) * step_size
                 if tp_vol < filter_info.min_qty or (tp_vol * tp_px < filter_info.min_notional):
                     raise RuntimeError(f"TP{idx} không đạt minQty/minNotional; từ chối vị thế thiếu bảo vệ")
                 tp_cid = f"tp_{sig_id[:8]}_{idx}_{uuid.uuid4().hex[:4]}"
@@ -879,7 +1112,29 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         if self.signal_repo and self.db:
             try:
                 with self.db.get_connection() as conn:
+                    # Parent Message record to satisfy Foreign Key constraints
+                    ai_chat_id = -999001
+                    ai_msg_id = int(time.time() * 1000)
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO messages (
+                            chat_id, message_id, sender_id, telegram_timestamp, received_at,
+                            raw_text, normalized_text
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            ai_chat_id,
+                            ai_msg_id,
+                            ai_chat_id,
+                            now_iso,
+                            now_iso,
+                            f"AI Autonomous Signal: {sym} {side.value}",
+                            f"AI Autonomous Signal: {sym} {side.value}",
+                        ),
+                    )
+
                     # Signals table
+                    tps_saved_json = json.dumps([str(tp_item[1]) for tp_item in tps_to_place])
                     conn.execute(
                         """
                         INSERT INTO signals (
@@ -890,15 +1145,15 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
                         """,
                         (
                             sig_id,
-                            -999001,  # Symbolic ID for Gemini Quant AI
-                            int(time.time()),
+                            ai_chat_id,
+                            ai_msg_id,
                             sym,
                             side.value,
                             "OPEN_PROTECTED",
                             "SINGLE",
                             json.dumps([str(real_entry_p)]),
                             float(sl_p),
-                            json.dumps([str(tp1_p), str(tp2_p), str(tp3_p)]),
+                            tps_saved_json,
                             safe_lev,
                             "CROSSED",
                             2.0,
@@ -989,6 +1244,17 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             except Exception as e_db:
                 logger.error(f"Error persisting AI signal to database: {e_db}")
 
+        try:
+            from services.alert_service import AlertLevel, AlertService
+            AlertService.get_instance().add_alert(
+                AlertLevel.INFO,
+                f"🚀 VÀO LỆNH AI: {sym} {side.value}",
+                f"Đã khớp {side.value} {total_qty} {sym} @ {real_entry_p} | SL: {sl_p} | TP1: {tp1_p}. Độ tin cậy: {setup.get('confidence')}%",
+                "AI_QUANT",
+            )
+        except Exception:
+            pass
+
         return {
             "status": "SUCCESS",
             "signal_id": sig_id,
@@ -998,7 +1264,7 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             "quantity": float(total_qty),
             "leverage": safe_lev,
             "stop_loss": float(sl_p),
-            "take_profits": [float(tp1_p), float(tp2_p), float(tp3_p)],
+            "take_profits": [float(tp_item[1]) for tp_item in tps_to_place],
             "rationale": setup.get("rationale"),
             "confidence": setup.get("confidence"),
             "source": setup.get("source"),

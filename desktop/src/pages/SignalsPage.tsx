@@ -6,20 +6,18 @@ import { wsClient } from "../services/websocket";
 import { formatDateTime } from "../utils/date";
 import type { SignalRecord } from "../types/api";
 
-const ELITE_TOP5_CHAT_IDS = [
-  -1002007658025, // THE WOLF (CRYPTO)®
-  -1001756316676, // Boom_Boom_Billionaires
-  -1002052872813, // CRYPTO LEOPARD'S
-  -1001552004524, // CRYPTO MONK
-  -1001370457350, // Crypto Neon
-];
-
 const KNOWN_CHANNELS: Record<number, string> = {
-  [-1002007658025]: "THE WOLF (CRYPTO)®",
-  [-1001756316676]: "Boom_Boom_Billionaires",
-  [-1002052872813]: "CRYPTO LEOPARD'S",
-  [-1001552004524]: "CRYPTO MONK",
-  [-1001370457350]: "Crypto Neon",
+  [-1001520053536]: "Coin Chief [Tier 1]",
+  [-1002052872813]: "CRYPTO LEOPARD'S [Tier 1]",
+  [-1001598691683]: "Crypto Devil® [Tier 1]",
+  [-1001700314832]: "WHALES CIRCLE [Tier 1]",
+  [-1001391574614]: "Bitcoin Bulls [Tier 2]",
+  [-1002078531832]: "Crypto Mermaids [Tier 2]",
+  [-1002007658025]: "THE WOLF (CRYPTO)® [Tier 2]",
+  [-1001552004524]: "CRYPTO MONK [Tier 2]",
+  [-1001860630181]: "Alpha Trade Zone",
+  [-1001895315984]: "Crypto spider 🕷️ scalper",
+  [-1002191067035]: "Crypto Hunters",
 };
 
 export const SignalsPage: React.FC = () => {
@@ -43,9 +41,6 @@ export const SignalsPage: React.FC = () => {
         if (sourceFilter === "AI" && !isAi) return false;
         if (sourceFilter === "TELEGRAM" && !isTelegram) return false;
 
-        if (isTelegram && s.chat_id && !ELITE_TOP5_CHAT_IDS.includes(Number(s.chat_id))) {
-          return false;
-        }
         return true;
       });
       setSignals(validData);

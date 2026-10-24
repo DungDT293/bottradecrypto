@@ -605,9 +605,12 @@ class TelegramService:
         # Ensure all allowed_chat_ids are present in result_dialogs
         existing_ids = {d["id"] for d in result_dialogs}
         known_names = {
+            -1002191067035: "Crypto Hunters",
+            -1001700314832: "WHALES CIRCLE",
+            -1001391574614: "Bitcoin Bulls",
+            -1001895315984: "Crypto spider 🕷️ scalper",
+            -1001860630181: "Alpha Trade Zone",
             -1002052872813: "CRYPTO LEOPARD'S",
-            -1001756316676: "Boom_Boom_Billionaires",
-            -1001370457350: "Crypto Neon",
             -1002007658025: "THE WOLF (CRYPTO)®",
             -1001552004524: "CRYPTO MONK",
         }
@@ -708,24 +711,38 @@ class TelegramService:
 
     DEFAULT_ELITE_TARGETS = [
         {
-            "id": -1002007658025,
-            "name": "THE WOLF (CRYPTO)®",
-            "link": "https://t.me/+lBx7BGAjD4wxY2I5",
-            "hash": "lBx7BGAjD4wxY2I5",
-            "username": None,
+            "id": -1001700314832,
+            "name": "WHALES CIRCLE",
+            "link": "https://t.me/WhalesCircle",
+            "hash": None,
+            "username": "WhalesCircle",
         },
         {
-            "id": -1001756316676,
-            "name": "Boom_Boom_Billionaires",
-            "link": "https://t.me/+n5N2aXPU5Y42MTNk",
-            "hash": "n5N2aXPU5Y42MTNk",
-            "username": None,
+            "id": -1001520053536,
+            "name": "Coin Chief",
+            "link": "https://t.me/CoinChief",
+            "hash": None,
+            "username": "CoinChief",
         },
         {
             "id": -1002052872813,
             "name": "CRYPTO LEOPARD'S",
             "link": "https://t.me/+2qFH92pocvhhNWFk",
             "hash": "2qFH92pocvhhNWFk",
+            "username": None,
+        },
+        {
+            "id": -1001598691683,
+            "name": "Crypto Devil® [Private]",
+            "link": "https://t.me/CryptoDevil",
+            "hash": None,
+            "username": "CryptoDevil",
+        },
+        {
+            "id": -1002007658025,
+            "name": "THE WOLF (CRYPTO)®",
+            "link": "https://t.me/+lBx7BGAjD4wxY2I5",
+            "hash": "lBx7BGAjD4wxY2I5",
             "username": None,
         },
         {
@@ -736,11 +753,18 @@ class TelegramService:
             "username": None,
         },
         {
-            "id": -1001370457350,
-            "name": "Crypto Neon",
-            "link": "https://t.me/CryptoNeon0",
+            "id": -1001391574614,
+            "name": "Bitcoin Bulls",
+            "link": "https://t.me/BitcoinBulls",
             "hash": None,
-            "username": "CryptoNeon0",
+            "username": "BitcoinBulls",
+        },
+        {
+            "id": -1002078531832,
+            "name": "Crypto Mermaids",
+            "link": "https://t.me/CryptoMermaids",
+            "hash": None,
+            "username": "CryptoMermaids",
         },
     ]
 
@@ -1002,10 +1026,12 @@ class TelegramService:
         # Automatically ensure all IDs from targets are in allowed_chat_ids in config
         if not os.environ.get("PYTEST_CURRENT_TEST"):
             try:
-                from config.config import load_config, save_config
+                from config.config import load_config, save_config, PERMANENT_BLACKLISTED_CHANNELS
                 cfg_disk = load_config()
-                top_ids = [t["id"] for t in elite_targets if t.get("id")]
-                current_allowed = list(getattr(cfg_disk.telegram, "allowed_chat_ids", []))
+                bl_set = set(PERMANENT_BLACKLISTED_CHANNELS.keys())
+                bl_set.update(getattr(cfg_disk.telegram, "blacklisted_chat_ids", []) or [])
+                top_ids = [t["id"] for t in elite_targets if t.get("id") and t["id"] not in bl_set]
+                current_allowed = [cid for cid in getattr(cfg_disk.telegram, "allowed_chat_ids", []) if cid not in bl_set]
                 updated_allowed = list(set(current_allowed + top_ids))
                 cfg_disk.telegram.allowed_chat_ids = updated_allowed
                 save_config(cfg_disk)

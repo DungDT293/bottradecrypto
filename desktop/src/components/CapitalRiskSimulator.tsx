@@ -67,7 +67,7 @@ export const CapitalRiskSimulator: React.FC<CapitalRiskSimulatorProps> = ({
         color: "#38bdf8",
         bg: "rgba(56, 189, 248, 0.12)",
         border: "rgba(56, 189, 248, 0.3)",
-        desc: "Tỷ lệ tăng trưởng lợi nhuận lý tưởng khi kết hợp cùng cơ chế Kèo Bất Tử và Winrate 75%+ của Top 5 Kênh Tinh Hoa.",
+        desc: "Tỷ lệ tăng trưởng lợi nhuận lý tưởng khi kết hợp cùng cơ chế Kèo Bất Tử và Winrate 75%+ của Top 8 Kênh Tinh Hoa.",
       };
     } else if (riskPerSignalPct <= 5.5) {
       return {
@@ -458,7 +458,7 @@ export const CapitalRiskSimulator: React.FC<CapitalRiskSimulatorProps> = ({
               Kịch Bản Mô Phỏng Tăng Trưởng Vốn (Chuỗi 30 Kèo Kế Tiếp)
             </span>
             <span style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px", display: "block" }}>
-              Dựa trên tỷ lệ thắng thực tế (Winrate 75%+) của Top 5 Kênh Tinh Hoa và cơ chế Kèo Bất Tử.
+              Dựa trên tỷ lệ thắng thực tế (Winrate 75%+) của Top 8 Kênh Tinh Hoa và cơ chế Kèo Bất Tử.
             </span>
           </div>
 

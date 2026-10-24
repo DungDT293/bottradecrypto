@@ -19,7 +19,7 @@ def normalize_text(text: str) -> str:
 
     # Remove zero-width spaces and invisible characters
     invisible_chars = [
-        "\u200b", "\u200c", "\u200d", "\ufeff", "\u200e", "\u200f",
+        "\u200b", "\u200c", "\u200d", "\ufeff", "\u200e", "\u200f", "\ufe0f",
         "\u202a", "\u202b", "\u202c", "\u202d", "\u202e"
     ]
     for char in invisible_chars:
@@ -38,7 +38,13 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
 
     # Strip telegram markdown bold/underline formatting tokens (**, __)
-    text = re.sub(r"(\*\*+|__+)", " ", text)
+    # 1. First remove intra-word markdown tokens so words are not broken apart (e.g. LON**G -> LONG, Q**USD -> QUSD, AVA**/USD -> AVA/USD, **$BR** -> $BR)
+    text = re.sub(r"([A-Za-z0-9])(\*\*+|__+)([/A-Za-z0-9])", r"\1\3", text)
+    # 2. Then remove any remaining formatting tokens
+    text = re.sub(r"(\*\*+|__+)", "", text)
+
+    # Fix author typos where space was typed instead of a decimal point in price (e.g. "$0 7272" -> "$0.7272")
+    text = re.sub(r"\$([0-9])\s+([0-9]{3,})\b", r"$\1.\2", text)
 
     # Strip plain raw urls (http://... or https://...)
     text = re.sub(r"https?://\S+", "", text)

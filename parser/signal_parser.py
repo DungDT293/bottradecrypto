@@ -12,7 +12,7 @@ NON_COIN_WORDS = {
     "FUTURES", "FUTURE", "SPOT", "SIGNAL", "SIGNALS", "TRADE", "TRADING",
     "PROFIT", "LOSS", "TARGET", "TARGETS", "ENTRY", "ENTRIES", "SETUP", "LEVERAGE",
     "MARGIN", "ACCURACY", "PUMP", "DUMP", "CALL", "CALLS", "DAILY", "TODAY", "WEEKLY",
-    "CRYPTO", "TOKEN", "COIN", "PERCENT", "LINK", "ADMIN", "FAST", "ALERT", "ALERTS",
+    "CRYPTO", "TOKEN", "COIN", "PERCENT", "ADMIN", "FAST", "ALERT", "ALERTS",
     "CHANNEL", "COMMUNITY", "GROUP", "MEMBERS", "RESULTS", "PROOF", "PREMIUM", "STOP",
     "MORE", "TIME", "JOIN", "POST", "GIVEAWAY",
 }
@@ -208,7 +208,8 @@ class SignalParser:
             else:
                 return raw, None, f"Quote asset '{quote}' khong phai USDT. Khong ho tro."
 
-        m_slash = re.search(r"[$#]?([A-Za-z0-9]+)\s*\/\s*([A-Za-z0-9]+)", text)
+        # 2. Match pair with slash where quote is USDT or other, base has at least one letter (prevents matching dates like 11/10 or 3/10)
+        m_slash = re.search(r"[$#]?([A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*)\s*\/\s*([A-Za-z0-9]+)", text)
         if m_slash:
             base = m_slash.group(1).upper()
             quote = m_slash.group(2).upper()
@@ -220,7 +221,7 @@ class SignalParser:
             else:
                 return raw, None, f"Quote asset '{quote}' khong phai USDT. Khong ho tro."
 
-        # 2. Match #SYMBOLUSDT, $SYMBOLUSDT or bare SYMBOLUSDT (e.g. #RSRUSDT, $FETUSDT, BTRUSDT, QUSDT)
+        # 3. Match #SYMBOLUSDT, $SYMBOLUSDT or bare SYMBOLUSDT (e.g. #RSRUSDT, $FETUSDT, BTRUSDT, QUSDT)
         m_usdt = re.search(r"(?:^|[\s\$#])([A-Za-z0-9]{1,12})USDT\b", text, re.IGNORECASE)
         if m_usdt:
             base = m_usdt.group(1).upper()
@@ -228,7 +229,7 @@ class SignalParser:
                 return f"{base}USDT", None, f"'{base}' khong phai ma coin hop le"
             return f"{base}USDT", f"{base}USDT", None
 
-        # 3. Match Coin: SYMBOL or PAIR: SYMBOL (e.g. Coin: WIF, Coin: Q)
+        # 4. Match Coin: SYMBOL or PAIR: SYMBOL (e.g. Coin: WIF, Coin: Q)
         m_coin = re.search(r"(?:COIN|Coin|PAIR|Pair)\s*[:#-]?\s*[$#]?([A-Za-z0-9]{1,10})\b", text)
         if m_coin:
             base = m_coin.group(1).upper()
@@ -236,7 +237,7 @@ class SignalParser:
                 return f"{base}/USDT", None, f"'{base}' khong phai ma coin hop le"
             return f"{base}/USDT", f"{base}USDT", None
 
-        # 4. Match #SYMBOL | or #SYMBOL with SETUP/DIRECTION (e.g. #BEL | SHORT SETUP, #Q SHORT, #W LONG)
+        # 5. Match #SYMBOL | or #SYMBOL with SETUP/DIRECTION (e.g. #BEL | SHORT SETUP, #Q SHORT, #W LONG)
         m_hash = re.search(r"#([A-Za-z0-9]{1,12})\s*(?:\|\s*)?(?:SHORT|LONG|BUY|SELL|\bSETUP\b)", text, re.IGNORECASE)
         if m_hash:
             base = m_hash.group(1).upper()
@@ -343,6 +344,13 @@ class SignalParser:
             text,
             re.IGNORECASE,
         )
+        if not m_range:
+            # Handles ranges without delimiter e.g. "Entry 0.1975 -0.1950" or "Entry - 0.72000 -0.7100"
+            m_range = re.search(
+                r"(?:Entries|Entry|ENTERY|Take Entries|LONG\s*ZONE|SHORT\s*ZONE|BUY\s*ZONE|SELL\s*ZONE|ZONE|LONG\s*ENTRY|SHORT\s*ENTRY|BUY\s*ENTRY|SELL\s*ENTRY)\s*\[?\s*-?\s*\$?([\d\.]+)\s*(?:-|–|TO|to)\s*\$?([\d\.]+)\s*\]?",
+                text,
+                re.IGNORECASE,
+            )
         if m_range:
             try:
                 p1 = Decimal(m_range.group(1))
@@ -352,14 +360,21 @@ class SignalParser:
                 pass
 
         # Check Entry Zone with diamond bullet or non-standard separator (Boom_Boom_Billionaires)
+        # Note: must not cross across lines into Take-Profit or Stop-Loss sections (e.g. picking up '1' from 'TP1:')
         m_zone = re.search(
-            r"Entry\s*Zone\s*:[^\d]*?\$?([\d\.]+)[^\d\n\r]*[\n\r]+[^\d]*?\$?([\d\.]+)",
+            r"Entry\s*Zone\s*:[^\d\n\r]*\$?([\d\.]+)[^\d\n\r]*[\r\n]+(?!\s*(?:Take|Target|TP|Stop|SL|Leverage|Risk|Close)\b)[^\d\n\r]*\$?([\d\.]+)",
             text,
             re.IGNORECASE,
         )
         if not m_zone:
             m_zone = re.search(
-                r"Entry\s*Zone\s*:[^\d\n]*?\$?([\d\.]+)[^\d\n]+?\$?([\d\.]+)",
+                r"Entry\s*Zone\s*:[^\d\n\r]*[\r\n]+[^\d\n\r]*\$?([\d\.]+)[^\d\n\r]*[\r\n]+(?!\s*(?:Take|Target|TP|Stop|SL|Leverage|Risk|Close)\b)[^\d\n\r]*\$?([\d\.]+)",
+                text,
+                re.IGNORECASE,
+            )
+        if not m_zone:
+            m_zone = re.search(
+                r"Entry\s*Zone\s*:[^\d\n]*?\$?([\d\.]+)[^\d\.\n]+?\$?([\d\.]+)",
                 text,
                 re.IGNORECASE,
             )
@@ -421,8 +436,9 @@ class SignalParser:
 
         # Check Single entry:
         # "Entry Targets: 0.048", "Entrys : 0.04800", "ENTRY ➜ 0.002075", "ENTERY PRICE: 0.02923", "Entry Price: 9.17", "Entry Zone: 0.1988", "BUY :\n 1) 1.674 - 100%", "Entry: - 0.3299"
+        # Note: BUY must require delimiter like ':' or '->' and not match direction 'BUY (LONG)'
         m_single = re.search(
-            r"(?:Entrys|Entry\s*Targets?|ENTRY\s*PRICE|ENTERY\s*PRICE|Entry\s*Price|ENTERY|Entry\s*Zone|Entry|Take Entries|BUY)\s*[:\=\-\>\u279c\u2794\s]*\n?\s*(?:\d+[\)\:]\s*|\d+\.(?!\d)\s*|\-\s*)?(?:[^\d\$\.]*)\s*\$?([\d\.]+)",
+            r"(?:Entrys|Entry\s*Targets?|ENTRY\s*PRICE|ENTERY\s*PRICE|Entry\s*Price|ENTERY|Entry\s*Zone|Entry|Take Entries|BUY\s*[:\=\->\u279c\u2794])\s*[:\=\-\>\u279c\u2794\s]*\n?\s*(?:\d+[\)\:]\s*|\d+\.(?!\d)\s*|\-\s*)?(?:[^\d\$\.\n]*)\s*\$?([\d\.]+)",
             text,
             re.IGNORECASE,
         )
@@ -442,7 +458,7 @@ class SignalParser:
         # 1. Check if line has a bullet number like '1) 0.018100' or '1) ⛔️ 0.3920' or '1. 0.018100'
         # Crucial: use (?!\d) on dot so decimal prices like 0.018100 are not mistaken for a bullet '0.'
         m_bullet = re.search(
-            r"\b(?:Stop-Loss|STOP LOSS|STOPLOSS|STOPP LOSS|Stop Loss|Stop Target|Stoploss|Stop|SL)\b[^\n]*\n+\s*(?:\d+[\)\:]|\d+\.(?!\d))\s*[^\d\$\n]*\$?([0-9\.]+)",
+            r"\b(?:Stop-Loss|STOP LOSS|STOPLOSS|STOPP LOSS|Stop Loss|Stop Target|Stoploss|Stop|SL)\b[^\n]*\n+\s*(?:\d+[\)\:]|\d+\.(?!\d))\s*[^\d\$\n]*(?:\$\s*)?([0-9\.]+)",
             text,
             re.IGNORECASE,
         )
@@ -455,9 +471,9 @@ class SignalParser:
             except InvalidOperation:
                 return None, f"Stop Loss '{val_str}' khong hop le", False
 
-        # 2. Standard inline SL e.g. 'Stoploss 🔴Loss :- 0.1384', 'Stop loss :0.01814613', 'SL under 62k'
+        # 2. Standard inline SL e.g. 'Stoploss 🔴Loss :- 0.1384', 'Stop loss :0.01814613', 'SL under 62k', 'SL : $ 85252'
         m = re.search(
-            r"\b(?:Stop-Loss|STOP LOSS|STOPLOSS|STOPP LOSS|Stop Loss|Stop Target|Stoploss|Stop|SL)\b[^\d\$\n]*\$?([0-9\.]+[kK]?)",
+            r"\b(?:Stop-Loss|STOP LOSS|STOPLOSS|STOPP LOSS|Stop Loss|Stop Target|Stoploss|Stop|SL)\b[^\d\$\n]*(?:\$\s*)?([0-9\.]+[kK]?)",
             text,
             re.IGNORECASE,
         )
@@ -671,6 +687,7 @@ class SignalParser:
                     except InvalidOperation:
                         pass
 
+        tps = [p for p in tps if p > Decimal("0")]
         if not tps:
             return [], "Khong tim thay muc Take Profit hop le"
 

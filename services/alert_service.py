@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sqlite3
 import threading
@@ -43,10 +44,14 @@ class AlertService:
         self._alerts: List[AlertItem] = []
         self._counter = 0
         self._mutex = threading.Lock()
+        self._notifier: Optional[Any] = None
         self.db = db
         if self.db:
             self._init_db_table()
             self._load_from_db()
+
+    def set_notifier(self, notifier: Any) -> None:
+        self._notifier = notifier
 
     @classmethod
     def get_instance(cls, db: Optional[Any] = None) -> "AlertService":
@@ -180,7 +185,25 @@ class AlertService:
                 except Exception:
                     pass
 
+            if self._notifier:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._dispatch_notify(title, message, level))
+                except RuntimeError:
+                    pass
+
             return item
+
+    async def _dispatch_notify(self, title: str, message: str, level: AlertLevel) -> None:
+        if not self._notifier:
+            return
+        emoji = "ℹ️" if level == AlertLevel.INFO else ("⚠️" if level == AlertLevel.WARNING else "🚨")
+        text = f"<b>{emoji} [{title}]</b>\n{message}"
+        try:
+            if hasattr(self._notifier, "notify"):
+                await self._notifier.notify(text)
+        except Exception:
+            pass
 
     def get_alerts(
         self,

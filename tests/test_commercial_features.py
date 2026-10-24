@@ -227,9 +227,9 @@ async def test_fetch_remote_elite_channels_resolution():
     cfg = AppConfig()
     svc = TelegramService(cfg)
 
-    # 1. Fallback to local config/elite_channels.json or default
+    # 1. Fallback to local config/elite_channels.json or default (8 Elite Channels)
     channels = await svc.fetch_remote_elite_channels()
-    assert len(channels) == 5
+    assert len(channels) == 8
     assert any(c["name"] == "THE WOLF (CRYPTO)®" for c in channels)
     assert any("Leopard" in c["name"] or "LEOPARD" in c["name"] for c in channels)
 
@@ -265,7 +265,7 @@ async def test_auto_join_progress_callback_and_delay():
 
         res = await svc.auto_join_elite_channels(progress_callback=fake_progress)
         assert res["success"] is True
-        assert res["total_channels"] == 5
+        assert res["total_channels"] == 8
         assert len(progress_events) > 0
 
         # Verify progress messages and waiting status

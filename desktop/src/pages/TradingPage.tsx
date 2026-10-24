@@ -149,6 +149,112 @@ export const TradingPage: React.FC = () => {
         </div>
       )}
 
+      {positions.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "12px",
+            marginBottom: "20px",
+          }}
+        >
+          <div
+            style={{
+              background: "rgba(30, 41, 59, 0.7)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              borderRadius: "8px",
+              padding: "12px 16px",
+            }}
+          >
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Tổng PnL Chưa Chốt (Net UPnL)
+            </div>
+            {(() => {
+              const totalUnpnl = positions.reduce((acc, p) => acc + (parseFloat(p.unrealized_pnl || "0") || 0), 0);
+              return (
+                <div
+                  style={{
+                    fontSize: "18px",
+                    fontWeight: 700,
+                    color: totalUnpnl >= 0 ? "#10b981" : "#ef4444",
+                    marginTop: "4px",
+                  }}
+                >
+                  {totalUnpnl >= 0 ? `+${totalUnpnl.toFixed(2)}` : totalUnpnl.toFixed(2)} USDT
+                </div>
+              );
+            })()}
+          </div>
+
+          <div
+            style={{
+              background: "rgba(30, 41, 59, 0.7)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              borderRadius: "8px",
+              padding: "12px 16px",
+            }}
+          >
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Tổng Ký Quỹ Đang Dùng (Margin)
+            </div>
+            {(() => {
+              const totalMargin = positions.reduce((acc, p) => {
+                const m = parseFloat(p.initial_margin || "0") || (parseFloat(p.amount) * parseFloat(p.entry_price) / (p.leverage || 1));
+                return acc + (isNaN(m) ? 0 : m);
+              }, 0);
+              return (
+                <div style={{ fontSize: "18px", fontWeight: 700, color: "#38bdf8", marginTop: "4px" }}>
+                  ${totalMargin.toFixed(2)} USDT
+                </div>
+              );
+            })()}
+          </div>
+
+          <div
+            style={{
+              background: "rgba(30, 41, 59, 0.7)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              borderRadius: "8px",
+              padding: "12px 16px",
+            }}
+          >
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Số Vị Thế Mở / Trần An Toàn
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 700, color: positions.length <= 5 ? "#10b981" : "#f59e0b", marginTop: "4px" }}>
+              {positions.length} / 5 vị thế {positions.length > 5 ? "(Vượt trần khống chế)" : "(An toàn)"}
+            </div>
+          </div>
+
+          <div
+            style={{
+              background: "rgba(30, 41, 59, 0.7)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              borderRadius: "8px",
+              padding: "12px 16px",
+            }}
+          >
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Kèo Bất Tử (Đã Khóa Lãi)
+            </div>
+            {(() => {
+              const riskFreeCount = positions.filter((p) => {
+                if (!p.sl_price || !p.entry_price) return false;
+                const sl = parseFloat(p.sl_price);
+                const entry = parseFloat(p.entry_price);
+                if (isNaN(sl) || isNaN(entry)) return false;
+                return p.side === "LONG" ? sl >= entry : sl <= entry;
+              }).length;
+              return (
+                <div style={{ fontSize: "18px", fontWeight: 700, color: "#a855f7", marginTop: "4px" }}>
+                  🛡️ {riskFreeCount} vị thế (100% Risk-Free)
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Positions Table */}
       <div className="table-container">
         <div className="table-header">
@@ -252,29 +358,66 @@ export const TradingPage: React.FC = () => {
                     <td className="mono">{pos.entry_price}</td>
                     <td className="mono">{pos.mark_price || "—"}</td>
                     <td className={`mono ${unpnl >= 0 ? "text-success" : "text-danger"}`} style={{ fontWeight: 700 }}>
-                      {unpnl >= 0 ? `+${unpnl.toFixed(2)}` : unpnl.toFixed(2)} USDT
+                      <div style={{ fontSize: "14px" }}>
+                        {unpnl >= 0 ? `+${unpnl.toFixed(2)}` : unpnl.toFixed(2)} USDT
+                      </div>
                     </td>
                     <td className={`mono ${isRoePos ? "text-success" : "text-danger"}`} style={{ fontWeight: 700, fontSize: "13px" }}>
-                      {isRoePos && !roePct.startsWith("+") ? `+${roePct}` : roePct}
+                      <div>{isRoePos && !roePct.startsWith("+") ? `+${roePct}` : roePct}</div>
+                      <div style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 400 }}>trên margin</div>
                     </td>
                     <td>
-                      {pos.sl_price ? (
-                        <span
-                          className="badge"
-                          style={{
-                            background: "rgba(239, 68, 68, 0.15)",
-                            color: "#f87171",
-                            border: "1px solid rgba(239, 68, 68, 0.35)",
-                            fontWeight: 700,
-                          }}
-                        >
-                          SL: {pos.sl_price}
-                        </span>
-                      ) : pos.sl_order_id ? (
-                        <span className="badge badge-read-only">SL: {pos.sl_order_id.slice(-6)}</span>
-                      ) : (
-                        <span className="badge badge-live">CHƯA CÓ SL</span>
-                      )}
+                      {(() => {
+                        const slVal = parseFloat(pos.sl_price || "0");
+                        const entryVal = parseFloat(pos.entry_price || "0");
+                        const isBreakevenLocked = Boolean(
+                          pos.sl_price && entryVal > 0 && (
+                            (pos.side === "LONG" && slVal >= entryVal) ||
+                            (pos.side === "SHORT" && slVal <= entryVal)
+                          )
+                        );
+
+                        if (isBreakevenLocked) {
+                          return (
+                            <span
+                              className="badge"
+                              style={{
+                                background: "rgba(16, 185, 129, 0.18)",
+                                color: "#34d399",
+                                border: "1px solid rgba(16, 185, 129, 0.45)",
+                                fontWeight: 700,
+                                fontSize: "11px",
+                                padding: "3px 8px",
+                              }}
+                              title="Lệnh này đã dời Stop Loss qua giá Entry. Đã khóa lãi thành công, 100% không còn rủi ro!"
+                            >
+                              🛡️ KHÓA LÃI: {pos.sl_price}
+                            </span>
+                          );
+                        }
+
+                        if (pos.sl_price) {
+                          return (
+                            <span
+                              className="badge"
+                              style={{
+                                background: "rgba(239, 68, 68, 0.15)",
+                                color: "#f87171",
+                                border: "1px solid rgba(239, 68, 68, 0.35)",
+                                fontWeight: 700,
+                              }}
+                            >
+                              SL: {pos.sl_price}
+                            </span>
+                          );
+                        }
+
+                        if (pos.sl_order_id) {
+                          return <span className="badge badge-read-only">SL: {pos.sl_order_id.slice(-6)}</span>;
+                        }
+
+                        return <span className="badge badge-live">CHƯA CÓ SL</span>;
+                      })()}
                     </td>
                     <td className="mono" style={{ fontSize: "12px" }}>
                       {pos.tp_order_ids?.length > 0 ? `${pos.tp_order_ids.length} lệnh TP` : "Chưa có"}

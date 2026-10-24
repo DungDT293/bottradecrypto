@@ -428,6 +428,18 @@ class BinanceFuturesClient:
                 result["last_close"] = last_c
                 result["trend_1h"] = "BULLISH" if last_c >= ema20 else "BEARISH"
                 result["trend_diff_pct"] = ((last_c - ema20) / ema20 * 100) if ema20 > 0 else 0.0
+
+                # Trụ Cột 4: Calculate 14-period ATR from 1h candles
+                if len(klines) >= 15:
+                    tr_list = []
+                    for i in range(1, len(klines)):
+                        h = float(klines[i][2])
+                        l = float(klines[i][3])
+                        prev_c = float(klines[i - 1][4])
+                        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+                        tr_list.append(tr)
+                    if tr_list:
+                        result["atr_1h"] = sum(tr_list[-14:]) / min(14, len(tr_list))
         except Exception:
             pass
 

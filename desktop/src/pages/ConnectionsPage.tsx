@@ -850,10 +850,10 @@ export const ConnectionsPage: React.FC = () => {
                   <div>
                     <div style={{ fontSize: "14px", fontWeight: 700, color: "#34d399", display: "flex", alignItems: "center", gap: "8px" }}>
                       <Zap size={18} />
-                      <span>Tham Gia Nhanh 5 Kênh Tinh Hoa (1-Click Auto-Join)</span>
+                      <span>Tham Gia Nhanh 8 Kênh Tinh Hoa (1-Click Auto-Join)</span>
                     </div>
                     <p style={{ margin: "4px 0 0 0", fontSize: "12px", color: "var(--text-secondary)" }}>
-                      Tự động vào 5 kênh Telegram tín hiệu có winrate & PnL cao nhất: <strong>THE WOLF, Boom Boom Billionaires, Leopard, Monk, Neon</strong> và tự động đưa vào danh sách theo dõi lệnh.
+                      Tự động vào 8 kênh Telegram tinh hoa chuẩn mực: <strong>Whales Circle, Coin Chief, Leopard, Crypto Devil, The Wolf, Monk, Bitcoin Bulls, Mermaids</strong>.
                     </p>
                   </div>
 
@@ -879,7 +879,7 @@ export const ConnectionsPage: React.FC = () => {
                     ) : (
                       <>
                         <Sparkles size={14} />
-                        <span>Tham Gia 5 Kênh Ngay</span>
+                        <span>Tham Gia 8 Kênh Ngay</span>
                       </>
                     )}
                   </button>

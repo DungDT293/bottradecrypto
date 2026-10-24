@@ -1,13 +1,14 @@
 import asyncio
 import hashlib
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from telethon import TelegramClient, events
 
-from config.config import AppConfig, exchange_writes_enabled
+from config.config import AppConfig, exchange_writes_enabled, PERMANENT_BLACKLISTED_CHANNELS
 from core.enums import ExecutionMode, OrderSide, OrderType, PositionSide, SignalState, UpdateType
 from core.models import SourceMetadata, ValidatedSignal
 from execution.order_manager import OrderManager
@@ -17,7 +18,9 @@ from parser.normalizer import normalize_text
 from parser.signal_parser import SignalParser
 from parser.update_parser import ChannelUpdateParser
 from parser.validator import SignalValidator
-from services.channel_analytics_service import KNOWN_CHANNELS
+from risk.market_regime_shield import global_market_regime_shield
+from services.channel_analytics_service import KNOWN_CHANNELS, ChannelAnalyticsService
+from services.signal_queue_service import SignalQueueService, global_signal_queue_service
 from services.admin_evidence import classify_media_claim, detect_media_kind, is_brag_media_claim
 from storage.database import DatabaseManager, OrderRepository, SignalRepository
 
@@ -77,6 +80,9 @@ class TelegramSignalListener:
         self._entry_enabled = entry_enabled_provider or (lambda: True)
         self._periodic_sync_task: Optional[asyncio.Task] = None
         self._stop_requested = False
+        self._last_sl_timestamp_by_chat: Dict[int, float] = {}
+        self.analytics_service = ChannelAnalyticsService(db_path=getattr(db_manager, "db_path", "./data/trading_state.db"))
+        self.signal_queue = global_signal_queue_service
 
     def _is_authorized_admin(self, event: Any) -> bool:
         sender_id = getattr(event, "sender_id", None)
@@ -93,10 +99,38 @@ class TelegramSignalListener:
         raw_text = event.raw_text or ""
         reply_to_msg_id = getattr(event, "reply_to_msg_id", None)
 
+        # 0. Check Permanent and Dynamic Blacklist (Anti-Fake Channels Shield)
+        blacklisted_chats = set(getattr(self.config.telegram, "blacklisted_chat_ids", []) or [])
+        blacklisted_chats.update(PERMANENT_BLACKLISTED_CHANNELS.keys())
+        if chat_id in blacklisted_chats:
+            reason = PERMANENT_BLACKLISTED_CHANNELS.get(chat_id, "Kenh Blacklist nguy hiem / fake tin hieu")
+            print(f"[BI CHAN: KENH FAKE/LUA DAO BLACKLIST] Chat ID: {chat_id} | Msg: {msg_id} | Ly do: {reason}. Tu choi xu ly!")
+            return
+
         # 1. Check Allowlist
         allowed_chats = self.config.telegram.allowed_chat_ids
         if not allowed_chats or chat_id not in allowed_chats:
             return  # Empty allowlist is deny-all
+
+        # 1b. Content-Level Scam & Dangerous Execution Guards
+        raw_lower = raw_text.lower()
+        if any(w in raw_lower for w in ["remove sl", "reome sl", "dca and hold", "do dca", "closing below", "sl : my instruction", "stoploss : my instruction"]):
+            print(f"[BI CHAN: LENH NGUY HIEM / GO SL] Chat ID: {chat_id} | Msg: {msg_id} yeu cau go SL hoac DCA gong lo. Tu choi ngay de bao toan von!")
+            return
+
+        if re.search(r'0x[a-fA-F0-9]{40}', raw_text) or re.search(r'T[A-Za-z1-9]{33}', raw_text):
+            print(f"[BI CHAN: DIA CHI VI TIEN MA HOA] Chat ID: {chat_id} | Msg: {msg_id} chua dia chi vi nop tien/lua dao VIP. Bo qua!")
+            return
+
+        if "t.me/+" in raw_text and any(k in raw_lower for k in ["targets 👇", "targets:", "full set-up", "entry: targets"]):
+            if not any(k in raw_lower for k in ["stoploss", "stop-loss", "stop loss", "sl:"]):
+                print(f"[BI CHAN: TEASER LINK DONG VOI] Chat ID: {chat_id} | Msg: {msg_id} chi chua link teaser keo mem khong co SL so. Bo qua!")
+                return
+
+        # Record SL Hit announcements to activate Anti-Revenge Cool-off Guard (90 mins)
+        if any(k in raw_lower for k in ["sl hit", "stop loss hit", "stoploss hit"]):
+            self._last_sl_timestamp_by_chat[chat_id] = time.time()
+            print(f"[GHI NHAN: KEO DINH SL] Chat ID: {chat_id} | Msg: {msg_id} thong bao SL hit. Kich hoat dong bang Anti-Revenge 90 phut.")
 
         now_utc = datetime.now(timezone.utc)
         orig_date = getattr(event, "date", None)
@@ -363,6 +397,15 @@ class TelegramSignalListener:
 
         if update_type in [UpdateType.RESULT_TP_REPORTED, UpdateType.CORRECT_SIGNAL, UpdateType.CANCEL_PENDING_ENTRY, UpdateType.ENTRY_CHANGE]:
             return
+
+        # 5b. Anti-Revenge Trading Cool-off check (90 minutes after an SL hit)
+        if not is_edit:
+            last_sl_t = self._last_sl_timestamp_by_chat.get(chat_id, 0.0)
+            elapsed_sl = time.time() - last_sl_t
+            if elapsed_sl < 5400:  # 90 minutes
+                rem_mins = int((5400 - elapsed_sl) / 60)
+                print(f"[BI CHAN: ANTI-REVENGE COOLOFF] Chat ID: {chat_id} | Msg: {msg_id} bi chan: Kenh vua co keo dinh SL cach day {int(elapsed_sl/60)} phut (con dong bang {rem_mins} phut de tranh bay cay cu tra thu).")
+                return
 
         # 6. Parse Signal Content
         meta = SourceMetadata(
@@ -643,6 +686,18 @@ class TelegramSignalListener:
                     filters = await client.get_symbol_filter(validated.symbol)
                     equity = await client.get_account_equity()
 
+                    # 0b. Trụ Cột 2: Circuit Breaker Auto-Mute Check (3 consecutive SLs in 48h)
+                    is_cb, cb_msg = self.analytics_service.check_circuit_breaker(chat_id)
+                    if is_cb:
+                        print(f"\n[CIRCUIT BREAKER: TAM DUNG TRADE REAL] Nhóm: {channel_name} | {cb_msg}")
+                        self.signal_repo.record_timeline_event(
+                            validated.signal_id,
+                            "CIRCUIT_BREAKER_MUTED",
+                            cb_msg,
+                        )
+                        print(f"-> Chuyển sang chế độ Paper/Shadow để thẩm định lại, không gửi lệnh sàn thực tế.\n")
+                        return
+
                     # 1. Fetch live open positions from Binance
                     try:
                         open_positions = await client.get_open_positions()
@@ -659,6 +714,47 @@ class TelegramSignalListener:
                             market_ctx = await client.get_market_trend_context(validated.symbol)
                         except Exception:
                             pass
+
+                    # 2b. Trụ Cột 1: Correlation Shield & BTC 4H Market Regime Filter
+                    try:
+                        if hasattr(client, "_request"):
+                            await global_market_regime_shield.update_regime(client)
+                        regime_allowed, regime_reason = global_market_regime_shield.check_signal_allowed(
+                            validated.symbol, validated.side
+                        )
+                        if not regime_allowed:
+                            print(f"\n[BI CHAN: BTC MARKET REGIME DUMP] {regime_reason}\n")
+                            self.signal_repo.record_timeline_event(
+                                validated.signal_id,
+                                "MARKET_REGIME_BLOCKED",
+                                regime_reason,
+                            )
+                            self.signal_repo.update_signal_state(
+                                validated.signal_id, SignalState.REJECTED, regime_reason
+                            )
+                            return
+                    except Exception as e:
+                        print(f"[CANH BAO] Loi kiem tra market regime: {e}")
+
+                    # 2c. Trụ Cột 5: Liquidity & Funding Rate Filter (/fapi/v1/premiumIndex)
+                    funding_val = market_ctx.get("funding_rate", 0.0)
+                    vol_24 = market_ctx.get("volume_24h", 0.0)
+                    is_liq_ok, liq_err = SignalValidator.validate_funding_and_liquidity(
+                        funding_rate=funding_val,
+                        quote_volume_24h=vol_24,
+                    )
+                    if not is_liq_ok:
+                        reject_reason = f"Trụ cột 5 chặn lệnh: {liq_err}."
+                        print(f"\n[BI CHAN: FUNDING HOAC THANH KHOAN] {reject_reason}\n")
+                        self.signal_repo.record_timeline_event(
+                            validated.signal_id,
+                            "LIQUIDITY_FUNDING_BLOCKED",
+                            reject_reason,
+                        )
+                        self.signal_repo.update_signal_state(
+                            validated.signal_id, SignalState.REJECTED, reject_reason
+                        )
+                        return
 
                     # 3. TÌNH HUỐNG 1: BẢO VỆ XUNG ĐỘT TRÙNG CẶP (DUPLICATE SYMBOL PROTECTION)
                     existing_pos = next((p for p in open_positions if p.get("symbol") == validated.symbol and Decimal(str(p.get("positionAmt", "0"))) != Decimal("0")), None)
@@ -718,11 +814,29 @@ class TelegramSignalListener:
 
                     source_cfg = self.config.sources.get(chat_id)
                     is_elite_admin = chat_id in (-1001756316676, -1002052872813, -1001754095061, -1002007658025, -1001552004524)
-                    max_allowed_at_risk = getattr(self.config.risk, "max_active_signals", 15)
+                    is_ferrari = getattr(self.config, "ferrari_mode_enabled", False)
+                    max_allowed_at_risk = min(int(getattr(self.config.risk, "max_active_signals", 5)), 5)
 
-                    # Hard Ceiling: Tong so vi the dong thoi tren Binance khong bao gio vuot qua tran toi da (15)
+                    # Hard Ceiling: Tong so vi the dong thoi tren Binance khong bao gio vuot qua tran toi da (5)
                     total_open_positions = len(open_positions)
+                    is_tier1 = chat_id in (-1001520053536, -1002052872813, -1001598691683, -1001700314832)
                     if total_open_positions >= max_allowed_at_risk:
+                        if is_tier1 or is_elite_admin:
+                            enqueued = self.signal_queue.enqueue(
+                                signal=validated,
+                                chat_id=chat_id,
+                                channel_name=channel_name,
+                                priority=1,
+                            )
+                            if enqueued:
+                                queue_msg = (
+                                    f"Trụ Cột 6 Hàng Đợi Thông Minh: Kèo {validated.symbol} từ nhóm Tier 1 '{channel_name}' "
+                                    f"được đưa vào hàng đợi ưu tiên (TTL 20 phút) do đạt trần {total_open_positions}/{max_allowed_at_risk} vị thế."
+                                )
+                                print(f"\n[SMART QUEUE ENQUEUED] {queue_msg}\n")
+                                self.signal_repo.record_timeline_event(validated.signal_id, "QUEUED_WAITING_FOR_SLOT", queue_msg)
+                                return
+
                         slot_reject_reason = (
                             f"Danh mục đã đạt trần tối đa {total_open_positions}/{max_allowed_at_risk} vị thế đồng thời trên Binance. "
                             f"Kèo {validated.symbol} từ '{channel_name}' tạm hoãn để bảo toàn ký quỹ."
@@ -732,7 +846,23 @@ class TelegramSignalListener:
                         self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, slot_reject_reason)
                         return
 
-                    if at_risk_count >= max_allowed_at_risk and not is_elite_admin:
+                    if not is_ferrari and at_risk_count >= max_allowed_at_risk and not is_elite_admin:
+                        if is_tier1:
+                            enqueued = self.signal_queue.enqueue(
+                                signal=validated,
+                                chat_id=chat_id,
+                                channel_name=channel_name,
+                                priority=1,
+                            )
+                            if enqueued:
+                                queue_msg = (
+                                    f"Trụ Cột 6 Hàng Đợi Thông Minh: Kèo {validated.symbol} từ nhóm Tier 1 '{channel_name}' "
+                                    f"được đưa vào hàng đợi ưu tiên (TTL 20 phút) chờ nhả slot rủi ro."
+                                )
+                                print(f"\n[SMART QUEUE ENQUEUED] {queue_msg}\n")
+                                self.signal_repo.record_timeline_event(validated.signal_id, "QUEUED_WAITING_FOR_SLOT", queue_msg)
+                                return
+
                         slot_reject_reason = (
                             f"Danh mục đã đạt tối đa {at_risk_count} vị thế đang chịu rủi ro "
                             f"(Đã có {risk_free_count} vị thế đạt Kèo Bất Tử giải phóng slot). "
@@ -743,8 +873,8 @@ class TelegramSignalListener:
                         self.signal_repo.record_timeline_event(validated.signal_id, "RISK_SLOT_LIMIT_REACHED", slot_reject_reason)
                         self.signal_repo.update_signal_state(validated.signal_id, SignalState.REJECTED, slot_reject_reason)
                         return
-                    elif at_risk_count >= max_allowed_at_risk and is_elite_admin:
-                        print(f"[VIP ADMIN PRIORITY] Kèo Tinh Hoa {validated.symbol} từ '{channel_name}' được ưu tiên đặc cách vào lệnh!")
+                    elif at_risk_count >= max_allowed_at_risk and (is_elite_admin or is_ferrari):
+                        print(f"[VIP/FERRARI PRIORITY] Kèo {validated.symbol} từ '{channel_name}' được ưu tiên đặc cách vào lệnh!")
 
                     # 5. MARKET TREND & NEWS SANITY CHECK
                     if market_ctx.get("market_status") == "BTC_HIGH_VOLATILITY_DUMP" and validated.side == PositionSide.LONG:
@@ -766,7 +896,9 @@ class TelegramSignalListener:
                             else Decimal("0")
                         )
                         if position_amt > 0 and entry_price > 0 and position_sl > 0:
-                            open_risk += position_amt * abs(entry_price - position_sl)
+                            # Clamp SL distance to max 15% to prevent corrupted database records from inflating open_risk
+                            sl_dist = min(abs(entry_price - position_sl), entry_price * Decimal("0.15"))
+                            open_risk += position_amt * sl_dist
 
                     ticker = await client._request("GET", "/fapi/v1/ticker/price", params={"symbol": validated.symbol})
                     current_price = Decimal(ticker.get("price", "0"))
@@ -926,6 +1058,15 @@ class TelegramSignalListener:
                         await client.set_leverage(validated.symbol, validated.leverage)
                     except Exception:
                         pass
+
+                    # Trụ Cột 4: Apply ATR Volatility-Adjusted Sizing
+                    atr_val = Decimal(str(market_ctx.get("atr_1h", 0.0)))
+                    if atr_val > Decimal("0") and current_price > Decimal("0") and hasattr(self.order_manager, "risk_engine"):
+                        validated = self.order_manager.risk_engine.apply_atr_volatility_sizing(
+                            signal=validated,
+                            atr_1h=atr_val,
+                            current_price=current_price,
+                        )
 
                     entry_sizes = self.order_manager.risk_engine.calculate_position_sizes(
                         signal=validated,
@@ -1253,4 +1394,94 @@ class TelegramSignalListener:
                 break
             except Exception:
                 await asyncio.sleep(10)
+
+    async def process_next_queued_signal(self) -> Optional[Any]:
+        """
+        Trụ Cột 6: Dequeues and executes the highest-priority signal when a slot opens up.
+        """
+        item = self.signal_queue.dequeue_next()
+        if not item:
+            return None
+
+        if item.is_expired:
+            print(f"[SMART QUEUE] Kèo {item.signal.symbol} từ '{item.channel_name}' đã hết hạn TTL ({item.ttl_seconds}s). Bỏ qua.")
+            self.signal_repo.record_timeline_event(
+                item.signal.signal_id,
+                "QUEUED_SIGNAL_EXPIRED",
+                f"Kèo trong hàng đợi đã quá hạn TTL ({item.ttl_seconds}s) trước khi có slot trống.",
+            )
+            self.signal_repo.update_signal_state(
+                item.signal.signal_id,
+                SignalState.REJECTED,
+                reason=f"Hàng đợi ưu tiên quá hạn TTL ({item.ttl_seconds}s)",
+            )
+            return None
+
+        print(f"\n[SMART QUEUE ACTIVATING] Giải phóng slot! Tự động kích hoạt kèo {item.signal.symbol} từ hàng đợi ('{item.channel_name}')...\n")
+        self.signal_repo.record_timeline_event(
+            item.signal.signal_id,
+            "QUEUED_SIGNAL_ACTIVATED",
+            f"Slot rủi ro được giải phóng. Kích hoạt tự động kèo {item.signal.symbol} từ hàng đợi ưu tiên!",
+        )
+
+        try:
+            client = self.order_manager.client
+            current_price = Decimal("0")
+            try:
+                current_price = await client.get_symbol_price(item.signal.symbol)
+            except Exception:
+                pass
+
+            if current_price <= Decimal("0"):
+                print(f"[SMART QUEUE ERROR] Không thể lấy giá thị trường cho {item.signal.symbol}. Hủy lệnh.")
+                return None
+
+            # Verify price has not blown past TP1 or breached SL
+            if item.signal.side == PositionSide.LONG:
+                if item.signal.take_profits and current_price >= item.signal.take_profits[0][0]:
+                    print(f"[SMART QUEUE CANCEL] {item.signal.symbol} đã chạm TP1 trước khi có slot. Bỏ qua.")
+                    self.signal_repo.update_signal_state(item.signal.signal_id, SignalState.REJECTED, "Giá đã chạm TP1 trong thời gian chờ hàng đợi")
+                    return None
+                if item.signal.stop_loss and current_price <= item.signal.stop_loss:
+                    print(f"[SMART QUEUE CANCEL] {item.signal.symbol} đã chạm SL trước khi có slot. Bỏ qua.")
+                    self.signal_repo.update_signal_state(item.signal.signal_id, SignalState.REJECTED, "Giá đã chạm SL trong thời gian chờ hàng đợi")
+                    return None
+            elif item.signal.side == PositionSide.SHORT:
+                if item.signal.take_profits and current_price <= item.signal.take_profits[0][0]:
+                    print(f"[SMART QUEUE CANCEL] {item.signal.symbol} đã chạm TP1 trước khi có slot. Bỏ qua.")
+                    self.signal_repo.update_signal_state(item.signal.signal_id, SignalState.REJECTED, "Giá đã chạm TP1 trong thời gian chờ hàng đợi")
+                    return None
+                if item.signal.stop_loss and current_price >= item.signal.stop_loss:
+                    print(f"[SMART QUEUE CANCEL] {item.signal.symbol} đã chạm SL trước khi có slot. Bỏ qua.")
+                    self.signal_repo.update_signal_state(item.signal.signal_id, SignalState.REJECTED, "Giá đã chạm SL trong thời gian chờ hàng đợi")
+                    return None
+
+            equity = await client.get_margin_balance()
+            if equity <= Decimal("0"):
+                return None
+
+            filters = await client.get_symbol_filters(item.signal.symbol)
+
+            # Sizing
+            entry_sizes = self.order_manager.risk_engine.calculate_position_sizes(
+                signal=item.signal,
+                current_equity=equity,
+                open_risk_amount=Decimal("0"),
+                step_size=filters.step_size,
+                min_qty=filters.min_qty,
+                min_notional=filters.min_notional,
+                current_market_price=current_price,
+            )
+            orders = await self.order_manager.submit_entries(item.signal, entry_sizes, current_market_price=current_price)
+            print(f"[SMART QUEUE SUCCESS] Đã mở thành công {len(orders)} lệnh cho kèo {item.signal.symbol} từ hàng đợi!")
+            self.signal_repo.record_timeline_event(
+                item.signal.signal_id,
+                "ORDERS_SUBMITTED_FROM_QUEUE",
+                f"Kèo hàng đợi đã khớp và đặt {len(orders)} lệnh lên Binance thành công!",
+            )
+            return orders
+        except Exception as ex:
+            print(f"[SMART QUEUE EXEC ERROR] {ex}")
+            self.signal_repo.update_signal_state(item.signal.signal_id, SignalState.REJECTED, reason=f"Lỗi kích hoạt hàng đợi: {str(ex)}")
+            return None
 

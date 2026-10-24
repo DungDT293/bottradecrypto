@@ -50,9 +50,11 @@ def flatten(symbol,kind,interval,start,end):
  return sorted(out,key=lambda x:x[0])
 
 def replay(x, contract, mark):
- c=x['classification'];side=c['side'];vals=[Decimal(str(v)) for v in c['entries']];a=min(vals);b=max(vals);sl=Decimal(str(c['stop_loss']));tp=Decimal(str(c['take_profits'][0]));m={int(k[0]):(Decimal(str(k[2])),Decimal(str(k[3]))) for k in mark};entered=False
+ c=x['classification'];side=c['side'];vals=[Decimal(str(v)) for v in c['entries']];a=min(vals);b=max(vals);sl=Decimal(str(c['stop_loss']));tp=Decimal(str(c['take_profits'][0]));m={int(k[0]):(Decimal(str(k[2])),Decimal(str(k[3]))) for k in mark};entered=False;start_t=ts(x)
  for k in contract:
-  t=int(k[0]);hi=Decimal(str(k[2]));lo=Decimal(str(k[3]));mh,ml=m.get(t,(hi,lo))
+  t=int(k[0])
+  if t < start_t: continue
+  hi=Decimal(str(k[2]));lo=Decimal(str(k[3]));mh,ml=m.get(t,(hi,lo))
   if not entered:
    if lo<=b and hi>=a:entered=True
    else:continue

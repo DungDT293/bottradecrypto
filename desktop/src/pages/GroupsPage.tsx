@@ -362,7 +362,7 @@ export const GroupsPage: React.FC = () => {
             className="btn btn-secondary"
             onClick={handleAutoJoinElite}
             disabled={autoJoining}
-            title="Tự động tham gia 5 kênh tín hiệu tinh hoa và đưa vào danh sách theo dõi"
+            title="Tự động tham gia 8 kênh tín hiệu tinh hoa và đưa vào danh sách theo dõi"
             style={{
               borderColor: "rgba(16, 185, 129, 0.4)",
               color: "#34d399",
@@ -373,7 +373,7 @@ export const GroupsPage: React.FC = () => {
             }}
           >
             {autoJoining ? <RefreshCw size={14} className="spin" /> : <Zap size={14} />}
-            <span>{autoJoining ? "Đang tham gia..." : "⚡ Auto-Join 5 Kênh Tinh Hoa"}</span>
+            <span>{autoJoining ? "Đang tham gia..." : "⚡ Auto-Join 8 Kênh Tinh Hoa"}</span>
           </button>
           <button className="btn btn-secondary" onClick={() => fetchDialogs(true)} disabled={loading} title="Tải lại từ Telegram">
             <RefreshCw size={14} className={loading ? "spin" : ""} />

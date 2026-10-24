@@ -1,27 +1,41 @@
 {
-  "version": "1.3.3",
-  "updated_at": "2026-10-21T15:30:00Z",
-  "description": "Danh sách 5 Kênh Tinh Hoa và Link Invite mới nhất cho Bot Trade Crypto",
+  "version": "2.2.0",
+  "updated_at": "2026-10-24T14:00:00Z",
+  "description": "Danh sách 8 Kênh Tinh Hoa chuẩn mực (Tier 1 & Tier 2) cho Bot Trade Crypto",
   "channels": [
     {
-      "id": -1002007658025,
-      "name": "THE WOLF (CRYPTO)®",
-      "link": "https://t.me/+lBx7BGAjD4wxY2I5",
-      "hash": "lBx7BGAjD4wxY2I5",
-      "username": null
+      "id": -1001700314832,
+      "name": "WHALES CIRCLE",
+      "link": "https://t.me/WhalesCircle",
+      "hash": null,
+      "username": "WhalesCircle"
     },
     {
-      "id": -1001756316676,
-      "name": "Boom_Boom_Billionaires",
-      "link": "https://t.me/+n5N2aXPU5Y42MTNk",
-      "hash": "n5N2aXPU5Y42MTNk",
-      "username": null
+      "id": -1001520053536,
+      "name": "Coin Chief",
+      "link": "https://t.me/CoinChief",
+      "hash": null,
+      "username": "CoinChief"
     },
     {
       "id": -1002052872813,
       "name": "CRYPTO LEOPARD'S",
       "link": "https://t.me/+2qFH92pocvhhNWFk",
       "hash": "2qFH92pocvhhNWFk",
+      "username": null
+    },
+    {
+      "id": -1001598691683,
+      "name": "Crypto Devil® [Private]",
+      "link": "https://t.me/CryptoDevil",
+      "hash": null,
+      "username": "CryptoDevil"
+    },
+    {
+      "id": -1002007658025,
+      "name": "THE WOLF (CRYPTO)®",
+      "link": "https://t.me/+lBx7BGAjD4wxY2I5",
+      "hash": "lBx7BGAjD4wxY2I5",
       "username": null
     },
     {
@@ -32,12 +46,18 @@
       "username": null
     },
     {
-      "id": -1001370457350,
-      "name": "Crypto Neon",
-      "link": "https://t.me/CryptoNeon0",
+      "id": -1001391574614,
+      "name": "Bitcoin Bulls",
+      "link": "https://t.me/BitcoinBulls",
       "hash": null,
-      "username": "CryptoNeon0"
+      "username": "BitcoinBulls"
+    },
+    {
+      "id": -1002078531832,
+      "name": "Crypto Mermaids",
+      "link": "https://t.me/CryptoMermaids",
+      "hash": null,
+      "username": "CryptoMermaids"
     }
   ]
 }
-

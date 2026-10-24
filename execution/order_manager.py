@@ -267,10 +267,15 @@ class OrderManager:
                 f = symbol_filter
                 tp_qty = (tp_qty // f.step_size) * f.step_size
                 tp_price = (tp_price // f.tick_size) * f.tick_size
-                if tp_qty < f.min_qty:
+                min_notional = getattr(f, "min_notional", Decimal("5.0"))
+                if min_notional <= Decimal("0"):
+                    min_notional = Decimal("5.0")
+                if tp_qty < f.min_qty or (tp_qty * tp_price < min_notional):
                     if is_last_tp and (filled_qty - accumulated_tp_qty) >= f.min_qty:
                         residual = filled_qty - accumulated_tp_qty
                         tp_qty = (residual // f.step_size) * f.step_size
+                        if tp_qty * tp_price < min_notional:
+                            continue
                     else:
                         continue
 
@@ -328,7 +333,7 @@ class OrderManager:
                 )
                 raise EmergencyCloseError(f"Khong the dat TP{idx+1} ({tp_price}); da huy bao ve va dong vi the: {e}")
 
-        if len(placed_tp_orders) != total_tps:
+        if not placed_tp_orders or accumulated_tp_qty < (filled_qty * Decimal("0.90")):
             try:
                 await self.client.cancel_algo_order(signal.symbol, client_algo_id=sl_order.client_order_id)
                 self.order_repo.update_order_fill(sl_order.client_order_id, "CANCELED", sl_order.filled_quantity, sl_order.avg_fill_price)
@@ -382,7 +387,7 @@ class OrderManager:
             be_price = avg_entry_price * (Decimal("1.0") - fee_mult)
 
         sl_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
-        new_sl_cid = f"be_{signal.signal_id[:20]}"
+        new_sl_cid = f"be_{signal.signal_id[:16]}_{uuid.uuid4().hex[:4]}"
 
         if hasattr(self.client, "get_symbol_filter"):
             try:
@@ -438,7 +443,14 @@ class OrderManager:
 
         # Cancel old SL if provided; propagate failure so caller records a discrepancy.
         if existing_sl_algo_id and existing_sl_algo_id != new_sl_cid:
-            await self.client.cancel_algo_order(signal.symbol, client_algo_id=existing_sl_algo_id)
+            try:
+                if str(existing_sl_algo_id).isdigit():
+                    await self.client.cancel_algo_order(signal.symbol, algo_id=existing_sl_algo_id)
+                else:
+                    await self.client.cancel_algo_order(signal.symbol, client_algo_id=existing_sl_algo_id)
+                self.order_repo.update_order_fill(str(existing_sl_algo_id), "CANCELED", Decimal("0"))
+            except Exception:
+                pass
 
         return new_sl
 
@@ -456,7 +468,7 @@ class OrderManager:
         Submits new trailing Algo SL and cancels old BE/initial SL.
         """
         sl_side = OrderSide.SELL if signal.side == PositionSide.LONG else OrderSide.BUY
-        new_sl_cid = f"{label}_{signal.signal_id[:20]}"
+        new_sl_cid = f"{label}_{signal.signal_id[:16]}_{uuid.uuid4().hex[:4]}"
         trail_price = target_price
 
         if hasattr(self.client, "get_symbol_filter"):
@@ -505,7 +517,14 @@ class OrderManager:
 
         # Cancel old SL if provided; propagate failure so caller records a discrepancy.
         if existing_sl_algo_id and existing_sl_algo_id != new_sl_cid:
-            await self.client.cancel_algo_order(signal.symbol, client_algo_id=existing_sl_algo_id)
+            try:
+                if str(existing_sl_algo_id).isdigit():
+                    await self.client.cancel_algo_order(signal.symbol, algo_id=existing_sl_algo_id)
+                else:
+                    await self.client.cancel_algo_order(signal.symbol, client_algo_id=existing_sl_algo_id)
+                self.order_repo.update_order_fill(str(existing_sl_algo_id), "CANCELED", Decimal("0"))
+            except Exception:
+                pass
 
         return new_sl
 

@@ -1,6 +1,7 @@
 import asyncio
 import json
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -10,6 +11,7 @@ from core.enums import MarginMode, PositionSide, SignalState
 from core.exceptions import AccountStateBlockedError, ReconciliationError
 from core.models import SourceMetadata, ValidatedSignal
 from execution.order_manager import OrderManager
+from execution.trailing_tp_manager import TrailingTakeProfitManager
 from storage.database import DatabaseManager, OrderRepository, SignalRepository
 
 try:
@@ -24,6 +26,8 @@ def build_validated_signal_from_row(row: Dict[str, Any], config: AppConfig) -> V
     tps_raw = json.loads(row.get("take_profits_json") or "[]")
 
     entries = [(Decimal(str(e)), Decimal("1.0")) for e in entries_raw]
+    if not entries:
+        entries = [(Decimal("0"), Decimal("1.0"))]
 
     tp1_pct = float(getattr(config.execution, "tp1_target_weight_pct", Decimal("35.0")))
     tp_weights = calculate_tp_weights(len(tps_raw), tp1_pct)
@@ -42,12 +46,15 @@ def build_validated_signal_from_row(row: Dict[str, Any], config: AppConfig) -> V
     side_val = str(row.get("side", "LONG")).upper()
     side = PositionSide.LONG if "BUY" in side_val or "LONG" in side_val else PositionSide.SHORT
 
+    sl_raw = row.get("stop_loss")
+    stop_loss = Decimal(str(sl_raw)) if sl_raw is not None and str(sl_raw) != "None" else Decimal("0")
+
     return ValidatedSignal(
         signal_id=row["signal_id"],
         symbol=row["symbol"],
         side=side,
         entries=entries,
-        stop_loss=Decimal(str(row["stop_loss"])),
+        stop_loss=stop_loss,
         take_profits=take_profits,
         leverage=int(row.get("leverage") or 5),
         margin_mode=MarginMode.ISOLATED,
@@ -72,6 +79,7 @@ class ReconciliationEngine:
         db: DatabaseManager,
         order_manager: Optional[OrderManager] = None,
         config: Optional[AppConfig] = None,
+        on_slot_freed_callback: Optional[Any] = None,
     ):
         self.client = exchange_client
         self.db = db
@@ -79,6 +87,19 @@ class ReconciliationEngine:
         self.order_repo = OrderRepository(db)
         self.order_manager = order_manager
         self.config = config or getattr(order_manager, "config", None)
+        self.trailing_mgr = TrailingTakeProfitManager()
+        self.on_slot_freed_callback = on_slot_freed_callback
+
+    async def _notify_slot_freed(self) -> None:
+        """Invoked when a position is closed or moves to breakeven, freeing up risk slots."""
+        if hasattr(self, "on_slot_freed_callback") and self.on_slot_freed_callback:
+            try:
+                if asyncio.iscoroutinefunction(self.on_slot_freed_callback):
+                    await self.on_slot_freed_callback()
+                else:
+                    self.on_slot_freed_callback()
+            except Exception as ex_cb:
+                logger.warning(f"[RECONCILIATION] Callback on_slot_freed loi: {ex_cb}")
 
     @staticmethod
     def _exchange_order_matches(local_order: Any, exchange_order: Dict[str, Any]) -> bool:
@@ -384,6 +405,8 @@ class ReconciliationEngine:
                 direction_mismatch = (amt != Decimal("0")) and (is_sig_long != is_pos_long)
 
                 if amt == Decimal("0") or direction_mismatch:
+                    # Reset tracked trailing peak on position closure
+                    self.trailing_mgr.reset_tracked_peak(sig_id)
                     # Position was closed outside or hit SL/TP while bot was offline
                     close_reason = "amt=0" if amt == Decimal("0") else f"đã đổi chiều sang {'LONG' if is_pos_long else 'SHORT'}"
                     report["discrepancies"].append(
@@ -430,6 +453,7 @@ class ReconciliationEngine:
                             }))
                         except Exception:
                             pass
+                    await self._notify_slot_freed()
                 else:
                     # Check if position size has increased (e.g. DCA / Entry 2 filled) or SL is missing/under-sized
                     if self.order_manager and self.config:
@@ -512,136 +536,221 @@ class ReconciliationEngine:
                         except Exception as ex_prot:
                             report["discrepancies"].append(f"Lỗi tái đồng bộ bảo vệ {symbol}: {ex_prot}")
 
-                    # Position is still open: Check Break-even trigger (Kèo Bất Tử)
+                    # Position is still open: Quantum Dynamic Breakeven & Multi-Tier Profit Guardian
                     if self.order_manager and self.config and getattr(self.config.risk, "breakeven_after_tp1_default", True):
                         try:
                             db_orders = self.order_repo.get_orders_for_signal(sig_id)
-                            if db_orders:
-                                has_be = any(o.client_order_id.startswith("be_") for o in db_orders)
-                                if not has_be:
-                                    tps_raw = json.loads(row.get("take_profits_json") or "[]")
-                                    if tps_raw:
-                                        tp1_price = Decimal(str(tps_raw[0]))
-                                        is_long = amt > Decimal("0")
+                            tps_raw = json.loads(row.get("take_profits_json") or "[]")
+                            is_long = amt > Decimal("0")
 
-                                        # Check if TP1 order was FILLED in database or on Binance
-                                        tp1_orders = [
-                                            o for o in db_orders
-                                            if ("tp_" in o.client_order_id and ("_1_" in o.client_order_id or o.client_order_id.endswith("_1")))
-                                        ]
-                                        tp1_filled = any(o.status == "FILLED" for o in tp1_orders)
+                            # 1. Real-time unrealized price gain calculation
+                            if entry_p > Decimal("0") and mark_p > Decimal("0"):
+                                price_gain_pct = ((mark_p - entry_p) / entry_p * Decimal("100")) if is_long else ((entry_p - mark_p) / entry_p * Decimal("100"))
+                            else:
+                                price_gain_pct = Decimal("0")
 
-                                        # Actively query Binance to confirm if TP1 genuinely executed
-                                        if not tp1_filled and tp1_orders:
-                                            for tp_ord in tp1_orders:
-                                                try:
-                                                    st = await self.client.get_order_status(symbol, client_order_id=tp_ord.client_order_id)
-                                                    if st.get("status") == "FILLED":
-                                                        tp1_filled = True
-                                                        self.order_repo.update_order_fill(
-                                                            tp_ord.client_order_id,
-                                                            "FILLED",
-                                                            Decimal(str(st.get("executedQty", "0"))),
-                                                            Decimal(str(st.get("avgPrice", "0"))),
-                                                        )
-                                                        break
-                                                except Exception:
-                                                    pass
+                            # 2. Identify current active Stop Loss order & trigger price
+                            current_algo_sl = next((o for o in reversed(db_orders) if o.is_algo and o.status == "NEW"), None)
+                            current_sl_px = current_algo_sl.trigger_price if current_algo_sl and current_algo_sl.trigger_price else None
+                            if current_sl_px is None and active_sl_orders:
+                                for a in active_sl_orders:
+                                    raw_trig = a.get("triggerPrice") or a.get("stopPrice")
+                                    if raw_trig:
+                                        try:
+                                            current_sl_px = Decimal(str(raw_trig))
+                                            break
+                                        except Exception:
+                                            pass
 
-                                        # Strict validation: For LONG, TP1 MUST be above entry price; for SHORT, TP1 MUST be below entry price
-                                        valid_tp1_direction = (tp1_price > entry_p * Decimal("1.002")) if is_long else (tp1_price < entry_p * Decimal("0.998"))
-                                        if not valid_tp1_direction:
-                                            continue
+                            # Check if current SL is already at or better than Breakeven
+                            is_at_least_be = False
+                            if current_sl_px is not None and entry_p > Decimal("0"):
+                                is_at_least_be = (current_sl_px >= entry_p * Decimal("1.0005")) if is_long else (current_sl_px <= entry_p * Decimal("0.9995"))
+                            if any(o.client_order_id.startswith("be_") for o in db_orders):
+                                is_at_least_be = True
 
-                                        # Price check: Mark price MUST actually touch or exceed TP1 price and TP1 must be valid
-                                        price_reached_tp1 = valid_tp1_direction and ((mark_p >= tp1_price if is_long else mark_p <= tp1_price) if mark_p > Decimal("0") else False)
-
-                                        # Guard: Current mark price MUST be comfortably in profit compared to entry price (at least 0.5% profit cushion)
-                                        price_favorable_for_be = (mark_p >= entry_p * Decimal("1.005")) if is_long else (mark_p <= entry_p * Decimal("0.995"))
-
-                                        # Safe trigger: TP1 order actually FILLED on Binance, OR price genuinely reached TP1 with comfortable profit
-                                        tp1_confirmed = tp1_filled or (price_reached_tp1 and price_favorable_for_be)
-
-                                        if tp1_confirmed and price_favorable_for_be:
-                                            validated_sig = build_validated_signal_from_row(row, self.config)
-                                            old_sl_id = None
-                                            for o in db_orders:
-                                                if o.is_algo and o.status == "NEW" and not o.client_order_id.startswith("be_"):
-                                                    old_sl_id = o.client_order_id
-                                                    break
-                                            be_res = await self.order_manager.move_sl_to_breakeven(
-                                                signal=validated_sig,
-                                                position_qty=abs(amt),
-                                                avg_entry_price=entry_p,
-                                                existing_sl_algo_id=old_sl_id,
-                                            )
-                                            if be_res:
-                                                report["breakeven_activated"] += 1
-                                                report["discrepancies"].append(
-                                                    f"KÈO BẤT TỬ: TP1 ({tp1_price}) của {symbol} đã khớp! Đã tự động dời SL về hòa vốn Entry ({entry_p})!"
+                            # 3. Check TP1 status (order fill or mark price reach)
+                            tp1_filled = False
+                            price_reached_tp1 = False
+                            tp1_price = None
+                            if tps_raw:
+                                tp1_price = Decimal(str(tps_raw[0]))
+                                tp1_orders = [
+                                    o for o in db_orders
+                                    if ("tp_" in o.client_order_id and ("_1_" in o.client_order_id or o.client_order_id.endswith("_1")))
+                                ]
+                                tp1_filled = any(o.status == "FILLED" for o in tp1_orders)
+                                if not tp1_filled and tp1_orders:
+                                    for tp_ord in tp1_orders:
+                                        try:
+                                            st = await self.client.get_order_status(symbol, client_order_id=tp_ord.client_order_id)
+                                            if st.get("status") == "FILLED":
+                                                tp1_filled = True
+                                                self.order_repo.update_order_fill(
+                                                    tp_ord.client_order_id,
+                                                    "FILLED",
+                                                    Decimal(str(st.get("executedQty", "0"))),
+                                                    Decimal(str(st.get("avgPrice", "0"))),
                                                 )
-                                                self.signal_repo.record_timeline_event(
-                                                    sig_id,
-                                                    "BREAKEVEN_SL_ACTIVATED",
-                                                    f"Kèo Bất Tử: TP1 ({tp1_price}) đã khớp. Đã dời SL về Entry ({entry_p}) + phí sàn!",
-                                                )
-
-                                # Check Step-by-Step Trailing Stop Loss on TP2 hit (Locks in TP1 profit on remaining volume)
-                                has_tp1_trail = any(o.client_order_id.startswith("trail_tp1_") for o in db_orders)
-                                if not has_tp1_trail and len(tps_raw) >= 2:
-                                    tp1_price = Decimal(str(tps_raw[0]))
-                                    tp2_price = Decimal(str(tps_raw[1]))
-                                    is_long = amt > Decimal("0")
-                                    tp2_orders = [
-                                        o for o in db_orders
-                                        if ("tp_" in o.client_order_id and ("_2_" in o.client_order_id or o.client_order_id.endswith("_2")))
-                                    ]
-                                    tp2_filled = any(o.status == "FILLED" for o in tp2_orders)
-                                    if not tp2_filled and tp2_orders:
-                                        for tp2_ord in tp2_orders:
-                                            try:
-                                                st = await self.client.get_order_status(symbol, client_order_id=tp2_ord.client_order_id)
-                                                if st.get("status") == "FILLED":
-                                                    tp2_filled = True
-                                                    self.order_repo.update_order_fill(
-                                                        tp2_ord.client_order_id,
-                                                        "FILLED",
-                                                        Decimal(str(st.get("executedQty", "0"))),
-                                                        Decimal(str(st.get("avgPrice", "0"))),
-                                                    )
-                                                    break
-                                            except Exception:
-                                                pass
-
-                                    valid_tp2_direction = (tp2_price > tp1_price) if is_long else (tp2_price < tp1_price)
-                                    price_reached_tp2 = valid_tp2_direction and ((mark_p >= tp2_price if is_long else mark_p <= tp2_price) if mark_p > Decimal("0") else False)
-                                    tp2_confirmed = tp2_filled or price_reached_tp2
-
-                                    if tp2_confirmed:
-                                        old_be_or_sl_id = None
-                                        for o in db_orders:
-                                            if o.is_algo and o.status == "NEW":
-                                                old_be_or_sl_id = o.client_order_id
                                                 break
-                                        validated_sig = build_validated_signal_from_row(row, self.config)
-                                        trail_res = await self.order_manager.move_sl_to_trailing_price(
-                                            signal=validated_sig,
-                                            position_qty=abs(amt),
-                                            target_price=tp1_price,
-                                            existing_sl_algo_id=old_be_or_sl_id,
-                                            label="trail_tp1",
+                                        except Exception:
+                                            pass
+
+                                valid_tp1_direction = (tp1_price > entry_p * Decimal("1.002")) if is_long else (tp1_price < entry_p * Decimal("0.998"))
+                                price_reached_tp1 = valid_tp1_direction and ((mark_p >= tp1_price if is_long else mark_p <= tp1_price) if mark_p > Decimal("0") else False)
+
+                            # 4. Breakeven Trigger Condition (TP1 filled OR price reached TP1 OR price gain >= 1.5%)
+                            price_favorable_for_be = (mark_p >= entry_p * Decimal("1.004")) if is_long else (mark_p <= entry_p * Decimal("0.996"))
+                            dynamic_be_gain = price_gain_pct >= Decimal("1.5") and price_favorable_for_be
+                            should_activate_be = (tp1_filled or (price_reached_tp1 and price_favorable_for_be) or dynamic_be_gain)
+
+                            if not is_at_least_be and should_activate_be:
+                                validated_sig = build_validated_signal_from_row(row, self.config)
+                                old_sl_id = current_algo_sl.client_order_id if current_algo_sl else None
+                                if not old_sl_id and active_sl_orders:
+                                    old_sl_id = str(active_sl_orders[0].get("algoId") or active_sl_orders[0].get("clientAlgoId"))
+
+                                be_res = await self.order_manager.move_sl_to_breakeven(
+                                    signal=validated_sig,
+                                    position_qty=abs(amt),
+                                    avg_entry_price=entry_p,
+                                    existing_sl_algo_id=old_sl_id,
+                                )
+                                if be_res:
+                                    is_at_least_be = True
+                                    report["breakeven_activated"] += 1
+                                    trigger_reason = f"TP1 ({tp1_price}) đã khớp" if tp1_filled else (f"Chạm giá TP1 ({tp1_price})" if price_reached_tp1 else f"Lợi nhuận đạt +{price_gain_pct:.2f}%")
+                                    report["discrepancies"].append(
+                                        f"KÈO BẤT TỬ CHỦ ĐỘNG: {trigger_reason} cho {symbol}! Đã tự động dời SL về hòa vốn Entry ({entry_p}) + phí sàn!"
+                                    )
+                                    self.signal_repo.record_timeline_event(
+                                        sig_id,
+                                        "BREAKEVEN_SL_ACTIVATED",
+                                        f"Kèo Bất Tử Chủ Động: {trigger_reason}. Đã dời SL về Entry ({entry_p}) + phí sàn. Rủi ro = 0!",
+                                    )
+                                    try:
+                                        from services.alert_service import AlertLevel, AlertService
+                                        AlertService.get_instance().add_alert(
+                                            AlertLevel.INFO,
+                                            f"🛡️ KÈO BẤT TỬ: {symbol}",
+                                            f"{trigger_reason}. Đã tự động dời SL về Entry ({entry_p}) + phí sàn. Lợi nhuận đã được khóa an toàn 100%!",
+                                            "RECONCILIATION",
                                         )
-                                        if trail_res:
-                                            report["discrepancies"].append(
-                                                f"KHÓA LÃI TỪNG NẤC: TP2 ({tp2_price}) của {symbol} đã khớp! Đã tự động dời SL lên mức giá TP1 ({tp1_price}) để khóa trọn lợi nhuận!"
-                                            )
-                                            self.signal_repo.record_timeline_event(
-                                                sig_id,
-                                                "TRAILING_PROFIT_ACTIVATED",
-                                                f"Khóa Lãi Từng Nấc: TP2 ({tp2_price}) đã khớp. Đã dời SL lên TP1 ({tp1_price}) khóa lãi an toàn cho phần còn lại!",
-                                            )
+                                    except Exception:
+                                        pass
+                                    await self._notify_slot_freed()
+
+                            # 5. Multi-Tier Dynamic Profit-Locking & Trailing Engine
+                            # Evaluates whether market has surged to higher profit tiers (+3%, +6%, +10%) or hit TP2/moonbag
+                            target_trail_px = None
+                            trail_label = None
+                            trail_desc = None
+
+                            # Tier A: Unrealized Gain Multi-Tier Thresholds
+                            if price_gain_pct >= Decimal("10.0"):
+                                # ROE +100% to +350%: Lock in at least +6.0% profit above entry
+                                target_gain = Decimal("6.0")
+                                target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
+                                trail_label = "trail_p10"
+                                trail_desc = f"Lợi nhuận vượt bậc +{price_gain_pct:.2f}%: Đã khóa chặt +6.0% lợi nhuận"
+                            elif price_gain_pct >= Decimal("6.0"):
+                                # ROE +60% to +200%: Lock in at least +3.2% profit above entry
+                                target_gain = Decimal("3.2")
+                                target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
+                                trail_label = "trail_p6"
+                                trail_desc = f"Lợi nhuận tăng trưởng +{price_gain_pct:.2f}%: Đã khóa chặt +3.2% lợi nhuận"
+                            elif price_gain_pct >= Decimal("3.0"):
+                                # ROE +30% to +100%: Lock in at least +1.2% profit above entry
+                                target_gain = Decimal("1.2")
+                                target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
+                                trail_label = "trail_p3"
+                                trail_desc = f"Lợi nhuận tích cực +{price_gain_pct:.2f}%: Đã khóa an toàn +1.2% lợi nhuận"
+
+                            # Tier B: TP2 Hit Trailing Lock (Locks TP1 price on remaining volume)
+                            if len(tps_raw) >= 2:
+                                tp1_price = Decimal(str(tps_raw[0]))
+                                tp2_price = Decimal(str(tps_raw[1]))
+                                tp2_orders = [
+                                    o for o in db_orders
+                                    if ("tp_" in o.client_order_id and ("_2_" in o.client_order_id or o.client_order_id.endswith("_2")))
+                                ]
+                                tp2_filled = any(o.status == "FILLED" for o in tp2_orders)
+                                if not tp2_filled and tp2_orders:
+                                    for tp2_ord in tp2_orders:
+                                        try:
+                                            st = await self.client.get_order_status(symbol, client_order_id=tp2_ord.client_order_id)
+                                            if st.get("status") == "FILLED":
+                                                tp2_filled = True
+                                                self.order_repo.update_order_fill(
+                                                    tp2_ord.client_order_id,
+                                                    "FILLED",
+                                                    Decimal(str(st.get("executedQty", "0"))),
+                                                    Decimal(str(st.get("avgPrice", "0"))),
+                                                )
+                                                break
+                                        except Exception:
+                                            pass
+
+                                valid_tp2_direction = (tp2_price > tp1_price) if is_long else (tp2_price < tp1_price)
+                                price_reached_tp2 = valid_tp2_direction and ((mark_p >= tp2_price if is_long else mark_p <= tp2_price) if mark_p > Decimal("0") else False)
+                                if tp2_filled or price_reached_tp2:
+                                    if target_trail_px is None or ((tp1_price > target_trail_px) if is_long else (tp1_price < target_trail_px)):
+                                        target_trail_px = tp1_price
+                                        trail_label = "trail_tp1"
+                                        trail_desc = f"TP2 ({tp2_price}) đã khớp: Đã dời SL lên mức giá TP1 ({tp1_price})"
+
+                            # Tier C: Moonbag Trailing Take-Profit (Gồng lãi cho phần volume còn lại)
+                            has_moon_or_tp1 = any(o.client_order_id.startswith("trail_") for o in db_orders)
+                            if (has_moon_or_tp1 or price_gain_pct >= Decimal("6.0")) and mark_p > Decimal("0") and len(tps_raw) >= 2:
+                                tp2_price = Decimal(str(tps_raw[1]))
+                                ref_sl = current_sl_px or (entry_p if is_at_least_be else Decimal("0"))
+                                should_trail, new_sl_price, trail_reason = self.trailing_mgr.calculate_trailing_stop(
+                                    side=PositionSide.LONG if is_long else PositionSide.SHORT,
+                                    reference_price=tp2_price,
+                                    current_mark_price=mark_p,
+                                    current_sl=ref_sl,
+                                    key=sig_id,
+                                )
+                                if should_trail and new_sl_price:
+                                    if target_trail_px is None or ((new_sl_price > target_trail_px) if is_long else (new_sl_price < target_trail_px)):
+                                        target_trail_px = new_sl_price
+                                        trail_label = "trail_moon"
+                                        trail_desc = f"Trailing Moonbag: {trail_reason}"
+
+                            # 6. Apply Trailing Stop Loss if strictly better than current SL (Monotonic Ratchet)
+                            if target_trail_px is not None and mark_p > Decimal("0"):
+                                strictly_better = False
+                                if current_sl_px is not None:
+                                    strictly_better = (target_trail_px > current_sl_px * Decimal("1.0005")) if is_long else (target_trail_px < current_sl_px * Decimal("0.9995"))
+                                else:
+                                    strictly_better = (target_trail_px > entry_p) if is_long else (target_trail_px < entry_p)
+
+                                safe_from_mark = (target_trail_px <= mark_p * Decimal("0.995")) if is_long else (target_trail_px >= mark_p * Decimal("1.005"))
+
+                                if strictly_better and safe_from_mark:
+                                    old_sl_id = current_algo_sl.client_order_id if current_algo_sl else None
+                                    if not old_sl_id and active_sl_orders:
+                                        old_sl_id = str(active_sl_orders[0].get("algoId") or active_sl_orders[0].get("clientAlgoId"))
+
+                                    validated_sig = build_validated_signal_from_row(row, self.config)
+                                    trail_res = await self.order_manager.move_sl_to_trailing_price(
+                                        signal=validated_sig,
+                                        position_qty=abs(amt),
+                                        target_price=target_trail_px,
+                                        existing_sl_algo_id=old_sl_id,
+                                        label=trail_label or "trail",
+                                    )
+                                    if trail_res:
+                                        report["discrepancies"].append(
+                                            f"KHÓA LÃI TỰ ĐỘNG: {symbol} -> {trail_desc} (SL mới: {target_trail_px})!"
+                                        )
+                                        self.signal_repo.record_timeline_event(
+                                            sig_id,
+                                            "DYNAMIC_PROFIT_LOCK_ACTIVATED",
+                                            f"Khóa Lãi Tự Động: {trail_desc} (SL mới: {target_trail_px})",
+                                        )
                         except Exception as ex_be:
-                            report["discrepancies"].append(f"Lỗi kiểm tra Breakeven cho {symbol}: {ex_be}")
+                            report["discrepancies"].append(f"Lỗi kiểm tra Breakeven / Khóa lãi cho {symbol}: {ex_be}")
 
         # 3. Fallback: Check for any active Binance positions that were NOT covered in active_rows (e.g. marked CLOSED earlier)
         checked_symbols = {dict(r)["symbol"] for r in active_rows}
@@ -654,11 +763,65 @@ class ReconciliationEngine:
                     and (a.get("orderType") == "STOP_MARKET" or a.get("type") == "STOP_MARKET")
                     and a.get("reduceOnly") in (True, "true", "True")
                 ]
-                if not active_sl_orders:
+                sym_open_orders = [o for o in (all_open_orders or []) if o.get("symbol") == pos_sym]
+                has_bot_signature = any(
+                    str(o.get("clientOrderId", "")).startswith(("sig_", "tp_", "sl_", "be_", "trail_", "ent_"))
+                    for o in sym_open_orders
+                ) or any(
+                    str(a.get("clientAlgoId", "")).startswith(("sig_", "tp_", "sl_", "be_", "trail_", "ent_"))
+                    for a in active_sl_orders
+                )
+
+                if has_bot_signature:
+                    try:
+                        entry_p = Decimal(str(pos.get("entryPrice", "0")))
+                        is_pos_long = amt > Decimal("0")
+                        side_str = "LONG" if is_pos_long else "SHORT"
+                        recovered_sig_id = f"sig_recovered_{pos_sym}_{int(time.time())}"
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        with self.signal_repo.db.get_connection() as conn:
+                            rcv_chat_id = -999001
+                            rcv_msg_id = int(time.time() * 1000) % 2000000000
+                            conn.execute(
+                                """
+                                INSERT OR IGNORE INTO messages (
+                                    chat_id, message_id, sender_id, telegram_timestamp, received_at,
+                                    raw_text, normalized_text
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (rcv_chat_id, rcv_msg_id, rcv_chat_id, now_iso, now_iso, f"Recovered Position: {pos_sym}", f"Recovered Position: {pos_sym}")
+                            )
+                            sl_val = None
+                            if active_sl_orders:
+                                sl_val = active_sl_orders[0].get("triggerPrice") or active_sl_orders[0].get("stopPrice")
+                            if not sl_val:
+                                sl_val = str(entry_p * Decimal("0.98") if is_pos_long else entry_p * Decimal("1.02"))
+
+                            tp_vals = [str(o.get("price")) for o in sym_open_orders if o.get("price") and float(o.get("price", 0)) > 0]
+                            conn.execute(
+                                """
+                                INSERT OR REPLACE INTO signals (
+                                    signal_id, chat_id, message_id, symbol, side, state,
+                                    entry_mode, entries_json, stop_loss, take_profits_json,
+                                    leverage, margin_mode, risk_pct, created_at, updated_at
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    recovered_sig_id, rcv_chat_id, rcv_msg_id, pos_sym, side_str,
+                                    "OPEN_PROTECTED", "SINGLE", json.dumps([str(entry_p)]),
+                                    float(sl_val), json.dumps(tp_vals), int(pos.get("leverage") or 10),
+                                    "CROSSED", 2.0, now_iso, now_iso
+                                )
+                            )
+                        report["discrepancies"].append(
+                            f"ĐÃ TỰ ĐỘNG NHẬN NUÔI & BẢO VỆ: Phát hiện vị thế bot {pos_sym} ({amt}) trên Binance. Đã đồng bộ vào hệ thống giám sát để tự động dời SL & khóa lãi!"
+                        )
+                    except Exception as ex_adopt:
+                        report["discrepancies"].append(f"Không thể nhận nuôi vị thế {pos_sym}: {ex_adopt}")
+                elif not active_sl_orders:
                     report["discrepancies"].append(
                         f"CẢNH BÁO: Phát hiện vị thế {pos_sym} ({amt}) đang mở trên sàn nhưng chưa có SL! Đang tự động bảo vệ..."
                     )
-                    # No local signal/order ownership means no automatic adoption.
                     report["discrepancies"].append(
                         f"Vị thế {pos_sym} không có signal active đã xác minh; không tự nhận nuôi vị thế."
                     )

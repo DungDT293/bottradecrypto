@@ -11,13 +11,41 @@ from config.policy_defaults import ExecutionPolicyConfig, RiskPolicy, SourcePoli
 from core.enums import ExecutionMode
 
 DEFAULT_ELITE_CHANNELS = [
-    -1001754095061,  # Crypto Radar (Tier S - Pure Binance Futures, 81.8% Winrate)
-    -1001756316676,  # Boom_Boom_Billionaires (Tier S - Pure Binance Futures, 75.0% Winrate)
-    -1001370457350,  # Crypto Neon (Tier A - Fixed 10x Leverage, Binance coins only, 71.4% Winrate)
-    -1002052872813,  # CRYPTO LEOPARD'S (Tier A - Binance Futures coins only, 79.5% Winrate)
+    -1001520053536,  # Coin Chief (Tier 1 - Winrate 73.53%, R:R 1:2.0, Breakout chuẩn)
+    -1002052872813,  # CRYPTO LEOPARD'S (Tier 1 - Winrate 79.5% - 81.8%, Short kiệt sức)
+    -1001598691683,  # Crypto Devil® [Private] (Tier 1 - Winrate 71.4% - 88.9%, Mean Reversion)
+    -1001700314832,  # WHALES CIRCLE (Tier 1 - Winrate 72.2%, R:R 1:2.5 - 1:3.2, Nến 4H/1D)
+    -1001391574614,  # Bitcoin Bulls (Tier 2 - Winrate 68.42%, Cổ điển)
+    -1002078531832,  # Crypto Mermaids (Tier 2 - Winrate 62.50%, Chuyên BTC)
+    -1002007658025,  # THE WOLF (CRYPTO)® (Tier 2 - Winrate 65.00%, Dual-Entry)
+    -1001552004524,  # CRYPTO MONK (Tier 2 - Winrate 62.50%, Bẫy thanh khoản)
 ]
 DEFAULT_8_CHANNELS = DEFAULT_ELITE_CHANNELS
 DEFAULT_22_CHANNELS = DEFAULT_ELITE_CHANNELS
+
+PERMANENT_BLACKLISTED_CHANNELS: Dict[int, str] = {
+    -1002191067035: "Crypto Hunters - Quét SL 77.5%, giấu số liệu lỗ, xóa tin nhắn thua",
+    -1002266035358: "THE MASTER (CRYPTO) - Winrate 29%, R:R 0.43, lệnh gỡ SL/DCA, Fake Gap 69.4%",
+    -1001903052876: "AISH CRYPTO - Lừa đảo ví cá nhân BEP20, khoe lãi ma, SL 15%",
+    -1001390568202: "PRO TRADING - Stoploss theo admin (vi phạm Zero-Liquidation)",
+    -1001756316676: "Boom_Boom_Billionaires - Suy thoái thành spam link đa cấp, teaser Targets 👇 rỗng",
+    -1001370457350: "Crypto Neon - Kênh đã chết/dừng phát kèo, spam copy trade MEXC",
+    -1001430928952: "Crypto Trading Signal - Kênh bỏ hoang",
+    -1001899782732: "S1IMPLE CAPITAL - Kèo chat tự do không có cấu trúc",
+    -1001966506182: "Crypto Pulse Matrix® - 90% teaser khoe lãi ảo 1636%",
+    -1001982472141: "ÇRYPTO (BÈAST)™ - Tín hiệu không có Stop Loss",
+    -1001120565155: "CFTopTrading - Nhật ký tự sự, không có thông số",
+    -1002159998063: "Gold First - Kênh chết",
+    -1001590450482: "THE CRYPTO TRADER - Format lỗi, không có Stop Loss",
+    -1002134496030: "Crypto Time Hotel - Nhận định chung chung",
+    -1001526156115: "RSR CRYPTO SIGNAL ™️ - 100% khoe VIP và teaser",
+    -1001594522150: "Whales_Pumps - 100% teaser rác",
+    -1002477619139: "Dahlia X Trader - 100% teaser rác",
+    -1001591741285: "ASR CRYPTO SIGNAL - 100% teaser rác",
+    -1002007699575: "Absolute Futures - Kèo demo không có SL",
+    -1001652601224: "Crypto World Updates - Đòn bẩy 75x kết hợp SL 6% gây cháy tài khoản",
+    -1001754095061: "Crypto Radar - R:R nghịch lý 1:0.09 (TP1 +0.58% vs SL -6.28%)",
+}
 
 
 class TelegramConfig(BaseModel):
@@ -26,6 +54,7 @@ class TelegramConfig(BaseModel):
     phone: Optional[str] = None
     session_name: str = "./data/telegram_user"
     allowed_chat_ids: List[int] = Field(default_factory=lambda: list(DEFAULT_22_CHANNELS))
+    blacklisted_chat_ids: List[int] = Field(default_factory=lambda: list(PERMANENT_BLACKLISTED_CHANNELS.keys()))
     admin_sender_ids: List[int] = Field(default_factory=list)
     reconnect_max_backlog_seconds: int = 300
     sanitize_input: bool = True
@@ -70,6 +99,7 @@ class GeminiAIConfig(BaseModel):
 class AppConfig(BaseModel):
     mode: ExecutionMode = ExecutionMode.READ_ONLY
     live_trading_enabled: bool = False
+    ferrari_mode_enabled: bool = False
     data_dir: str = "./data"
     database_file: str = "./data/trading_state.db"
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
@@ -151,6 +181,23 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
     tg_data = data.setdefault("telegram", {})
     if not tg_data.get("allowed_chat_ids"):
         tg_data["allowed_chat_ids"] = list(DEFAULT_22_CHANNELS)
+
+    # Initialize and merge blacklisted_chat_ids
+    existing_bl = set(tg_data.get("blacklisted_chat_ids") or [])
+    existing_bl.update(PERMANENT_BLACKLISTED_CHANNELS.keys())
+    tg_data["blacklisted_chat_ids"] = list(existing_bl)
+
+    # STRICT INVARIANT: Strip all blacklisted channels from allowed_chat_ids and sources
+    current_allowed = tg_data.get("allowed_chat_ids") or []
+    tg_data["allowed_chat_ids"] = [cid for cid in current_allowed if cid not in existing_bl]
+    
+    sources_data = data.get("sources") or {}
+    for bl_cid in existing_bl:
+        bl_str = str(bl_cid)
+        if bl_str in sources_data:
+            sources_data.pop(bl_str, None)
+        if bl_cid in sources_data:
+            sources_data.pop(bl_cid, None)
 
     # Inject env secrets
     if os.getenv("TELEGRAM_API_ID"):

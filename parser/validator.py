@@ -30,6 +30,24 @@ class SignalValidator:
     def __init__(self, config: AppConfig):
         self.config = config
 
+    @staticmethod
+    def validate_funding_and_liquidity(
+        funding_rate: float,
+        quote_volume_24h: float,
+        max_funding_abs: float = 0.0015,
+        min_24h_volume: float = 15_000_000.0,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Trụ Cột 5: Funding Rate & Liquidity Filter.
+        Từ chối lệnh nếu phí tài trợ ăn mòn vốn (|Funding| > 0.15%)
+        hoặc thanh khoản 24h không đủ 15 triệu USDT tránh trượt giá.
+        """
+        if abs(funding_rate) > max_funding_abs:
+            return False, f"Funding rate ({funding_rate * 100:.3f}%) vượt quá ngưỡng an toàn (+/-{max_funding_abs * 100:.2f}%)"
+        if quote_volume_24h > 0 and quote_volume_24h < min_24h_volume:
+            return False, f"Thanh khoản 24h ({quote_volume_24h:,.0f} USDT) thấp hơn ngưỡng tối thiểu ({min_24h_volume:,.0f} USDT)"
+        return True, None
+
     def validate_and_resolve(
         self,
         signal: ParsedSignal,
@@ -108,6 +126,23 @@ class SignalValidator:
             signal.validation_status = SignalState.REJECTED
             signal.blocking_reason = f"Khoang cach SL qua xa ({sl_dist_pct:.2f}% > {self.config.execution.max_sl_distance_pct}%)"
             return signal, None
+
+        # Check Risk:Reward Ratio (TP1 and Final Target)
+        if signal.take_profits and raw_sl and avg_entry > Decimal("0"):
+            tp1 = signal.take_profits[0]
+            tp_final = max(signal.take_profits) if signal.side == PositionSide.LONG else min(signal.take_profits)
+            sl_dist = abs(avg_entry - raw_sl)
+            tp1_dist = abs(tp1 - avg_entry)
+            final_dist = abs(tp_final - avg_entry)
+            if sl_dist > Decimal("0"):
+                rr1 = tp1_dist / sl_dist
+                rr_final = final_dist / sl_dist
+                min_rr1 = getattr(self.config.execution, "min_rr_tp1", Decimal("0.20"))
+                min_rr_final = getattr(self.config.execution, "min_rr_final", Decimal("0.35"))
+                if rr1 < min_rr1 or rr_final < min_rr_final:
+                    signal.validation_status = SignalState.REJECTED
+                    signal.blocking_reason = f"Ty le R:R qua thap (R:R1={rr1:.2f} < {min_rr1} hoac R:R_final={rr_final:.2f} < {min_rr_final})"
+                    return signal, None
 
         sl_buffer_pct = getattr(self.config.risk, "sl_buffer_pct", Decimal("1.0"))
         buffered_sl = raw_sl
@@ -222,15 +257,23 @@ class SignalValidator:
                 signal.field_sources["tp_weights"] = FieldSource.GLOBAL_POLICY
 
         # 7. Clamp Leverage
-        max_allowed_lev = self.config.risk.max_leverage
+        is_ferrari = getattr(self.config, "ferrari_mode_enabled", False)
+        max_allowed_lev = 40 if is_ferrari else self.config.risk.max_leverage
         if source_override and source_override.max_leverage_override:
             max_allowed_lev = min(max_allowed_lev, source_override.max_leverage_override)
 
-        # Select leverage: pick optimal target (e.g. 20x) within range, or respect requested
-        if signal.leverage_range:
+        # Select leverage: in Ferrari mode prioritize 35x-40x; otherwise pick optimal target
+        if is_ferrari:
+            if signal.leverage_requested and signal.leverage_requested >= 30:
+                chosen_lev = min(signal.leverage_requested, 40)
+            elif signal.leverage_range:
+                lower, upper = min(signal.leverage_range), max(signal.leverage_range)
+                chosen_lev = max(lower, min(upper, 35))
+            else:
+                chosen_lev = 35
+        elif signal.leverage_range:
             lower, upper = min(signal.leverage_range), max(signal.leverage_range)
             target_lev = getattr(source_override, "default_leverage_override", None) or self.config.risk.default_leverage
-            # Select target leverage within [lower, upper] range
             chosen_lev = max(lower, min(upper, target_lev))
         elif signal.leverage_requested:
             chosen_lev = signal.leverage_requested
@@ -240,7 +283,7 @@ class SignalValidator:
             else:
                 chosen_lev = self.config.risk.default_leverage
 
-        # Clamp to max policy (e.g. 50X/100X clamped to 25X)
+        # Clamp to max policy (e.g. 50X/100X clamped to 25X or 40X in Ferrari)
         final_leverage = min(chosen_lev, max_allowed_lev)
         if signal.leverage_requested and final_leverage != signal.leverage_requested:
             signal.warnings.append(f"Don bay yeu cau ({signal.leverage_requested}x) duoc ap tran an toan thanh {final_leverage}x")
@@ -259,6 +302,21 @@ class SignalValidator:
                     signal.warnings.append(
                         f"Don bay {orig_lev}x qua cao so voi khoang cach SL ({sl_dist_pct*100:.1f}%). Tu dong ha xuong {final_leverage}x de dam bao khong bi thanh ly truoc khi cham SL."
                     )
+
+        # Macro Bearish Panic Clamp for Altcoin Longs: Clamp leverage to 15x-18x
+        try:
+            from risk.market_regime_shield import global_market_regime_shield
+            regime_lev_cap = global_market_regime_shield.get_safe_leverage_ceiling(
+                signal.symbol_candidate, signal.side
+            )
+            if regime_lev_cap and final_leverage > regime_lev_cap:
+                orig_lev = final_leverage
+                final_leverage = regime_lev_cap
+                signal.warnings.append(
+                    f"Thị trường BTC BEARISH_PANIC: Tự động ghìm trần đòn bẩy Altcoin LONG từ {orig_lev}x xuống {final_leverage}x an toàn."
+                )
+        except Exception:
+            pass
 
         # 8. Margin mode determination (use signal margin mode if specified, otherwise fall back to config)
         final_margin_mode = signal.margin_mode_requested or getattr(self.config.risk, "margin_mode", MarginMode.CROSSED)

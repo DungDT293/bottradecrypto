@@ -2,17 +2,26 @@ import sqlite3
 import json
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import pytz
 
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
 KNOWN_CHANNELS: Dict[int, str] = {
-    -1002007658025: "THE WOLF (CRYPTO)®",
-    -1001756316676: "Boom_Boom_Billionaires",
+    -1002191067035: "Crypto Hunters",
+    -1001700314832: "WHALES CIRCLE",
+    -1001391574614: "Bitcoin Bulls",
+    -1001895315984: "Crypto spider 🕷️ scalper",
+    -1001860630181: "Alpha Trade Zone",
     -1002052872813: "CRYPTO LEOPARD'S",
+    -1002007658025: "THE WOLF (CRYPTO)®",
+    -1002078531832: "Crypto Mermaids",
+    -1001520053536: "Coin Chief",
     -1001552004524: "CRYPTO MONK",
-    -1001370457350: "Crypto Neon",
+    -1001598691683: "Crypto Devil® [Private]",
+    -1001652601224: "Crypto World Updates",
+    -1001754095061: "Crypto Radar",
+    -999001: "Quantum AI Engine 2.0",
 }
 
 
@@ -25,6 +34,58 @@ class ChannelAnalyticsService:
 
     def __init__(self, db_path: str = "./data/trading_state.db"):
         self.db_path = db_path
+
+    def check_circuit_breaker(self, chat_id: int) -> Tuple[bool, Optional[str]]:
+        """
+        Trụ Cột 2: Circuit Breaker & Auto-Mute Guard.
+        Kiểm tra nếu kênh dính 3 lệnh Stop-Loss liên tiếp trong vòng 48 giờ:
+        Tự động kích hoạt Circuit Breaker, chuyển kênh sang MUTED_TEMPORARY trong 7 ngày
+        để bảo toàn vốn (chỉ chạy shadow/paper test).
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+            query = """
+                SELECT st.event_type, st.timestamp, s.signal_id
+                FROM signal_timeline st
+                JOIN signals s ON st.signal_id = s.signal_id
+                WHERE s.chat_id = ?
+                  AND st.event_type IN ('EXCHANGE_SL_FILLED', 'EXCHANGE_TP_FILLED', 'RESULT_SL_REPORTED', 'RESULT_TP_REPORTED', 'EXCHANGE_POSITION_CLOSED_LOSS', 'EXCHANGE_POSITION_CLOSED_WIN')
+                  AND st.timestamp >= ?
+                ORDER BY st.timestamp DESC
+                LIMIT 10
+            """
+            c.execute(query, (chat_id, cutoff))
+            rows = c.fetchall()
+            conn.close()
+
+            consecutive_sl = 0
+            latest_sl_time = None
+            for r in rows:
+                ev = r["event_type"]
+                if ev in ("EXCHANGE_SL_FILLED", "RESULT_SL_REPORTED", "EXCHANGE_POSITION_CLOSED_LOSS"):
+                    consecutive_sl += 1
+                    if latest_sl_time is None:
+                        latest_sl_time = r["timestamp"]
+                elif ev in ("EXCHANGE_TP_FILLED", "RESULT_TP_REPORTED", "EXCHANGE_POSITION_CLOSED_WIN"):
+                    break
+
+            if consecutive_sl >= 3 and latest_sl_time:
+                try:
+                    sl_dt = datetime.fromisoformat(latest_sl_time.replace("Z", "+00:00"))
+                    mute_expiry = sl_dt + timedelta(days=7)
+                    if datetime.now(timezone.utc) < mute_expiry:
+                        remaining_hours = int((mute_expiry - datetime.now(timezone.utc)).total_seconds() // 3600)
+                        return True, f"Kênh đã dính {consecutive_sl} Stop Loss liên tiếp trong 48h. Tự động đóng băng (MUTED_TEMPORARY) còn {remaining_hours}h để bảo vệ vốn."
+                except Exception:
+                    return True, f"Kênh đã dính {consecutive_sl} Stop Loss liên tiếp. Kích hoạt Circuit Breaker 7 ngày."
+        except Exception:
+            pass
+
+        return False, None
 
     def get_channel_leaderboard(
         self,
@@ -278,21 +339,34 @@ class ChannelAnalyticsService:
 
             # Dynamic Commercial Tier Allocation
             is_blacklisted = False
+            blacklist_reason = "Kênh trong danh sách Blacklist hoặc đã bị tắt nhận lệnh hoàn toàn"
             try:
-                from config.config import load_config
-                cfg = load_config("config.yaml")
-                source_cfg = cfg.sources.get(cid)
-                if source_cfg and getattr(source_cfg, "margin_multiplier", 1.0) <= 0:
+                from config.config import load_config, PERMANENT_BLACKLISTED_CHANNELS
+                if cid in PERMANENT_BLACKLISTED_CHANNELS:
                     is_blacklisted = True
+                    blacklist_reason = PERMANENT_BLACKLISTED_CHANNELS[cid]
+                else:
+                    cfg = load_config("config.yaml")
+                    if cid in getattr(cfg.telegram, "blacklisted_chat_ids", []):
+                        is_blacklisted = True
+                    source_cfg = cfg.sources.get(cid)
+                    if source_cfg and getattr(source_cfg, "margin_multiplier", 1.0) <= 0:
+                        is_blacklisted = True
             except Exception:
                 pass
 
+            is_cb_tripped, cb_reason = self.check_circuit_breaker(cid)
             if is_blacklisted:
                 tier = "BLOCKED"
-                verdict = "[ĐÃ TẮT / CHẶN] Kênh Blacklist"
+                verdict = "[ĐÃ CHẶN] Kênh Fake / Blacklist"
                 verdict_color = "error"
-                badge_desc = "Kênh trong danh sách Blacklist hoặc đã bị tắt nhận lệnh hoàn toàn"
+                badge_desc = blacklist_reason
                 score = 0.0
+            elif is_cb_tripped:
+                tier = "MUTED_TEMPORARY"
+                verdict = f"[CIRCUIT BREAKER] {cb_reason}"
+                verdict_color = "warning"
+                badge_desc = "Tạm dừng trade real 7 ngày (3 SL liên tiếp)"
             elif emp_info and "tier" in emp_info:
                 tier = emp_info["tier"]
                 verdict = emp_info.get("verdict", verdict)
@@ -372,7 +446,7 @@ class ChannelAnalyticsService:
         except Exception:
             pass
         if not allowed_chat_ids:
-            allowed_chat_ids = {-1002052872813, -1001756316676, -1001370457350, -1002007658025, -1001552004524}
+            allowed_chat_ids = {-1002191067035, -1001700314832, -1001391574614, -1001895315984, -1001860630181, -1002052872813}
 
         # Demote or eliminate scam/blacklisted channels
         tier_weight = {"S": 0, "A": 1, "B": 2, "C": 3, "D": 4, "BLOCKED": 5}

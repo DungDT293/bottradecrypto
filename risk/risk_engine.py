@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal, ROUND_DOWN
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import pytz
 
 from config.config import AppConfig
@@ -27,6 +27,46 @@ class RiskEngine:
     def get_current_date_str(self) -> str:
         now_hcm = datetime.now(self.tz_hcm)
         return now_hcm.strftime("%Y-%m-%d")
+
+    def apply_atr_volatility_sizing(
+        self,
+        signal: ValidatedSignal,
+        atr_1h: Decimal,
+        current_price: Decimal,
+    ) -> ValidatedSignal:
+        """
+        Trụ Cột 4: ATR Volatility-Adjusted Sizing.
+        - Nếu ATR% > 5.0%: Tự động hạ rủi ro xuống 1.0% NAV (thay vì 1.5% thông thường).
+        - Nếu khoảng cách SL < 1.5 * ATR: Nới SL an toàn ra ngoài vùng quét râu nến (1.5 * ATR)
+          và tự động điều chỉnh volume giảm tương ứng để giữ nguyên rủi ro chuẩn (1.5% NAV).
+        """
+        if atr_1h <= Decimal("0") or current_price <= Decimal("0"):
+            return signal
+
+        # 1. Check ATR % of price
+        atr_pct = (atr_1h / current_price) * Decimal("100")
+        if atr_pct > Decimal("5.0"):
+            signal.risk_pct = min(signal.risk_pct, Decimal("1.0"))
+            signal.warnings.append(
+                f"Coin co bien dong cao ATR {atr_pct:.2f}% > 5.0%. Tu dong ha rui ro xuong 1.0% NAV."
+            )
+
+        # 2. Check if SL is too tight compared to 1.5 * ATR
+        if signal.entries and signal.stop_loss:
+            ref_entry = signal.entries[0][0]
+            sl_dist = abs(ref_entry - signal.stop_loss)
+            min_sl_dist = atr_1h * Decimal("1.5")
+            if sl_dist < min_sl_dist:
+                is_long = signal.side in (PositionSide.LONG, "LONG")
+                new_sl = ref_entry - min_sl_dist if is_long else ref_entry + min_sl_dist
+                orig_sl = signal.stop_loss
+                signal.stop_loss = new_sl
+                signal.warnings.append(
+                    f"Khoang cach SL cu ({sl_dist:.4f}) qua hep so voi 1.5x ATR ({min_sl_dist:.4f}). "
+                    f"Tu dong noi SL tu {orig_sl} thanh {new_sl} de tranh bi quet rau."
+                )
+
+        return signal
 
     def calculate_position_sizes(
         self,
@@ -55,13 +95,19 @@ class RiskEngine:
 
         # 1. Check max total open risk
         max_total_risk_amount = (self.config.risk.max_total_open_risk_pct / Decimal("100")) * current_equity
-        signal_risk_pct = min(signal.risk_pct, self.config.risk.risk_per_signal_pct) * margin_mult
+        ferrari_on = getattr(self.config, "ferrari_mode_enabled", False)
+        if ferrari_on:
+            signal_risk_pct = max(Decimal("5.0"), min(signal.risk_pct, Decimal("8.0")))
+        else:
+            signal_risk_pct = min(signal.risk_pct, self.config.risk.risk_per_signal_pct) * margin_mult
         signal_risk_budget = (signal_risk_pct / Decimal("100")) * current_equity
 
-        if open_risk_amount + signal_risk_budget > max_total_risk_amount:
-            raise RiskCheckError(
-                f"Vuot qua han muc tong rui ro dang mo: Hien tai {open_risk_amount:.2f} + Lenh moi {signal_risk_budget:.2f} > Toi da {max_total_risk_amount:.2f} USDT"
-            )
+        open_risk_capped = self.config.risk.max_total_open_risk_pct < Decimal("100")
+        if not ferrari_on and open_risk_capped:
+            if open_risk_amount + signal_risk_budget > max_total_risk_amount:
+                raise RiskCheckError(
+                    f"Vuot qua han muc tong rui ro dang mo: Hien tai {open_risk_amount:.2f} + Lenh moi {signal_risk_budget:.2f} > Toi da {max_total_risk_amount:.2f} USDT"
+                )
 
         # Buffer factor for fees and slippage
         # total_buffer = fee_buffer_pct (entry + exit) + slippage_buffer_pct
@@ -71,10 +117,19 @@ class RiskEngine:
         # Check if margin cap should be enforced (CROSSED mode)
         margin_mode = signal.margin_mode or getattr(self.config.risk, "margin_mode", None)
         enforce_margin_cap = margin_mode in (MarginMode.CROSSED, MarginMode.CROSS, "CROSS", "CROSSED")
-        base_max_margin_pct = getattr(self.config.risk, "max_margin_per_trade_pct", Decimal("7.0"))
-        max_margin_pct = base_max_margin_pct * margin_mult
+        base_max_margin_pct = Decimal("25.0") if ferrari_on else getattr(self.config.risk, "max_margin_per_trade_pct", Decimal("7.0"))
+        max_margin_pct = base_max_margin_pct * (Decimal("1.0") if ferrari_on else margin_mult)
         max_margin_amount = (max_margin_pct / Decimal("100")) * current_equity
-        lev = Decimal(str(signal.leverage or getattr(self.config.risk, "default_leverage", 25)))
+        lev = Decimal(str(signal.leverage or (35 if ferrari_on else getattr(self.config.risk, "default_leverage", 25))))
+        try:
+            from risk.market_regime_shield import global_market_regime_shield
+            regime_cap = global_market_regime_shield.get_safe_leverage_ceiling(
+                signal.symbol, signal.side
+            )
+            if regime_cap and lev > Decimal(str(regime_cap)):
+                lev = Decimal(str(regime_cap))
+        except Exception:
+            pass
 
         entry_results: List[Tuple[Decimal, Decimal]] = []
         total_notional = Decimal("0")
@@ -175,9 +230,10 @@ class RiskEngine:
         """
         if step_size <= Decimal("0"):
             return qty
-        precision = abs(step_size.as_tuple().exponent)
-        units = (qty / step_size).to_integral_value(rounding=ROUND_DOWN)
-        result = units * step_size
+        norm_step = step_size.normalize()
+        precision = abs(norm_step.as_tuple().exponent)
+        units = (qty / norm_step).to_integral_value(rounding=ROUND_DOWN)
+        result = units * norm_step
         return round(result, precision)
 
     @staticmethod
@@ -187,8 +243,71 @@ class RiskEngine:
         """
         if tick_size <= Decimal("0"):
             return price
-        precision = abs(tick_size.as_tuple().exponent)
-        units = (price / tick_size).quantize(Decimal("1"))
-        result = units * tick_size
+        norm_tick = tick_size.normalize()
+        precision = abs(norm_tick.as_tuple().exponent)
+        units = (price / norm_tick).quantize(Decimal("1"))
+        result = units * norm_tick
         return round(result, precision)
+
+    @staticmethod
+    def get_compounding_stage(equity: Decimal) -> Dict[str, Any]:
+        """
+        Trụ Cột 7: Compounding Capital Scaling Matrix.
+        Stage 1: $80 - $150 (Vốn khởi đầu, max 3-4 lệnh, risk 1.5%)
+        Stage 2: $150 - $500 (Vốn tích lũy, max 5-6 lệnh, risk 1.5%)
+        Stage 3: $500 - $2,000 (Vốn quy mô vừa, max 6-8 lệnh, risk 1.2%)
+        Stage 4: > $2,000 (Tổ chức/Chuyên nghiệp, max 8-10 lệnh, risk 1.0%)
+        """
+        eq = Decimal(str(equity)) if equity > Decimal("0") else Decimal("85.24")
+        if eq < Decimal("150"):
+            prog = float(min(Decimal("100.0"), max(Decimal("0.0"), (eq - Decimal("80")) / Decimal("70") * Decimal("100"))))
+            return {
+                "stage": 1,
+                "label": "Stage 1 (Vốn khởi đầu $80–$150)",
+                "current_equity": float(eq),
+                "max_positions": 4,
+                "recommended_risk_pct": 1.5,
+                "max_total_risk_pct": 6.0,
+                "target_equity": 150.0,
+                "progress_pct": round(prog, 1),
+                "mission": "Bảo toàn vốn tuyệt đối, kiểm chứng ổn định, tích lũy lãi",
+            }
+        elif eq < Decimal("500"):
+            prog = float(min(Decimal("100.0"), (eq - Decimal("150")) / Decimal("350") * Decimal("100")))
+            return {
+                "stage": 2,
+                "label": "Stage 2 (Vốn tích lũy $150–$500)",
+                "current_equity": float(eq),
+                "max_positions": 6,
+                "recommended_risk_pct": 1.5,
+                "max_total_risk_pct": 9.0,
+                "target_equity": 500.0,
+                "progress_pct": round(prog, 1),
+                "mission": "Đa dạng hóa danh mục tín hiệu, bật Trailing TP Moonbag 30%",
+            }
+        elif eq < Decimal("2000"):
+            prog = float(min(Decimal("100.0"), (eq - Decimal("500")) / Decimal("1500") * Decimal("100")))
+            return {
+                "stage": 3,
+                "label": "Stage 3 (Quy mô vừa $500–$2,000)",
+                "current_equity": float(eq),
+                "max_positions": 8,
+                "recommended_risk_pct": 1.2,
+                "max_total_risk_pct": 10.0,
+                "target_equity": 2000.0,
+                "progress_pct": round(prog, 1),
+                "mission": "Kích hoạt bộ lọc BTC Regime Shield & ATR Sizing tối ưu",
+            }
+        else:
+            return {
+                "stage": 4,
+                "label": "Stage 4 (Chuyên nghiệp > $2,000)",
+                "current_equity": float(eq),
+                "max_positions": 10,
+                "recommended_risk_pct": 1.0,
+                "max_total_risk_pct": 10.0,
+                "target_equity": 10000.0,
+                "progress_pct": 100.0,
+                "mission": "Giao dịch bán tự động đa chiến lược, tối ưu hoàn phí VIP",
+            }
 

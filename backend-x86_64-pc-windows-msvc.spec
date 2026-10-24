@@ -26,10 +26,21 @@ hiddenimports = [
     'services.trading_service',
     'services.gemini_autonomous_trader',
     'services.telegram_listener_service',
+    'services.market_sentiment_news_guardian',
+    'services.quantum_ai_engine',
+    'services.quantum_council_harness',
+    'services.signal_queue_service',
     'parser',
     'parser.signal_parser',
     'execution',
+    'execution.trailing_tp_manager',
+    'exchange',
+    'exchange.binance_client',
+    'exchange.exchange_info',
+    'exchange.mock_exchange',
+    'exchange.secret_store',
     'risk',
+    'risk.market_regime_shield',
     'storage',
     'storage.database',
     'config',
@@ -44,7 +55,7 @@ for mod in ['telethon', 'uvicorn', 'fastapi', 'pytz', 'psutil']:
 datas.append(('desktop/dist', 'desktop/dist'))
 if os.path.exists('data/channel_winrates_6_months.json'):
     datas.append(('data/channel_winrates_6_months.json', 'data'))
-for pkg in ['backend', 'services', 'execution', 'risk', 'parser', 'config', 'core', 'storage', 'telegram']:
+for pkg in ['backend', 'services', 'execution', 'exchange', 'risk', 'parser', 'config', 'core', 'storage', 'telegram']:
     datas.append((pkg, pkg))
 
 a = Analysis(

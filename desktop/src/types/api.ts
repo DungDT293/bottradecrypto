@@ -256,6 +256,7 @@ export type MultiTPWeightMode =
 export interface AppSettings {
   mode: ExecutionMode;
   live_trading_enabled: boolean;
+  ferrari_mode_enabled?: boolean;
   risk_per_signal_pct: number;
   max_daily_loss_pct: number;
   max_leverage: number;
@@ -266,11 +267,13 @@ export interface AppSettings {
   breakeven_after_tp1?: boolean;
   sl_buffer_pct?: number;
   max_active_signals?: number;
+  max_total_open_risk_pct?: number;
 }
 
 export interface AppSnapshot {
   mode: string;
   live_trading_enabled: boolean;
+  ferrari_mode_enabled?: boolean;
   engine_status: string;
   entry_enabled: boolean;
   account: BinanceAccountSnapshot;
