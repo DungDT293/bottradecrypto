@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  jarvis-bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: jarvis_quantum_bot
+    restart: always
+    volumes:
+      - ../config:/app/config
+      - ../storage:/app/storage
+      - ../logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+    deploy:
+      resources:
+        limits:
+          memory: 1500M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+

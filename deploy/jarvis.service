@@ -1,0 +1,26 @@
+[Unit]
+Description=Jarvis Quantum AI Trading Bot 24/7 (Stark Protocol Mark 85)
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/bottradecrypto
+ExecStart=/root/bottradecrypto/venv/bin/python -u -m telegram.dedicated_bot
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/root/bottradecrypto
+StandardOutput=journal
+StandardError=journal
+
+# Bảo vệ chống tràn RAM / OOM
+MemoryHigh=1500M
+MemoryMax=1800M
+
+[Install]
+WantedBy=multi-user.target
+

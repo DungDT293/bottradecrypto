@@ -123,3 +123,188 @@ async def test_dedicated_bot_handle_update_commands():
                 assert "100.73" in pos_output
                 assert "-1.60 USDT" in pos_output
                 assert "101.84" in pos_output
+
+
+@pytest.mark.asyncio
+async def test_dedicated_bot_remote_actions():
+    from decimal import Decimal
+    from exchange.exchange_info import SymbolFilterInfo
+    from core.enums import ExecutionMode
+
+    bot = DedicatedTelegramBot(bot_token="123456789:ABCdefGHIjkLMNopqrstuvwxyz")
+    bot.config.mode = ExecutionMode.LIVE
+    bot.config.live_trading_enabled = True
+    bot.send_message = AsyncMock(return_value=True)
+
+    # 1. Close single position via callback act_cls_SOLUSDT
+    with patch("exchange.binance_client.BinanceFuturesClient.cancel_all_symbol_orders", new_callable=AsyncMock) as mock_cancel, \
+         patch("exchange.binance_client.BinanceFuturesClient.get_position", new_callable=AsyncMock) as mock_get_pos, \
+         patch("exchange.binance_client.BinanceFuturesClient.create_standard_order", new_callable=AsyncMock) as mock_order, \
+         patch("exchange.binance_client.BinanceFuturesClient.get_income_history", new_callable=AsyncMock) as mock_income, \
+         patch("exchange.binance_client.BinanceFuturesClient.close", new_callable=AsyncMock):
+
+        mock_get_pos.return_value = {"symbol": "SOLUSDT", "positionAmt": "-2.54"}
+        mock_income.return_value = [{"symbol": "SOLUSDT", "income": "3.50", "incomeType": "REALIZED_PNL"}]
+
+        update_cls = {
+            "update_id": 201,
+            "callback_query": {
+                "id": "cb_cls_1",
+                "from": {"id": 123456},
+                "data": "act_cls_SOLUSDT",
+                "message": {"chat": {"id": 123456}}
+            }
+        }
+        await bot.handle_update(update_cls)
+        assert mock_cancel.called
+        assert mock_order.called
+        assert any("ĐÃ ĐÓNG VỊ THẾ SOLUSDT" in str(c) for c in bot.send_message.call_args_list)
+
+    # 2. Move SL to Break-Even via callback act_be_SOLUSDT
+    bot.send_message.reset_mock()
+    with patch("exchange.binance_client.BinanceFuturesClient.get_position", new_callable=AsyncMock) as mock_get_pos, \
+         patch("exchange.binance_client.BinanceFuturesClient.get_symbol_filter", new_callable=AsyncMock) as mock_filter, \
+         patch("exchange.binance_client.BinanceFuturesClient.get_open_algo_orders", new_callable=AsyncMock) as mock_algos, \
+         patch("exchange.binance_client.BinanceFuturesClient.create_algo_order", new_callable=AsyncMock) as mock_algo_order, \
+         patch("exchange.binance_client.BinanceFuturesClient.close", new_callable=AsyncMock):
+
+        mock_get_pos.return_value = {"symbol": "SOLUSDT", "positionAmt": "-2.54", "entryPrice": "100.10", "markPrice": "98.50"}
+        mock_filter.return_value = SymbolFilterInfo("SOLUSDT", Decimal("0.01"), Decimal("0.01"), Decimal("0.01"), Decimal("10000"), Decimal("5.0"), True)
+        mock_algos.return_value = []
+
+        update_be = {
+            "update_id": 202,
+            "callback_query": {
+                "id": "cb_be_1",
+                "from": {"id": 123456},
+                "data": "act_be_SOLUSDT",
+                "message": {"chat": {"id": 123456}}
+            }
+        }
+        await bot.handle_update(update_be)
+        assert mock_algo_order.called
+        assert any("KÍCH HOẠT KÈO BẤT TỬ SOLUSDT" in str(c) for c in bot.send_message.call_args_list)
+
+    # 3. Toggle Ferrari Mode via callback act_toggle_ferrari
+    bot.send_message.reset_mock()
+    with patch("config.config.save_config"):
+        curr_ferrari = bot.config.ferrari_mode_enabled
+        update_ferrari = {
+            "update_id": 203,
+            "callback_query": {
+                "id": "cb_ferrari_1",
+                "from": {"id": 123456},
+                "data": "act_toggle_ferrari",
+                "message": {"chat": {"id": 123456}}
+            }
+        }
+        await bot.handle_update(update_ferrari)
+        assert bot.config.ferrari_mode_enabled == (not curr_ferrari)
+        assert any("FERRARI MODE" in str(c) for c in bot.send_message.call_args_list)
+
+    # 4. Margin Health via /margin
+    bot.send_message.reset_mock()
+    with patch("exchange.binance_client.BinanceFuturesClient._request", new_callable=AsyncMock) as mock_req, \
+         patch("exchange.binance_client.BinanceFuturesClient.get_open_positions", new_callable=AsyncMock) as mock_open_pos, \
+         patch("exchange.binance_client.BinanceFuturesClient.close", new_callable=AsyncMock):
+
+        mock_req.return_value = {
+            "totalWalletBalance": "100.50",
+            "totalMarginBalance": "100.50",
+            "availableBalance": "75.20",
+            "totalMaintMargin": "2.10",
+            "totalPositionInitialMargin": "25.30"
+        }
+        mock_open_pos.return_value = [
+            {"symbol": "SOLUSDT", "positionAmt": "-2.54", "markPrice": "100.5", "liquidationPrice": "130.0"}
+        ]
+
+        update_margin = {
+            "update_id": 204,
+            "message": {
+                "message_id": 10,
+                "chat": {"id": 123456},
+                "text": "/margin"
+            }
+        }
+        await bot.handle_update(update_margin)
+        assert any("SỨC KHỎE KÝ QUỸ" in str(c) for c in bot.send_message.call_args_list)
+
+    # 5. Ping via /ping
+    bot.send_message.reset_mock()
+    with patch("exchange.binance_client.BinanceFuturesClient.sync_time", new_callable=AsyncMock), \
+         patch("exchange.binance_client.BinanceFuturesClient.close", new_callable=AsyncMock):
+
+        update_ping = {
+            "update_id": 205,
+            "message": {
+                "message_id": 11,
+                "chat": {"id": 123456},
+                "text": "/ping"
+            }
+        }
+        await bot.handle_update(update_ping)
+        assert any("JARVIS TELEMETRY" in str(c) for c in bot.send_message.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_dedicated_bot_natural_language_chat():
+    from core.enums import ExecutionMode
+
+    bot = DedicatedTelegramBot(bot_token="123456789:ABCdefGHIjkLMNopqrstuvwxyz")
+    bot.config.mode = ExecutionMode.LIVE
+    bot.config.live_trading_enabled = True
+    bot.send_message = AsyncMock(return_value=True)
+
+    # 1. Natural chat "đóng sol"
+    with patch.object(bot, "_action_close_position", new_callable=AsyncMock) as mock_cls:
+        update_chat = {
+            "update_id": 301,
+            "message": {
+                "message_id": 20,
+                "chat": {"id": 123456},
+                "text": "đóng sol"
+            }
+        }
+        await bot.handle_update(update_chat)
+        assert mock_cls.called
+        assert mock_cls.call_args[0][1] == "SOLUSDT"
+
+    # 2. Natural chat "bật ferrari"
+    with patch.object(bot, "_action_toggle_ferrari", new_callable=AsyncMock) as mock_ferrari:
+        update_ferrari = {
+            "update_id": 302,
+            "message": {
+                "message_id": 21,
+                "chat": {"id": 123456},
+                "text": "bật ferrari giúp tôi"
+            }
+        }
+        await bot.handle_update(update_ferrari)
+        assert mock_ferrari.called
+
+    # 3. Natural chat "ký quỹ của tôi thế nào"
+    with patch.object(bot, "_cmd_margin_health", new_callable=AsyncMock) as mock_margin:
+        update_margin = {
+            "update_id": 303,
+            "message": {
+                "message_id": 22,
+                "chat": {"id": 123456},
+                "text": "ký quỹ của tôi thế nào"
+            }
+        }
+        await bot.handle_update(update_margin)
+        assert mock_margin.called
+
+    # 4. Natural chat "thị trường sao rồi jarvis"
+    with patch.object(bot, "_cmd_macro", new_callable=AsyncMock) as mock_macro:
+        update_macro = {
+            "update_id": 304,
+            "message": {
+                "message_id": 23,
+                "chat": {"id": 123456},
+                "text": "thị trường sao rồi jarvis"
+            }
+        }
+        await bot.handle_update(update_macro)
+        assert mock_macro.called

@@ -1,8 +1,8 @@
-# TELEGRAM BINANCE SIGNAL EXECUTOR (v2.4.0 QUANTUM DUAL-AI & SNIPER PROFIT GUARDIAN)
+# TELEGRAM BINANCE SIGNAL EXECUTOR (v2.5.0 QUANTUM JARVIS MARK 85)
 
-Hệ thống tự động hóa giao dịch tiền mã hóa cấp định lượng (Institutional Quant System) tích hợp **Dual-AI (Google Gemini 3.6/4 Argon + Quantum Quant Engine 2.0)** và tiếp nhận tín hiệu từ các nhóm/kênh Telegram tinh hoa qua MTProto Telethon cá nhân (Read-Only). 
+Hệ thống tự động hóa giao dịch tiền mã hóa cấp định lượng (Institutional Quant System) tích hợp **Dual-AI (Google Gemini 3.6/4 Argon + Quantum Quant Engine 2.0)**, tiếp nhận tín hiệu từ các nhóm/kênh Telegram tinh hoa qua MTProto Telethon cá nhân (Read-Only), và trợ lý tương tác Telegram **Dedicated Jarvis Bot Mark 85** trực chiến 24/7 trên VPS.
 
-Phiên bản **v2.4.0** trang bị bộ lọc **4H Macro Trend Alignment Shield**, cơ chế chốt lời nhanh **Scalp TP1 (0.95R)**, kích hoạt **Kèo Bất Tử sớm (+0.8% Gain = +16% ROE)**, hệ thống **Khóa Lãi Động Đa Tầng (Dynamic Multi-Tier Profit Lock)** và chế độ bứt phá lợi nhuận **FERRARI MODE (x35 - x40 Leverage)** bảo đảm tuyệt đối kỷ luật Zero-Liquidation.
+Phiên bản **v2.5.0** trang bị bộ điều khiển Telegram từ xa toàn diện, giáp bảo vệ **4H Macro Trend Alignment Shield**, giải thuật phân bổ tự động **Ferrari Mode (x35 - x40)** mở rộng trần 15 lệnh cùng chiều, cơ chế chốt lời nhanh **Scalp TP1 (0.95R)**, kích hoạt **Kèo Bất Tử sớm (+0.8% Gain = +16% ROE)**, hệ thống **Khóa Lãi Động Đa Tầng (Dynamic Multi-Tier Profit Lock)** và sổ tay triển khai **VPS 24/7 độc lập**: [Hướng dẫn triển khai VPS](docs/VPS_DEPLOYMENT_GUIDE.md).
 
 ---
 
