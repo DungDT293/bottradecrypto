@@ -839,6 +839,9 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                 s["open_positions"] = current_positions
                 s["last_closed_at"] = self.symbol_last_closed.get(sym) or self._get_last_closed_from_db(sym)
                 s["last_trade_opened_at"] = self.last_trade_opened_at
+                is_ferrari = bool(getattr(self.config, "ferrari_mode_enabled", False))
+                s["ferrari_mode_enabled"] = is_ferrari
+                s["max_directional_cap"] = 15 if is_ferrari else 3
                 deliberation = await self.council_arbiter.deliberate(sym, s)
                 if not deliberation.is_approved:
                     logger.warning(

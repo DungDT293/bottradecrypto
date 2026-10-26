@@ -1044,6 +1044,12 @@ class QuantumCouncilArbiter:
         if "last_trade_opened_at" not in market_data and self.last_trade_opened_at > 0:
             market_data["last_trade_opened_at"] = self.last_trade_opened_at
 
+        if "ferrari_mode_enabled" not in market_data:
+            market_data["ferrari_mode_enabled"] = bool(getattr(self.config, "ferrari_mode_enabled", False))
+        if "max_directional_cap" not in market_data:
+            is_ferrari = bool(market_data.get("ferrari_mode_enabled", False))
+            market_data["max_directional_cap"] = 15 if is_ferrari else 3
+
         # Tự động nạp vị thế từ Binance client nếu chưa có trong market_data
         if "open_positions" not in market_data and "positions" not in market_data and self.client:
             try:

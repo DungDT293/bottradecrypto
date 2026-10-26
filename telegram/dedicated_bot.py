@@ -1061,7 +1061,7 @@ class DedicatedTelegramBot:
             ferrari_txt = "🟢 BẬT (x35 - x40, Tối đa 20 vị thế)" if is_ferrari else "⚪ TẮT (Chế độ an toàn 20x)"
 
             text = (
-                "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR MARK 85</b>\n"
+                "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR v2.5.0 (JARVIS MARK 85)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"• Chế độ giao dịch: <b>{mode} (TIỀN THẬT LIVE)</b>\n"
                 f"• Ferrari Mode: <b>{ferrari_txt}</b>\n"
