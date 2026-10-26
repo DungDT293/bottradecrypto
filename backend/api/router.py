@@ -1721,6 +1721,52 @@ def create_api_router(
         else:
             return {"success": False, "reason": res.get("reason", "Lỗi không xác định")}
 
+    class AICouncilDebateRequest(BaseModel):
+        symbol: str
+        direction: Optional[str] = None
+        entry_price: Optional[float] = None
+        stop_loss: Optional[float] = None
+        take_profit_1: Optional[float] = None
+        broadcast: bool = True
+
+    @router.post("/ai/council-debate", dependencies=[Depends(verify_token)])
+    async def run_ai_council_debate(body: AICouncilDebateRequest):
+        """
+        Triệu tập Hội Đồng Lượng Tử AI thẩm định và tranh biện cho cặp giao dịch.
+        Tự động phát sóng cuộc đối chất của 5 tác tử AI lên Telegram nếu broadcast=True.
+        """
+        sym = body.symbol.upper().replace("/", "").replace(":", "")
+        params = {}
+        if body.direction:
+            params["direction"] = body.direction.upper()
+        if body.entry_price:
+            params["entry_price"] = body.entry_price
+        if body.stop_loss:
+            params["stop_loss"] = body.stop_loss
+        if body.take_profit_1:
+            params["take_profit_1"] = body.take_profit_1
+
+        if hasattr(ai_trader, "evaluate_and_broadcast_debate"):
+            delib = await ai_trader.evaluate_and_broadcast_debate(sym, custom_params=params, broadcast=body.broadcast)
+        else:
+            from services.quantum_council_harness import QuantumCouncilArbiter
+            arbiter = QuantumCouncilArbiter(config=config, binance_client=binance_svc.client if binance_svc else None)
+            delib = await arbiter.deliberate(sym, params)
+            if body.broadcast and getattr(delib, "debate_html", None):
+                alert_svc.add_alert(
+                    AlertLevel.INFO,
+                    f"Quantum Council: {sym}",
+                    delib.debate_html,
+                    "AI_COUNCIL",
+                )
+
+        return {
+            "success": True,
+            "symbol": sym,
+            "deliberation": delib.to_dict() if hasattr(delib, "to_dict") else delib,
+            "debate_html": getattr(delib, "debate_html", ""),
+        }
+
     # -------------------------------------------------------------
     # 9. Graceful Shutdown Endpoint
     # -------------------------------------------------------------
@@ -1830,10 +1876,19 @@ def create_api_router(
 
     @router.get("/capital-stage", dependencies=[Depends(verify_token)])
     async def get_capital_stage():
-        try:
-            equity = await binance_client.get_margin_balance()
-        except Exception:
-            equity = Decimal("127.05")
-        return RiskEngine.get_compounding_stage(equity)
+        cached = binance_svc.get_cached_snapshot()
+        raw_equity = getattr(cached, "total_margin_balance", None) or getattr(cached, "equity", None)
+        if raw_equity and Decimal(str(raw_equity)) > Decimal("0"):
+            equity = Decimal(str(raw_equity))
+        elif binance_svc.has_credentials():
+            try:
+                equity = await binance_client.get_account_equity()
+            except Exception:
+                equity = Decimal("92.21")
+        else:
+            equity = Decimal("92.21")
+        is_ferrari = bool(getattr(config, "ferrari_mode_enabled", False))
+        max_pos = int(getattr(config.risk, "max_active_signals", 20 if is_ferrari else 4))
+        return RiskEngine.get_compounding_stage(equity, max_positions_override=max_pos, ferrari_mode=is_ferrari)
 
     return router

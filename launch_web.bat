@@ -9,7 +9,7 @@ echo ===================================================================
 echo 1. Dang dong bo cau hinh Live...
 echo 2. Dang bat server va tu dong mo trinh duyet...
 
-python -m backend.launcher --data-dir ./data --config config.yaml --open-browser
+python -m backend.launcher --config config.yaml --open-browser
 
 pause
 

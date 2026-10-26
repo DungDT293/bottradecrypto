@@ -93,11 +93,119 @@ class TelegramSignalListener:
         cleaned = "".join(text.split()).lower()
         return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
 
+    async def _handle_interactive_command(self, event: Any, chat_id: Any, text: str) -> bool:
+        """
+        Xử lý các câu lệnh tương tác của người dùng trong Saved Messages hoặc kênh được phép:
+        - /debate <symbol> hoặc /council <symbol>: Triệu tập 5 Đặc Vụ AI Hội Đồng Lượng Tử đối chất.
+        - /status: Báo cáo trạng thái bot, an toàn vốn & kết nối.
+        - /help: Hướng dẫn các câu lệnh.
+        """
+        cmd_text = text.strip()
+        parts = cmd_text.split()
+        if not parts:
+            return False
+
+        cmd = parts[0].lower()
+        if not (cmd.startswith("/") or cmd.startswith("!")):
+            return False
+
+        is_private = getattr(event, "is_private", False)
+        is_out = getattr(event, "out", False)
+        allowed_chats = self.config.telegram.allowed_chat_ids or []
+        if not (is_private or is_out or chat_id in allowed_chats):
+            return False
+
+        # 1. Lệnh /debate hoặc /council
+        if cmd in ("/debate", "!debate", "/council", "!council"):
+            symbol = parts[1].upper() if len(parts) > 1 else "SOLUSDT"
+            symbol = symbol.replace("/", "").replace(":", "")
+            if not symbol.endswith("USDT") and not symbol.endswith("USDC"):
+                symbol = f"{symbol}USDT"
+
+            try:
+                loading_msg = f"🏛️ <i>Đang triệu tập Hội Đồng Lượng Tử AI để thẩm định &amp; đối chất cặp <b>{symbol}</b>...</i>"
+                try:
+                    await event.reply(loading_msg, parse_mode="html")
+                except Exception:
+                    await self.tg_client.send_message(chat_id, loading_msg, parse_mode="html")
+
+                from services.quantum_council_harness import QuantumCouncilArbiter
+                arbiter = QuantumCouncilArbiter(config=self.config)
+                market_data = {}
+                if self.order_manager and hasattr(self.order_manager, "client"):
+                    try:
+                        px = await self.order_manager.client.get_symbol_price(symbol)
+                        if px and float(px) > 0:
+                            market_data["current_price"] = float(px)
+                    except Exception:
+                        pass
+
+                delib = await arbiter.deliberate(symbol, market_data)
+                debate_html = getattr(delib, "debate_html", None) or arbiter.format_telegram_transcript(delib)
+
+                try:
+                    await event.reply(debate_html, parse_mode="html")
+                except Exception:
+                    await self.tg_client.send_message(chat_id, debate_html, parse_mode="html")
+                return True
+            except Exception as e_deb:
+                err_text = f"⚠️ <i>Lỗi triệu tập Hội đồng cho {symbol}: {e_deb}</i>"
+                try:
+                    await self.tg_client.send_message(chat_id, err_text, parse_mode="html")
+                except Exception:
+                    pass
+                return True
+
+        # 2. Lệnh /status
+        elif cmd in ("/status", "!status"):
+            mode_str = self.config.mode.value
+            shadow_str = " (SHADOW TRADING)" if self.is_shadow else ""
+            status_html = (
+                f"🤖 <b>TRẠNG THÁI HỆ THỐNG BOT TRADE CRYPTO</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚡ <b>Chế độ hoạt động:</b> <code>{mode_str}{shadow_str}</code>\n"
+                f"🛡️ <b>Cơ chế an toàn:</b> 🟢 <b>Zero-Liquidation &amp; Kèo Bất Tử</b>\n"
+                f"📡 <b>Kênh theo dõi:</b> <code>{len(allowed_chats)} kênh Telegram</code>\n"
+                f"🧠 <b>Bộ não AI:</b> 🟢 <b>Quantum Council Multi-Agent System (Sẵn sàng)</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💡 <i>Gõ <code>/debate SOLUSDT</code> để xem 5 đặc vụ AI đối chất kèo!</i>"
+            )
+            try:
+                await event.reply(status_html, parse_mode="html")
+            except Exception:
+                await self.tg_client.send_message(chat_id, status_html, parse_mode="html")
+            return True
+
+        # 3. Lệnh /help hoặc /start
+        elif cmd in ("/help", "!help", "/start", "!start"):
+            help_html = (
+                "🏛️ <b>DANH SÁCH LỆNH QUANTUM COUNCIL AI:</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "• <code>/debate &lt;symbol&gt;</code> - Triệu tập 5 Đặc Vụ AI tranh biện &amp; thẩm định kèo (VD: <code>/debate SOLUSDT</code>)\n"
+                "• <code>/status</code> - Xem trạng thái hệ thống, chế độ và bảo vệ rủi ro\n"
+                "• <code>/help</code> - Xem hướng dẫn các câu lệnh\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "<i>Hệ thống tự động phát sóng biên bản tranh biện mỗi khi có lệnh mới được khớp!</i>"
+            )
+            try:
+                await event.reply(help_html, parse_mode="html")
+            except Exception:
+                await self.tg_client.send_message(chat_id, help_html, parse_mode="html")
+            return True
+
+        return False
+
     async def handle_incoming_message(self, event: Any, is_edit: bool = False) -> None:
         chat_id = event.chat_id
         msg_id = event.id
         raw_text = event.raw_text or ""
         reply_to_msg_id = getattr(event, "reply_to_msg_id", None)
+
+        # Xử lý các câu lệnh tương tác của người dùng (/debate, /status, /help)
+        if raw_text and (raw_text.strip().startswith("/") or raw_text.strip().startswith("!")):
+            handled = await self._handle_interactive_command(event, chat_id, raw_text)
+            if handled:
+                return
 
         # 0. Check Permanent and Dynamic Blacklist (Anti-Fake Channels Shield)
         blacklisted_chats = set(getattr(self.config.telegram, "blacklisted_chat_ids", []) or [])

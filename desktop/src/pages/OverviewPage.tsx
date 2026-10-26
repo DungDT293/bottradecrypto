@@ -80,7 +80,7 @@ export const OverviewPage: React.FC = () => {
                 className="badge"
                 style={{ backgroundColor: "rgba(59, 130, 246, 0.15)", color: "#93c5fd", fontSize: "11px" }}
               >
-                Trần: {capitalStage.max_positions} vị thế | Rủi ro: {capitalStage.recommended_risk_pct}% NAV/lệnh
+                Trần: {snapshot?.max_active_signals || capitalStage.max_positions} vị thế {snapshot?.ferrari_mode_enabled ? "(Ferrari Mode)" : ""} | Rủi ro: {capitalStage.recommended_risk_pct}% NAV/lệnh
               </span>
             </div>
             <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -111,7 +111,7 @@ export const OverviewPage: React.FC = () => {
 
           <div style={{ fontSize: "12px", color: "var(--text-muted)", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" }}>
             <span>🎯 Chiến lược: {capitalStage.mission}</span>
-            <span>Vốn hiện tại: <strong>${capitalStage.current_equity?.toFixed(2)} USDT</strong></span>
+            <span>Vốn hiện tại: <strong>{isConnected && marginBalance != null ? `$${parseFloat(String(marginBalance)).toFixed(2)} USDT` : `$${capitalStage.current_equity?.toFixed(2)} USDT`}</strong></span>
           </div>
         </div>
       )}
@@ -146,7 +146,11 @@ export const OverviewPage: React.FC = () => {
             {todayPnlVal >= 0 ? `+$${todayPnlVal.toFixed(2)}` : `-$${Math.abs(todayPnlVal).toFixed(2)}`}
           </div>
           <div className="card-subtitle">
-            Tỷ lệ thắng: <strong>{pnlToday?.win_rate_pct ?? 0}%</strong> ({pnlToday?.win_count ?? 0}/{pnlToday?.total_closed_trades ?? 0} lệnh)
+            {(pnlToday?.total_closed_trades ?? 0) > 0 ? (
+              <>Tỷ lệ thắng: <strong>{pnlToday?.win_rate_pct ?? 0}%</strong> ({pnlToday?.win_count ?? 0}/{pnlToday?.total_closed_trades ?? 0} lệnh)</>
+            ) : (
+              <span className="text-muted">Chưa có vị thế đóng hôm nay</span>
+            )}
           </div>
         </div>
 

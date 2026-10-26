@@ -250,62 +250,79 @@ class RiskEngine:
         return round(result, precision)
 
     @staticmethod
-    def get_compounding_stage(equity: Decimal) -> Dict[str, Any]:
+    def get_compounding_stage(
+        equity: Decimal,
+        max_positions_override: Optional[int] = None,
+        ferrari_mode: bool = False,
+    ) -> Dict[str, Any]:
         """
         Trụ Cột 7: Compounding Capital Scaling Matrix.
         Stage 1: $80 - $150 (Vốn khởi đầu, max 3-4 lệnh, risk 1.5%)
         Stage 2: $150 - $500 (Vốn tích lũy, max 5-6 lệnh, risk 1.5%)
         Stage 3: $500 - $2,000 (Vốn quy mô vừa, max 6-8 lệnh, risk 1.2%)
         Stage 4: > $2,000 (Tổ chức/Chuyên nghiệp, max 8-10 lệnh, risk 1.0%)
+        Hỗ trợ Ferrari Mode: mở rộng trần 20 vị thế và rủi ro gia tăng.
         """
         eq = Decimal(str(equity)) if equity > Decimal("0") else Decimal("85.24")
         if eq < Decimal("150"):
             prog = float(min(Decimal("100.0"), max(Decimal("0.0"), (eq - Decimal("80")) / Decimal("70") * Decimal("100"))))
+            max_pos = max_positions_override if max_positions_override is not None else (20 if ferrari_mode else 4)
+            risk_pct = 5.0 if ferrari_mode else 1.5
+            max_risk = 25.0 if ferrari_mode else 6.0
+            label = "Stage 1 (Vốn khởi đầu $80–$150)" if not ferrari_mode else "Stage 1 (Ferrari Bứt Phá x35-40)"
+            mission = "Bảo toàn vốn tuyệt đối, kiểm chứng ổn định, tích lũy lãi" if not ferrari_mode else "Bứt phá tài khoản x2.5 - x4.5 với đòn bẩy cao và Kèo Bất Tử"
             return {
                 "stage": 1,
-                "label": "Stage 1 (Vốn khởi đầu $80–$150)",
+                "label": label,
                 "current_equity": float(eq),
-                "max_positions": 4,
-                "recommended_risk_pct": 1.5,
-                "max_total_risk_pct": 6.0,
+                "max_positions": max_pos,
+                "recommended_risk_pct": risk_pct,
+                "max_total_risk_pct": max_risk,
                 "target_equity": 150.0,
                 "progress_pct": round(prog, 1),
-                "mission": "Bảo toàn vốn tuyệt đối, kiểm chứng ổn định, tích lũy lãi",
+                "mission": mission,
             }
         elif eq < Decimal("500"):
             prog = float(min(Decimal("100.0"), (eq - Decimal("150")) / Decimal("350") * Decimal("100")))
+            max_pos = max_positions_override if max_positions_override is not None else (20 if ferrari_mode else 6)
+            risk_pct = 5.0 if ferrari_mode else 1.5
+            max_risk = 25.0 if ferrari_mode else 9.0
             return {
                 "stage": 2,
                 "label": "Stage 2 (Vốn tích lũy $150–$500)",
                 "current_equity": float(eq),
-                "max_positions": 6,
-                "recommended_risk_pct": 1.5,
-                "max_total_risk_pct": 9.0,
+                "max_positions": max_pos,
+                "recommended_risk_pct": risk_pct,
+                "max_total_risk_pct": max_risk,
                 "target_equity": 500.0,
                 "progress_pct": round(prog, 1),
                 "mission": "Đa dạng hóa danh mục tín hiệu, bật Trailing TP Moonbag 30%",
             }
         elif eq < Decimal("2000"):
             prog = float(min(Decimal("100.0"), (eq - Decimal("500")) / Decimal("1500") * Decimal("100")))
+            max_pos = max_positions_override if max_positions_override is not None else (20 if ferrari_mode else 8)
+            risk_pct = 3.5 if ferrari_mode else 1.2
+            max_risk = 25.0 if ferrari_mode else 10.0
             return {
                 "stage": 3,
                 "label": "Stage 3 (Quy mô vừa $500–$2,000)",
                 "current_equity": float(eq),
-                "max_positions": 8,
-                "recommended_risk_pct": 1.2,
-                "max_total_risk_pct": 10.0,
+                "max_positions": max_pos,
+                "recommended_risk_pct": risk_pct,
+                "max_total_risk_pct": max_risk,
                 "target_equity": 2000.0,
                 "progress_pct": round(prog, 1),
                 "mission": "Kích hoạt bộ lọc BTC Regime Shield & ATR Sizing tối ưu",
             }
         else:
+            max_pos = max_positions_override if max_positions_override is not None else (20 if ferrari_mode else 10)
             return {
                 "stage": 4,
                 "label": "Stage 4 (Chuyên nghiệp > $2,000)",
                 "current_equity": float(eq),
-                "max_positions": 10,
-                "recommended_risk_pct": 1.0,
-                "max_total_risk_pct": 10.0,
+                "max_positions": max_pos,
+                "recommended_risk_pct": 2.5 if ferrari_mode else 1.0,
+                "max_total_risk_pct": 25.0 if ferrari_mode else 10.0,
                 "target_equity": 10000.0,
                 "progress_pct": 100.0,
                 "mission": "Giao dịch bán tự động đa chiến lược, tối ưu hoàn phí VIP",

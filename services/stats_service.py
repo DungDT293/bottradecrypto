@@ -134,11 +134,11 @@ class StatsService:
             except Exception:
                 pass
 
-        # Preserve lifecycle count, or take verified executed trades count
-        total_closed = max(len(closed_signals), win_count + loss_count)
+        # Verified executed trades count from Binance Income
+        total_closed = win_count + loss_count + be_count
         win_rate_pct = 0.0
-        if (win_count + loss_count + be_count) > 0:
-            win_rate_pct = round((win_count / (win_count + loss_count + be_count)) * 100, 1)
+        if total_closed > 0:
+            win_rate_pct = round((win_count / total_closed) * 100, 1)
 
         # Funding income is signed: positive income adds to net PnL; negative income subtracts.
         net_pnl = total_realized_pnl - total_commission + total_funding
@@ -149,6 +149,7 @@ class StatsService:
             "end_time_vn": end_utc.astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M:%S"),
             "has_data": has_trades,
             "total_closed_trades": total_closed,
+            "telegram_signals_concluded": len(closed_signals),
             "win_count": win_count,
             "loss_count": loss_count,
             "breakeven_count": be_count,
@@ -175,19 +176,37 @@ class StatsService:
             start_ms = int(start_utc.timestamp() * 1000)
             end_ms = int(end_utc.timestamp() * 1000)
 
-            incomes = await client._request(
+            # 1. Luôn lấy 1000 bản ghi mới nhất về trước để đảm bảo ngày hôm nay LUÔN ĐƯỢC CẬP NHẬT
+            latest_incomes = await client._request(
                 "GET",
                 "/fapi/v1/income",
-                params={"startTime": start_ms, "endTime": end_ms, "limit": 1000},
+                params={"limit": 1000},
                 signed=True,
-            )
-            if not incomes:
-                incomes = await client._request(
-                    "GET",
-                    "/fapi/v1/income",
-                    params={"limit": 1000},
-                    signed=True,
-                )
+            ) or []
+
+            # 2. Nếu cần tra cứu cửa sổ ngày rộng hơn (ví dụ 30 ngày), lấy thêm bản ghi theo startTime
+            window_incomes = []
+            if days_back > 0:
+                try:
+                    window_incomes = await client._request(
+                        "GET",
+                        "/fapi/v1/income",
+                        params={"startTime": start_ms, "endTime": end_ms, "limit": 1000},
+                        signed=True,
+                    ) or []
+                except Exception:
+                    window_incomes = []
+
+            # Hợp nhất và khử trùng lặp theo tranId
+            seen_tran_ids = set()
+            incomes = []
+            for inc in (latest_incomes + window_incomes):
+                tid = inc.get("tranId")
+                if tid:
+                    if tid in seen_tran_ids:
+                        continue
+                    seen_tran_ids.add(tid)
+                incomes.append(inc)
 
             if not incomes:
                 return {"success": True, "count": 0}

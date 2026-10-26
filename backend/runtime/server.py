@@ -29,11 +29,33 @@ def check_db_healthy(path: str) -> bool:
 
 
 def resolve_db_path(config: AppConfig, effective_data_dir: str) -> str:
+    # 1. Environment variable override
+    env_path = os.environ.get("TBCE_DATABASE_PATH")
+    if env_path and os.path.exists(env_path):
+        return os.path.abspath(env_path)
+
     raw_path = getattr(config, "database_file", None) or "./data/trading_state.db"
     if os.path.isabs(raw_path):
         return os.path.abspath(raw_path)
 
-    # Relative DB paths are rooted at effective runtime data directory, not process CWD.
+    # 2. Check AppData canonical live database first (Platform SSOT)
+    try:
+        from backend.runtime.handshake import get_default_data_dir
+        app_data_live = os.path.join(get_default_data_dir(), "data", "trading_state.db")
+        if os.path.exists(app_data_live):
+            return os.path.abspath(app_data_live)
+    except Exception:
+        pass
+
+    # 3. Prevent double-nesting if effective_data_dir already ends with 'data'
+    base_name = os.path.basename(raw_path)
+    clean_eff = os.path.abspath(effective_data_dir)
+    if os.path.basename(clean_eff) == "data":
+        direct = os.path.join(clean_eff, base_name)
+        if os.path.exists(direct):
+            return direct
+        return direct
+
     configured = os.path.abspath(os.path.join(effective_data_dir, raw_path))
     if os.path.exists(configured):
         return configured
@@ -42,6 +64,12 @@ def resolve_db_path(config: AppConfig, effective_data_dir: str) -> str:
     runtime_path = os.path.abspath(os.path.join(effective_data_dir, "data", "trading_state.db"))
     if runtime_path != configured and os.path.exists(runtime_path):
         return runtime_path
+
+    # Local workspace ./data/trading_state.db
+    local_ws = os.path.abspath("./data/trading_state.db")
+    if os.path.exists(local_ws):
+        return local_ws
+
     return configured
 
 

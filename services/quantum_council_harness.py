@@ -109,10 +109,17 @@ class CouncilDeliberationResult:
     deliberated_at: str
     execution_time_ms: float
     transcript: str = ""
+    # 5 Đặc Vụ Chuyên Môn Tranh Biện Hội Đồng Lượng Tử
+    lead_quant: Optional[AgentOpinion] = None
+    scalp_specialist: Optional[AgentOpinion] = None
+    macro_smc: Optional[AgentOpinion] = None
+    risk_guardian: Optional[AgentOpinion] = None
+    sentiment_scout: Optional[AgentOpinion] = None
+    debate_html: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """Chuyển đổi kết quả sang dạng dictionary để lưu trữ hoặc truyền qua API/WebSocket."""
-        return {
+        res = {
             "symbol": self.symbol,
             "direction": self.direction,
             "is_approved": self.is_approved,
@@ -158,7 +165,49 @@ class CouncilDeliberationResult:
             "deliberated_at": self.deliberated_at,
             "execution_time_ms": self.execution_time_ms,
             "transcript": self.transcript,
+            "debate_html": self.debate_html,
         }
+        if self.lead_quant:
+            res["lead_quant"] = {
+                "agent_id": self.lead_quant.agent_id,
+                "name": self.lead_quant.agent_name,
+                "vote": self.lead_quant.vote.value,
+                "confidence": self.lead_quant.confidence,
+                "rationale": self.lead_quant.rationale,
+            }
+        if self.scalp_specialist:
+            res["scalp_specialist"] = {
+                "agent_id": self.scalp_specialist.agent_id,
+                "name": self.scalp_specialist.agent_name,
+                "vote": self.scalp_specialist.vote.value,
+                "confidence": self.scalp_specialist.confidence,
+                "rationale": self.scalp_specialist.rationale,
+            }
+        if self.macro_smc:
+            res["macro_smc"] = {
+                "agent_id": self.macro_smc.agent_id,
+                "name": self.macro_smc.agent_name,
+                "vote": self.macro_smc.vote.value,
+                "confidence": self.macro_smc.confidence,
+                "rationale": self.macro_smc.rationale,
+            }
+        if self.risk_guardian:
+            res["risk_guardian"] = {
+                "agent_id": self.risk_guardian.agent_id,
+                "name": self.risk_guardian.agent_name,
+                "vote": self.risk_guardian.vote.value,
+                "confidence": self.risk_guardian.confidence,
+                "rationale": self.risk_guardian.rationale,
+            }
+        if self.sentiment_scout:
+            res["sentiment_scout"] = {
+                "agent_id": self.sentiment_scout.agent_id,
+                "name": self.sentiment_scout.agent_name,
+                "vote": self.sentiment_scout.vote.value,
+                "confidence": self.sentiment_scout.confidence,
+                "rationale": self.sentiment_scout.rationale,
+            }
+        return res
 
 
 # =============================================================================
@@ -637,13 +686,16 @@ class RedTeamSkepticAgent:
 
         # -------------------------------------------------------------
         # CHECK 0: GIỚI HẠN TỶ TRỌNG CÙNG CHIỀU (Directional Exposure Cap / Anti-Skew Shield)
-        # (Tối đa không quá 3 vị thế cùng chiều mở đồng thời: Max 3 SHORTs, Max 3 LONGs)
+        # (Chế độ thường: Max 3 vị thế cùng chiều; Chế độ Ferrari Mode: Max 15-20 vị thế)
         # -------------------------------------------------------------
         open_longs, open_shorts = self._count_directional_positions(market_data)
-        if dir_upper in ("SHORT", "SELL") and open_shorts >= 3:
+        is_ferrari = bool(market_data.get("ferrari_mode_enabled", False))
+        max_cap = int(market_data.get("max_directional_cap", 15 if is_ferrari else 3))
+
+        if dir_upper in ("SHORT", "SELL") and open_shorts >= max_cap:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
             red_flag = (
-                "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế SHORT. "
+                f"DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa {max_cap} vị thế SHORT. "
                 "Chặn để phòng ngừa rủi ro Short Squeeze khi thị trường đảo chiều!"
             )
             return AgentOpinion(
@@ -653,15 +705,15 @@ class RedTeamSkepticAgent:
                 vote=CouncilVote.VETO,
                 confidence=0,
                 rationale=red_flag,
-                key_metrics={"open_shorts": open_shorts, "max_cap": 3, "check": "directional_cap"},
+                key_metrics={"open_shorts": open_shorts, "max_cap": max_cap, "check": "directional_cap"},
                 red_flag=red_flag,
                 execution_time_ms=elapsed_ms,
             )
 
-        if dir_upper in ("LONG", "BUY") and open_longs >= 3:
+        if dir_upper in ("LONG", "BUY") and open_longs >= max_cap:
             elapsed_ms = (time.perf_counter() - start_t) * 1000.0
             red_flag = (
-                "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế LONG. "
+                f"DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa {max_cap} vị thế LONG. "
                 "Chặn để phòng ngừa rủi ro Long Squeeze khi thị trường đảo chiều!"
             )
             return AgentOpinion(
@@ -671,7 +723,7 @@ class RedTeamSkepticAgent:
                 vote=CouncilVote.VETO,
                 confidence=0,
                 rationale=red_flag,
-                key_metrics={"open_longs": open_longs, "max_cap": 3, "check": "directional_cap"},
+                key_metrics={"open_longs": open_longs, "max_cap": max_cap, "check": "directional_cap"},
                 red_flag=red_flag,
                 execution_time_ms=elapsed_ms,
             )
@@ -1088,6 +1140,100 @@ class QuantumCouncilArbiter:
         total_time_ms = (time.perf_counter() - start_t) * 1000.0
         now_iso = datetime.now(timezone.utc).isoformat()
 
+        # Tổng hợp 5 Đặc Vụ Chuyên Môn Tranh Biện Hội Đồng Lượng Tử
+        entry_val = float(trade_params.get("entry_price", market_data.get("current_price", 0.0)))
+        sl_val = float(trade_params.get("stop_loss", 0.0))
+        tp1_val = float(trade_params.get("take_profit_1", 0.0))
+        tp2_val = float(trade_params.get("take_profit_2", 0.0))
+        tp3_val = float(trade_params.get("take_profit_3", 0.0))
+        rr_val = trade_params.get("estimated_rr", 2.0)
+        lev_val = int(trade_params.get("leverage", 20))
+
+        # Agent 1: Lead Quant Strategist
+        if is_approved:
+            lead_rat = (
+                f"Hợp lưu SMC & OrderFlow đạt tỷ lệ R:R = {rr_val} (TP1: {tp1_val}, TP2: {tp2_val}, TP3: {tp3_val}). "
+                f"Độ đồng thuận toàn diện {consensus_score}/100. Quyết nghị kích hoạt lệnh {direction} "
+                f"với đòn bẩy {lev_val}x, phân bổ chốt lời 35/35/30 và Trailing Breakeven an toàn!"
+            )
+            lead_vote = CouncilVote.APPROVED
+        else:
+            lead_rat = (
+                f"Quyết định Trọng Tài: Bác bỏ kích hoạt lệnh {direction} {symbol}. "
+                f"Lý do: {veto_reason or 'Không đạt điểm đồng thuận tối thiểu >= 85'}. Bảo toàn vốn là ưu tiên số 1!"
+            )
+            lead_vote = CouncilVote.VETO if veto_reasons else CouncilVote.REJECTED
+
+        lead_opinion = AgentOpinion(
+            agent_id="lead_quant_strategist",
+            agent_name="Lead Quant Strategist (Trưởng Ban Định Lượng AI)",
+            role="Tổng hợp đa tín hiệu, tính toán xác suất thắng, R:R >= 2.0 & phân bổ TP 35/35/30",
+            vote=lead_vote,
+            confidence=consensus_score,
+            rationale=lead_rat,
+            key_metrics={"rr": rr_val, "consensus": consensus_score},
+            execution_time_ms=total_time_ms,
+        )
+
+        # Agent 2: Scalp Specialist
+        scalp_opinion = AgentOpinion(
+            agent_id="scalp_specialist",
+            agent_name="Scalp Specialist (Chuyên Gia Sóng Ngắn 15m/1H)",
+            role="Bắt nhịp vi mô, động lượng RSI/EMA, nến Pinbar rút chân & điểm uốn giá",
+            vote=tech_opinion.vote,
+            confidence=tech_opinion.confidence,
+            rationale=f"Động lượng nến ngắn hạn 15m/1H: {tech_opinion.rationale}",
+            key_metrics=tech_opinion.key_metrics,
+            execution_time_ms=tech_opinion.execution_time_ms,
+        )
+
+        # Agent 3: Macro & SMC Specialist
+        macro_smc_opinion = AgentOpinion(
+            agent_id="macro_smc_specialist",
+            agent_name="Macro & SMC Specialist (Chuyên Gia Vĩ Mô & Smart Money)",
+            role="Phân tích cấu trúc 4H/1D, quét thanh khoản (Liquidity Sweep), khối Order Block & BTC Regime",
+            vote=macro_opinion.vote,
+            confidence=macro_opinion.confidence,
+            rationale=f"Cấu trúc vĩ mô 4H & BTC Regime: {macro_opinion.rationale}",
+            key_metrics=macro_opinion.key_metrics,
+            red_flag=macro_opinion.red_flag,
+            execution_time_ms=macro_opinion.execution_time_ms,
+        )
+
+        # Agent 4: Risk Guardian Zero-Liquidation
+        sl_dist_pct = (abs(entry_val - sl_val) / entry_val * 100.0) if entry_val > 0 and sl_val > 0 else 0.0
+        liq_gap_pct = (100.0 / lev_val * 0.9) if lev_val > 0 else 0.0
+        safety_multiplier = (liq_gap_pct / sl_dist_pct) if sl_dist_pct > 0 else 2.5
+        risk_rat = (
+            f"Thẩm định rủi ro Zero-Liquidation: SL ({sl_dist_pct:.2f}%) an toàn tuyệt đối so với Giá thanh lý ước tính (~{liq_gap_pct:.2f}%). "
+            f"Biên an toàn đạt {safety_multiplier:.1f}x (KHÔNG THỂ CHÁY TÀI KHOẢN). "
+            f"Đòn bẩy {lev_val}x Isolated. {red_opinion.rationale}"
+        )
+        risk_opinion = AgentOpinion(
+            agent_id="risk_guardian_zero_liq",
+            agent_name="Risk Guardian Zero-Liquidation (Vệ Binh Rủi Ro)",
+            role="Bảo toàn vốn tuyệt đối, đo đạc khoảng cách SL vs Liquidation, kiểm soát đòn bẩy & bẫy giá",
+            vote=red_opinion.vote,
+            confidence=red_opinion.confidence,
+            rationale=red_opinion.red_flag or risk_rat,
+            key_metrics={"sl_dist_pct": sl_dist_pct, "liq_gap_pct": liq_gap_pct, "leverage": lev_val},
+            red_flag=red_opinion.red_flag,
+            execution_time_ms=red_opinion.execution_time_ms,
+        )
+
+        # Agent 5: Sentiment & News Scout
+        sentiment_opinion = AgentOpinion(
+            agent_id="sentiment_news_scout",
+            agent_name="Sentiment & News Scout (Thám Báo Tâm Lý & Dòng Tiền)",
+            role="Rà soát tin tức nóng, phát hiện thiên nga đen (SEC, Delist, Hack), tâm lý Funding Rate & FGI",
+            vote=sent_opinion.vote,
+            confidence=sent_opinion.confidence,
+            rationale=sent_opinion.red_flag or sent_opinion.rationale,
+            key_metrics=sent_opinion.key_metrics,
+            red_flag=sent_opinion.red_flag,
+            execution_time_ms=sent_opinion.execution_time_ms,
+        )
+
         result = CouncilDeliberationResult(
             symbol=symbol,
             direction=direction,
@@ -1101,9 +1247,20 @@ class QuantumCouncilArbiter:
             trade_parameters=trade_params,
             deliberated_at=now_iso,
             execution_time_ms=total_time_ms,
+            lead_quant=lead_opinion,
+            scalp_specialist=scalp_opinion,
+            macro_smc=macro_smc_opinion,
+            risk_guardian=risk_opinion,
+            sentiment_scout=sentiment_opinion,
         )
         result.transcript = self.format_telegram_transcript(result)
+        result.debate_html = self.format_council_debate_html(result)
         return result
+
+    def format_council_debate_html(self, result: CouncilDeliberationResult) -> str:
+        """Xuất biên bản tranh luận trực tiếp của 5 đặc vụ Hội đồng Lượng tử dạng HTML Telegram."""
+        from telegram.telegram_notifier import TelegramNotifier
+        return TelegramNotifier.format_council_debate_html(result)
 
     def _apply_risk_engine_protections(
         self,

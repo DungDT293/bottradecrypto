@@ -129,9 +129,9 @@ export const HistoryPage: React.FC = () => {
         </div>
 
         <div className="card">
-          <div className="card-title">Lượt khớp sàn & Vị thế đóng</div>
-          <div className="card-value">{trades.length} <span style={{ fontSize: "14px", fontWeight: 400, color: "var(--text-muted)" }}>/ {effectiveClosedCount} đóng</span></div>
-          <div className="card-subtitle">Khớp lệnh sàn Binance Futures</div>
+          <div className="card-title">Vị thế Đã Đóng & Khớp Sàn</div>
+          <div className="card-value">{effectiveClosedCount} <span style={{ fontSize: "14px", fontWeight: 400, color: "var(--text-muted)" }}>vị thế đã đóng</span></div>
+          <div className="card-subtitle">{trades.length} lượt khớp lệnh sàn gần nhất</div>
         </div>
 
         <div className="card">
@@ -243,7 +243,7 @@ export const HistoryPage: React.FC = () => {
                   <td className="mono" style={{ fontSize: "12px", color: "var(--text-muted)" }}>{tr.commission}</td>
                   <td className={`mono ${toFiniteNumber(tr.realized_pnl) === null ? "text-muted" : toFiniteNumber(tr.realized_pnl)! > 0 ? "text-success" : toFiniteNumber(tr.realized_pnl)! < 0 ? "text-danger" : "text-muted"}`} style={{ fontWeight: 700 }}>
                     {toFiniteNumber(tr.realized_pnl) === null ? "—" : toFiniteNumber(tr.realized_pnl)! === 0 ? (
-                      <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>0.00 USDT (Mở)</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>— (Vị thế mở)</span>
                     ) : (
                       `${toFiniteNumber(tr.realized_pnl)! >= 0 ? "+" : ""}${toFiniteNumber(tr.realized_pnl)!.toFixed(2)} USDT`
                     )}

@@ -849,6 +849,8 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                 # Cập nhật thông số tối ưu từ Hội Đồng Lượng Tử
                 s["confidence"] = deliberation.consensus_score
                 s["council_transcript"] = deliberation.transcript
+                s["council_debate_html"] = getattr(deliberation, "debate_html", "")
+                s["deliberation"] = deliberation
                 if deliberation.trade_parameters:
                     if "leverage" in deliberation.trade_parameters:
                         s["leverage"] = deliberation.trade_parameters["leverage"]
@@ -1393,8 +1395,20 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                 f"Đã khớp {side.value} {total_qty} {sym} @ {real_entry_p} | SL: {sl_p} | TP1: {tp1_p}. Độ tin cậy: {setup.get('confidence')}%",
                 "AI_QUANT",
             )
-        except Exception:
-            pass
+            # Phát sóng trực tiếp Tranh Biện Hội Đồng Lượng Tử AI lên Telegram
+            debate_html = setup.get("council_debate_html")
+            if not debate_html and "deliberation" in setup:
+                debate_html = getattr(setup["deliberation"], "debate_html", "")
+            if debate_html:
+                alert_svc = AlertService.get_instance()
+                if hasattr(alert_svc, "_notifier") and alert_svc._notifier:
+                    notifier = alert_svc._notifier
+                    if hasattr(notifier, "send_debate"):
+                        asyncio.create_task(notifier.send_debate(debate_html))
+                    elif hasattr(notifier, "notify"):
+                        asyncio.create_task(notifier.notify(debate_html, parse_mode="html"))
+        except Exception as e_broadcast:
+            logger.debug(f"Debate broadcast notification failed: {e_broadcast}")
 
         # Ghi nhận thời điểm mở lệnh để áp dụng Global Trade Interval 15m
         self.record_trade_opened(sym)
@@ -1442,3 +1456,42 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
             "executed": exec_res,
             **scan_meta,
         }
+
+    async def evaluate_and_broadcast_debate(
+        self,
+        symbol: str,
+        custom_params: Optional[Dict[str, Any]] = None,
+        broadcast: bool = True,
+    ) -> Any:
+        """
+        Kích hoạt Hội Đồng Lượng Tử AI thẩm định và phát sóng trực tiếp cuộc tranh luận
+        5 đặc vụ lên Telegram theo yêu cầu on-demand hoặc qua lệnh chat.
+        """
+        sym = symbol.upper().replace("/", "").replace(":", "")
+        market_data = dict(custom_params or {})
+
+        # Tự động nạp giá hiện tại từ sàn nếu chưa có
+        if "current_price" not in market_data and "entry_price" not in market_data and self.client:
+            try:
+                px = await self.client.get_symbol_price(sym)
+                if px and float(px) > 0:
+                    market_data["current_price"] = float(px)
+            except Exception:
+                pass
+
+        deliberation = await self.council_arbiter.deliberate(sym, market_data)
+
+        if broadcast and getattr(deliberation, "debate_html", None):
+            try:
+                from services.alert_service import AlertService
+                alert_svc = AlertService.get_instance()
+                if hasattr(alert_svc, "_notifier") and alert_svc._notifier:
+                    notifier = alert_svc._notifier
+                    if hasattr(notifier, "send_debate"):
+                        await notifier.send_debate(deliberation.debate_html)
+                    elif hasattr(notifier, "notify"):
+                        await notifier.notify(deliberation.debate_html, parse_mode="html")
+            except Exception as e_broadcast:
+                logger.debug(f"evaluate_and_broadcast_debate broadcast notice: {e_broadcast}")
+
+        return deliberation
