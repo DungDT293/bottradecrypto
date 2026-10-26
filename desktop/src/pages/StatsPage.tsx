@@ -227,7 +227,11 @@ export const StatsPage: React.FC = () => {
                       {c.trades} lệnh
                     </td>
                     <td style={{ padding: "12px 16px" }}>
-                      {isProfit ? (
+                      {c.trades === 0 ? (
+                        <span className="badge" style={{ backgroundColor: "rgba(148, 163, 184, 0.15)", color: "#94a3b8", fontSize: "11px" }}>
+                          ⚪ Đang Mở (Phí Sàn)
+                        </span>
+                      ) : isProfit ? (
                         <span className="badge" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", fontSize: "11px" }}>
                           🟢 Thắng Lợi
                         </span>
