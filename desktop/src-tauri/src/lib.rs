@@ -146,8 +146,8 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
 
     // 1. Check if packaged sidecar binary exists
     let sidecar_candidates = vec![
-        exe_dir.join("backend-x86_64-pc-windows-msvc.exe"),
         exe_dir.join("backend.exe"),
+        exe_dir.join("backend-x86_64-pc-windows-msvc.exe"),
         exe_dir.join("binaries").join("backend-x86_64-pc-windows-msvc.exe"),
         root.join("desktop").join("src-tauri").join("binaries").join("backend-x86_64-pc-windows-msvc.exe"),
         root.join("binaries").join("backend-x86_64-pc-windows-msvc.exe"),

@@ -113,10 +113,13 @@ def create_api_router(
         if getattr(trading_svc, "_ai_worker_started", False):
             return
         trading_svc._ai_worker_started = True
+        if ai_trader.enabled and exchange_writes_enabled(config):
+            trading_svc.set_engine_status(EngineStatus.RUNNING_LISTEN)
         await asyncio.sleep(12.0)  # Initial wait for server readiness
         while True:
             try:
                 if ai_trader.enabled and exchange_writes_enabled(config) and binance_svc.has_credentials():
+                    trading_svc.set_engine_status(EngineStatus.RUNNING_LISTEN)
                     res = await ai_trader.scan_and_auto_trade()
                     if res.get("executed") and res["executed"].get("status") == "SUCCESS":
                         t_info = res["executed"]
@@ -159,6 +162,7 @@ def create_api_router(
             return
         if not getattr(config, "channel_signals_enabled", False):
             print("[TELEGRAM] Quét tín hiệu kênh Telegram đang tắt (Ưu tiên AI Quant Autonomous Trader).")
+            trading_svc.set_engine_status(EngineStatus.RUNNING_LISTEN)
             return
         trading_svc._listener_started = True
         await asyncio.sleep(1.0)
