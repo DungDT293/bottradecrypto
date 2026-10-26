@@ -151,7 +151,7 @@ def create_api_router(
                     await reconciler.reconcile_all()
             except Exception:
                 pass
-            await asyncio.sleep(20.0)
+            await asyncio.sleep(12.0)
 
     router.reconciliation_task_starter = run_reconciliation_worker
 

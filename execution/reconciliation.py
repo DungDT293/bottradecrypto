@@ -607,7 +607,7 @@ class ReconciliationEngine:
                             is_at_least_be = False
                             if current_sl_px is not None and entry_p > Decimal("0"):
                                 is_at_least_be = (current_sl_px >= entry_p * Decimal("1.0005")) if is_long else (current_sl_px <= entry_p * Decimal("0.9995"))
-                            if any(o.client_order_id.startswith("be_") for o in db_orders):
+                            if any(o.client_order_id.startswith("be_") and o.status in ("NEW", "PARTIALLY_FILLED") for o in db_orders):
                                 is_at_least_be = True
 
                             # 3. Check TP1 status (order fill or mark price reach)
@@ -640,8 +640,8 @@ class ReconciliationEngine:
                                 valid_tp1_direction = (tp1_price > entry_p * Decimal("1.002")) if is_long else (tp1_price < entry_p * Decimal("0.998"))
                                 price_reached_tp1 = valid_tp1_direction and ((mark_p >= tp1_price if is_long else mark_p <= tp1_price) if mark_p > Decimal("0") else False)
 
-                            # 4. Breakeven Trigger Condition (TP1 filled OR price reached TP1 OR price gain >= 0.8%)
-                            price_favorable_for_be = (mark_p >= entry_p * Decimal("1.003")) if is_long else (mark_p <= entry_p * Decimal("0.997"))
+                            # 4. Breakeven Trigger Condition (TP1 filled OR price reached TP1 OR dynamic gain >= 0.8%)
+                            price_favorable_for_be = (mark_p >= entry_p * Decimal("1.002")) if is_long else (mark_p <= entry_p * Decimal("0.998"))
                             dynamic_be_gain = price_gain_pct >= Decimal("0.8") and price_favorable_for_be
                             should_activate_be = (tp1_filled or (price_reached_tp1 and price_favorable_for_be) or dynamic_be_gain)
 
@@ -1122,35 +1122,39 @@ class ReconciliationEngine:
     ) -> bool:
         """
         Đóng khẩn cấp vị thế khi bị bẻ gãy cấu trúc (Early Invalidation Cut):
-        1. Hủy mọi lệnh mở (SL/TP) của symbol này trên Binance.
+        1. Hủy các lệnh TP limit đang treo để giải phóng hạn mức Reduce-Only (dùng 1 request DELETE /fapi/v1/allOpenOrders).
         2. Bắn lệnh MARKET reduce_only để đóng toàn bộ vị thế ngay lập tức.
-        3. Cập nhật DB: trạng thái CLOSED (EARLY_INVALIDATION_CUT).
-        4. Bắn thông báo Telegram notify_early_cut.
+        3. Sau khi lệnh Market thành công, mới hủy lệnh SL Algo đang treo (giữ an toàn tuyệt đối, tránh mất SL khi Market lỗi).
+        4. Cập nhật SQLite: đóng signal và đánh dấu CANCELED các lệnh trong bảng orders.
+        5. Bắn thông báo Telegram & AlertService.
+        6. Giải phóng risk slot và phát sự kiện qua EventBus.
         """
         close_side = OrderSide.SELL if is_long else OrderSide.BUY
         try:
-            # 1. Hủy các lệnh SL algo đang treo
-            all_algos = await self.client.get_open_algo_orders(symbol)
-            for a in (all_algos or []):
-                aid = str(a.get("algoId") or a.get("clientAlgoId") or "")
-                caid = str(a.get("clientAlgoId") or "")
-                if aid:
-                    try:
-                        await self.client.cancel_algo_order(symbol, algo_id=aid, client_algo_id=caid if caid else None)
-                    except Exception:
-                        pass
+            # 1. Hủy các lệnh TP limit đang treo để giải phóng quota Reduce-Only
+            try:
+                await self.client.cancel_all_orders(symbol)
+            except Exception:
+                # Fallback: Hủy từng lệnh nếu cancel_all_orders gặp lỗi
+                all_orders = await self.client.get_open_orders(symbol)
+                for o in (all_orders or []):
+                    oid = str(o.get("clientOrderId") or o.get("orderId") or "")
+                    if oid:
+                        try:
+                            await self.client.cancel_standard_order(symbol, oid)
+                        except Exception:
+                            pass
 
-            # 2. Hủy các lệnh TP limit đang treo
-            all_orders = await self.client.get_open_orders(symbol)
-            for o in (all_orders or []):
-                oid = str(o.get("clientOrderId") or o.get("orderId") or "")
-                if oid:
-                    try:
-                        await self.client.cancel_standard_order(symbol, oid)
-                    except Exception:
-                        pass
+            # 2. Đặt lệnh Market Reduce-Only để đóng vị thế
+            # Lọc quantity theo step_size của sàn Binance để tránh lỗi -1111 / -1013 (LOT_SIZE)
+            if hasattr(self.client, "get_symbol_filter"):
+                try:
+                    f = await self.client.get_symbol_filter(symbol)
+                    if f and f.step_size > Decimal("0"):
+                        quantity = (quantity // f.step_size) * f.step_size
+                except Exception:
+                    pass
 
-            # 3. Đặt lệnh Market Reduce-Only để đóng vị thế
             emg_cid = f"early_{signal_id[:8]}_{uuid.uuid4().hex[:4]}"
             await self.client.create_standard_order(
                 symbol=symbol,
@@ -1161,7 +1165,19 @@ class ReconciliationEngine:
                 reduce_only=True,
             )
 
-            # 4. Cập nhật SQLite
+            # 3. Khi lệnh Market đã thành công, hủy các lệnh SL algo đang treo
+            all_algos = await self.client.get_open_algo_orders(symbol)
+            for a in (all_algos or []):
+                aid = str(a.get("algoId") or a.get("clientAlgoId") or "")
+                caid = str(a.get("clientAlgoId") or "")
+                if aid:
+                    try:
+                        await self.client.cancel_algo_order(symbol, algo_id=aid, client_algo_id=caid if caid else None)
+                    except Exception:
+                        pass
+
+            # 4. Cập nhật SQLite (cả signal và orders)
+            self.order_repo.cancel_open_orders_for_signal(signal_id)
             self.signal_repo.update_signal_state(
                 signal_id,
                 SignalState.CLOSED,
@@ -1201,6 +1217,19 @@ class ReconciliationEngine:
                 )
             except Exception:
                 pass
+
+            # 6. Phát sự kiện và giải phóng rủi ro
+            if event_bus:
+                try:
+                    asyncio.create_task(event_bus.publish("signal_updated", {
+                        "signal_id": signal_id,
+                        "symbol": symbol,
+                        "state": SignalState.CLOSED.value,
+                    }))
+                except Exception:
+                    pass
+
+            await self._notify_slot_freed()
 
             return True
         except Exception as e_close:

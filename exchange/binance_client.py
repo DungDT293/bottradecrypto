@@ -43,6 +43,7 @@ class BinanceFuturesClient:
     _symbol_filter_cache: Dict[str, SymbolFilterInfo] = {}
     _weight_history: List[Any] = []
     _MAX_WEIGHT_PER_60S: int = 2000
+    _last_used_weight_1m: int = 0
     _time_offset_ms: int = 0
     _last_time_sync: float = 0.0
 
@@ -225,7 +226,19 @@ class BinanceFuturesClient:
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=self.config.binance.request_timeout_seconds),
             ) as resp:
-                data = await resp.json()
+                # Track real-time server-side 1m used weight from Binance response header
+                server_weight = resp.headers.get("x-mbx-used-weight-1m")
+                if server_weight and str(server_weight).isdigit():
+                    BinanceFuturesClient._last_used_weight_1m = int(server_weight)
+                    if BinanceFuturesClient._last_used_weight_1m >= 1800:
+                        print(f"[BINANCE WEIGHT GUARD] Server weight cảnh báo cao: {BinanceFuturesClient._last_used_weight_1m}/2400. Tự động giãn nhịp 1.5s...")
+                        await asyncio.sleep(1.5)
+
+                try:
+                    data = await resp.json()
+                except Exception:
+                    raw_text = await resp.text()
+                    data = {"code": resp.status, "msg": raw_text[:200]}
                 if resp.status >= 400:
                     code = data.get("code")
                     msg = data.get("msg", "")

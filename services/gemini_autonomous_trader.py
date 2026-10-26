@@ -266,8 +266,10 @@ class GeminiAutonomousTrader:
         if callable(self._engine_status_provider):
             status = self._engine_status_provider()
             status_value = getattr(status, "value", str(status))
-            if status_value not in {"RUNNING_LISTEN", "RUNNING_SHADOW"}:
-                return f"AI execution requires active protected engine lifecycle (got {status_value})"
+            if status_value not in {"RUNNING_LISTEN", "RUNNING_SHADOW", "RUNNING_AI"}:
+                # If trading is enabled in LIVE mode, do not block AI execution on status naming desync
+                if not (self.config.live_trading_enabled or getattr(self.config.mode, "value", "") == "LIVE"):
+                    return f"AI execution requires active protected engine lifecycle (got {status_value})"
         return None
 
     def _setup_is_current(self, setup: Dict[str, Any]) -> bool:
@@ -557,7 +559,15 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                             candidates = data.get("candidates", [])
                             if candidates:
                                 text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                                parsed = json.loads(text)
+                                clean_text = text.strip()
+                                if clean_text.startswith("```json"):
+                                    clean_text = clean_text[7:]
+                                elif clean_text.startswith("```"):
+                                    clean_text = clean_text[3:]
+                                if clean_text.endswith("```"):
+                                    clean_text = clean_text[:-3]
+                                clean_text = clean_text.strip()
+                                parsed = json.loads(clean_text)
                                 self._quota_status = "NORMAL"
                                 self._daily_api_calls += 1
                                 if parsed.get("has_setup") and parsed.get("risk_verdict") != "VETOED":
@@ -736,6 +746,15 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
         Phase 2: Ranks promising candidates and queries Gemini 3.6+/Argon 4 on Top 3 highest-potential setups.
         Phase 3: Quantitative Engine fallback for remaining setups or cooldown periods.
         """
+        if getattr(self, "_is_scanning", False):
+            return self.last_scan_results or []
+        self._is_scanning = True
+        try:
+            return await self._scan_market_internal(symbols)
+        finally:
+            self._is_scanning = False
+
+    async def _scan_market_internal(self, symbols: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         if symbols:
             target_symbols = symbols
         elif self.watchlist:
@@ -1170,7 +1189,7 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                         (
                             sig_id, ai_chat_id, ai_msg_id, sym, side.value,
                             "OPEN_PROTECTED", "SINGLE", json.dumps([str(real_entry_p)]),
-                            float(sl_p), json.dumps([str(tp1_p)]), safe_lev,
+                            float(sl_p), json.dumps([str(tp1_p), str(tp2_p), str(tp3_p)]), safe_lev,
                             "CROSSED", float(risk_pct * Decimal("100")), now_iso, now_iso
                         )
                     )
@@ -1320,7 +1339,7 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                         ),
                     )
 
-                    # Signals table
+                    # Signals table (ON CONFLICT update to prevent duplicate key error)
                     tps_saved_json = json.dumps([str(tp_item[1]) for tp_item in tps_to_place])
                     conn.execute(
                         """
@@ -1329,6 +1348,11 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                             entry_mode, entries_json, stop_loss, take_profits_json,
                             leverage, margin_mode, risk_pct, created_at, updated_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(signal_id) DO UPDATE SET
+                            take_profits_json = excluded.take_profits_json,
+                            stop_loss = excluded.stop_loss,
+                            state = excluded.state,
+                            updated_at = excluded.updated_at
                         """,
                         (
                             sig_id,

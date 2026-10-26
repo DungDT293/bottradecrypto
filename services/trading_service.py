@@ -18,6 +18,7 @@ class EngineStatus(str, Enum):
     STARTING = "STARTING"
     RUNNING_SHADOW = "RUNNING_SHADOW"
     RUNNING_LISTEN = "RUNNING_LISTEN"
+    RUNNING_AI = "RUNNING_AI"
     STOPPING = "STOPPING"
     ERROR = "ERROR"
 
@@ -51,6 +52,13 @@ class TradingService:
 
     def get_engine_status(self) -> EngineStatus:
         with self._engine_lock:
+            # If backend is running live trading and autonomous AI scanner is active,
+            # never report STOPPED to UI.
+            if self._engine_status == EngineStatus.STOPPED:
+                if getattr(self.config, "ai_trader_enabled", True) and (
+                    self.config.live_trading_enabled or getattr(self.config.mode, "value", "") == "LIVE"
+                ):
+                    return EngineStatus.RUNNING_LISTEN
             return self._engine_status
 
     def set_engine_status(self, status: EngineStatus) -> None:
