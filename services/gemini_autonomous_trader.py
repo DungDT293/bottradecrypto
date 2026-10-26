@@ -27,26 +27,11 @@ from services.quantum_ai_engine import (
 logger = logging.getLogger("gemini_trader")
 
 DEFAULT_WATCHLIST = [
-    "BTCUSDT",
-    "ETHUSDT",
-    "SOLUSDT",
-    "BNBUSDT",
-    "XRPUSDT",
-    "DOGEUSDT",
-    "SUIUSDT",
-    "NEARUSDT",
-    "AVAXUSDT",
-    "PEPEUSDT",
-    "APTUSDT",
-    "ADAUSDT",
-    "LINKUSDT",
-    "PENGUUSDT",
-    "ENAUSDT",
-    "OPUSDT",
-    "ARBUSDT",
-    "TIAUSDT",
-    "INJUSDT",
-    "FETUSDT",
+    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT",
+    "LINKUSDT", "SUIUSDT", "NEARUSDT", "PEPEUSDT", "APTUSDT", "FETUSDT", "TAOUSDT", "RENDERUSDT",
+    "WIFUSDT", "SHIBUSDT", "ARBUSDT", "OPUSDT", "TIAUSDT", "INJUSDT", "SEIUSDT", "DOTUSDT",
+    "ATOMUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT", "AAVEUSDT", "FILUSDT", "FTMUSDT", "ORDIUSDT",
+    "BONKUSDT", "FLOKIUSDT", "ENAUSDT",
 ]
 
 def calculate_ema(prices: List[float], period: int) -> float:
@@ -97,6 +82,8 @@ class GeminiAutonomousTrader:
     - Built-in Quant Engine fallback if Gemini API key is missing or quota runs out.
     - Executes high-probability setups (>= 75% confidence, >= 2.0 R:R) with Zero-Liquidation risk.
     """
+
+    in_flight_symbols: set[str] = set()
 
     def __init__(
         self,
@@ -1124,6 +1111,7 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
 
         sig_id = f"sig_ai_{sym}_{uuid.uuid4().hex[:6]}"
         now_iso = datetime.now(timezone.utc).isoformat()
+        GeminiAutonomousTrader.in_flight_symbols.add(sym)
 
         # 1. Market Entry
         ent_cid = f"ent_{sig_id[:8]}_{uuid.uuid4().hex[:4]}"
@@ -1140,6 +1128,7 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
             if not filled_order_id:
                 raise RuntimeError("Sàn không trả về orderId cho lệnh Entry")
         except Exception as exc:
+            GeminiAutonomousTrader.in_flight_symbols.discard(sym)
             return {"status": "ERROR", "reason": f"Đặt Entry thất bại: {exc}"}
 
         await asyncio.sleep(0.3)
@@ -1147,8 +1136,56 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
         actual_amt = abs(Decimal(str(pos.get("positionAmt", "0")))) if pos else Decimal("0")
         real_entry_p = Decimal(str(pos.get("entryPrice", entry_p))) if pos else entry_p
         if actual_amt <= Decimal("0"):
+            GeminiAutonomousTrader.in_flight_symbols.discard(sym)
             return {"status": "ERROR", "reason": "Entry không tạo vị thế trên sàn"}
         total_qty = min(total_qty, actual_amt)
+
+        # Ghi nhận ngay lập tức tín hiệu vào DB để luồng đối chiếu Reconciliation không coi đây là vị thế mồ côi
+        if self.signal_repo and self.db:
+            try:
+                with self.db.get_connection() as conn:
+                    ai_chat_id = -999001
+                    ai_msg_id = int(time.time() * 1000)
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO messages (
+                            chat_id, message_id, sender_id, telegram_timestamp, received_at,
+                            raw_text, normalized_text
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (ai_chat_id, ai_msg_id, ai_chat_id, now_iso, now_iso, f"AI Autonomous Signal: {sym} {side.value}", f"AI Autonomous Signal: {sym} {side.value}")
+                    )
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO signals (
+                            signal_id, chat_id, message_id, symbol, side, state,
+                            entry_mode, entries_json, stop_loss, take_profits_json,
+                            leverage, margin_mode, risk_pct, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            sig_id, ai_chat_id, ai_msg_id, sym, side.value,
+                            "OPEN_PROTECTED", "SINGLE", json.dumps([str(real_entry_p)]),
+                            float(sl_p), json.dumps([str(tp1_p)]), safe_lev,
+                            "CROSSED", float(risk_pct * Decimal("100")), now_iso, now_iso
+                        )
+                    )
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO orders (
+                            client_order_id, signal_id, symbol, side, order_type,
+                            price, quantity, is_reduce_only, is_algo, exchange_order_id,
+                            status, filled_quantity, avg_fill_price, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            ent_cid, sig_id, sym, order_side.value, "MARKET",
+                            float(real_entry_p), float(total_qty), 0, 0, filled_order_id,
+                            "FILLED", float(total_qty), float(real_entry_p), now_iso, now_iso
+                        )
+                    )
+            except Exception as e_db:
+                logger.warning(f"Immediate DB save warning: {e_db}")
 
         # 2. Protective Algo STOP_MARKET Order (100% Volume)
         sl_cid = f"sl_{sig_id[:8]}_{uuid.uuid4().hex[:4]}"
@@ -1416,6 +1453,7 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
         # Ghi nhận thời điểm mở lệnh để áp dụng Global Trade Interval 15m
         self.record_trade_opened(sym)
 
+        GeminiAutonomousTrader.in_flight_symbols.discard(sym)
         return {
             "status": "SUCCESS",
             "signal_id": sig_id,

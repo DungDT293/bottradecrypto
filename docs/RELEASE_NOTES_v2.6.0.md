@@ -1,0 +1,37 @@
+# 🚀 Release Notes - Phiên Bản v2.6.0 (Quantum Sentinel & Top 35 Autonomous AI)
+
+*Mã phiên bản: v2.6.0*  
+*Ngày phát hành: 26/10/2026*  
+*Tác giả: Jarvis Quantum Core Engineering Team*
+
+---
+
+## 🌟 TỔNG QUAN BẢN PHÁT HÀNH v2.6.0
+
+Phiên bản **v2.6.0 (Quantum Sentinel & Top 35 Autonomous AI)** là bản nâng cấp toàn diện và ổn định nhất của hệ thống, tập trung giải quyết triệt để các bài toán thực chiến then chốt:
+
+1. **Triệt tiêu hiện tượng Race Condition (Lệnh mở rồi đóng khẩn cấp):**
+   * *Nguyên nhân cũ:* Khớp lệnh Entry xong nhưng DB ghi trễ khi đang đặt TP, dẫn đến tiến trình Reconciliation hiểu nhầm là vị thế mồ côi ngoài luồng và kích hoạt đóng khẩn cấp.
+   * *Giải pháp v2.6.0:* Ghi nhận tức thì vào SQLite ngay milli-giây đầu tiên khi Entry xác nhận, bổ sung cơ chế khóa bộ nhớ `in_flight_symbols` và bộ đệm thời gian 2 phút trong Reconciliation.
+
+2. **Chống chập chờn kết nối sàn Binance (Anti-Flapping Fail-Soft Resiliency):**
+   * *Nguyên nhân cũ:* Mỗi chu kỳ sync gọi 6 API đồng thời; 1 micro-timeout tạm thời làm reset toàn bộ `is_connected=False` khiến giao diện chớp tắt "Chưa kết nối" và "Chưa có dữ liệu".
+   * *Giải pháp v2.6.0:* Cơ chế chống chập chờn thông minh giữ nguyên bộ nhớ đệm an toàn, chỉ chuyển trạng thái sau 3 lần lỗi liên tiếp; tối ưu hóa giảm 33% số lệnh gọi API thừa.
+
+3. **Chế độ Giám sát An toàn Tuyệt đối cho Telegram Bot (100% Read-Only Monitoring):**
+   * Bot Telegram chuyển hoàn toàn thành trợ lý giám sát & cảnh báo thông minh, triệt tiêu mọi khả năng can thiệp lệnh hay đóng/mở lệnh từ xa để bảo vệ 100% an toàn bảo mật.
+   * Tích hợp bộ mẫu thông báo thông minh chuẩn Jarvis:
+     - **TP1:** Báo chốt 35% + Kích hoạt Kèo Bất Tử (Break-Even).
+     - **Full 3 TP:** Chúc mừng Grand Slam, tổng PnL và ROE %.
+     - **Chạm SL:** Trấn an tinh thần, giải thích nguyên nhân kỹ thuật (quét râu nến/kháng cự 1H), khẳng định kỷ luật bảo vệ 98.5% NAV.
+     - **Báo cáo 23:00:** Bảng sao kê chi tiết từng coin (Realized, Phí, Lãi ròng) và dự phóng toán học số ngày đạt các cột mốc $300 / $500 / $1000 USDT.
+
+4. **Tái cấu trúc Giao diện Thống kê (Coin-by-Coin PnL Breakdown):**
+   * Loại bỏ các chỉ số cào tin rác Telegram không còn sử dụng.
+   * Bổ sung Bảng Sao Kê Chi Tiết Từng Cặp Tiền (Coin-by-Coin Table) hiển thị trực quan lãi/lỗ ròng, phí sàn, phí funding và số lệnh chốt từng đồng coin theo chuẩn kế toán sàn Binance.
+   * Tinh gọn Sidebar còn 7 mục chuẩn vận hành.
+
+5. **Mở rộng Radar AI lên Top 35 Coin & Vua Sóng SMC:**
+   * Mở rộng danh mục theo dõi tự động lên đủ 35 đồng coin thanh khoản hàng đầu.
+   * Làm rõ nhãn phân tầng `Tier 80%+ (Quét tất cả từ 80%, 85% & 90% - Bắt trọn mọi kèo ngon)`.
+   * Tắt cào kênh Telegram (`channel_signals_enabled: false`) để dành trọn tài nguyên CPU/RAM cho AI Quant.

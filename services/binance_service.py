@@ -48,6 +48,9 @@ class BinanceService:
         self.config = config
         self._sync_attempted: bool = False
         self._last_sync_monotonic: float = 0.0
+        self._consecutive_failures: int = 0
+        self._cached_position_mode: Optional[str] = None
+        self._last_mode_check: float = 0.0
         self._cached_snapshot: BinanceAccountSnapshot = BinanceAccountSnapshot(
             is_connected=False,
             connected=False,
@@ -234,8 +237,15 @@ class BinanceService:
                 time_res = await client._request("GET", "/fapi/v1/time")
                 server_time = time_res.get("serverTime")
 
-                # 2. Position mode
-                is_one_way = await client.check_position_mode_one_way()
+                # 2. Position mode (cached 30 mins to avoid redundant signed requests)
+                if self._cached_position_mode is None or (time.time() - self._last_mode_check > 1800):
+                    try:
+                        is_one_way = await client.check_position_mode_one_way()
+                        self._cached_position_mode = "ONE_WAY" if is_one_way else "HEDGE"
+                        self._last_mode_check = time.time()
+                    except Exception:
+                        self._cached_position_mode = self._cached_position_mode or "ONE_WAY"
+                position_mode_str = self._cached_position_mode
 
                 # 3. Account balance / equity
                 acc_data = await client._request("GET", "/fapi/v2/account", signed=True)
@@ -274,12 +284,13 @@ class BinanceService:
                 except Exception:
                     pass
 
+                self._consecutive_failures = 0
                 self._cached_snapshot = BinanceAccountSnapshot(
                     is_connected=True,
                     connected=True,
                     mode=self.config.mode,
                     server_time=server_time,
-                    position_mode="ONE_WAY" if is_one_way else "HEDGE",
+                    position_mode=position_mode_str,
                     wallet_balance=total_wallet,
                     equity=total_equity,
                     total_margin_balance=total_equity,
@@ -306,6 +317,11 @@ class BinanceService:
                 last_error = e
             finally:
                 await client.close()
+
+        self._consecutive_failures += 1
+        # Chế độ chống chập chờn (Anti-Flapping): Nếu trước đó đang kết nối bình thường, không ngắt kết nối ngay khi gặp lỗi mạng tạm thời
+        if self._cached_snapshot and self._cached_snapshot.is_connected and self._consecutive_failures < 3:
+            return self._cached_snapshot
 
         self._cached_snapshot = BinanceAccountSnapshot(
             is_connected=False,

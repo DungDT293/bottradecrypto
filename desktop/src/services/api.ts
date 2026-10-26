@@ -218,6 +218,7 @@ export const api = {
   // 6. Statistics
   getPnL: (daysBack = 0) => request<PnLSummary>(`/stats/pnl?days_back=${encodeURIComponent(daysBack)}`),
   getPnLChart: () => request<PnLChartResponse>("/stats/pnl-chart"),
+  getCoinPnL: (daysBack = 0) => request<{ success: boolean; coins: any[] }>(`/stats/coins?days_back=${encodeURIComponent(daysBack)}`),
   syncPnL: () => request<{ success: boolean; message: string; details?: any }>("/stats/sync", { method: "POST" }),
   getTelemetry: () => request<any>("/stats/telemetry"),
 

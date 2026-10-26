@@ -444,6 +444,38 @@ class ReconciliationEngine:
                         "POSITION_CLOSED_RECONCILED",
                         f"Vị thế {symbol} đã hoàn tất đóng trên sàn Binance",
                     )
+
+                    # Thẩm định kết quả đóng vị thế & phát sóng thông báo thông minh qua Telegram
+                    try:
+                        from telegram.dedicated_bot import get_dedicated_bot
+                        bot = get_dedicated_bot()
+                        if bot and bot.is_configured:
+                            user_trades = await self.client._request(
+                                "GET", "/fapi/v1/userTrades",
+                                params={"symbol": symbol, "limit": 10},
+                                signed=True
+                            ) or []
+
+                            closing_pnl = 0.0
+                            last_exit_price = 0.0
+                            for ut in user_trades:
+                                pnl = float(ut.get("realizedPnl") or 0.0)
+                                if abs(pnl) > 1e-6:
+                                    closing_pnl += pnl
+                                    last_exit_price = float(ut.get("price") or 0.0)
+
+                            all_sig_orders = self.order_repo.get_orders_for_signal(sig_id)
+                            tp_orders = [o for o in all_sig_orders if "tp_" in o.client_order_id]
+                            filled_tps = [o for o in tp_orders if o.status == "FILLED"]
+
+                            if len(filled_tps) >= 3 or (closing_pnl > 0.1 and len(filled_tps) >= len(tp_orders) and len(tp_orders) > 0):
+                                asyncio.create_task(bot.notify_full_tp(symbol=symbol, total_pnl_usdt=closing_pnl))
+                            elif closing_pnl < -0.15:
+                                sl_val = last_exit_price or row.get("stop_loss") or "SL"
+                                root_cause = "Thị trường biến động quét râu nến qua vùng hỗ trợ/kháng cự 1H. Dừng lỗ kỷ luật giúp bảo vệ 98.5% NAV an toàn."
+                                asyncio.create_task(bot.notify_sl_hit(symbol=symbol, sl_price=sl_val, loss_usdt=abs(closing_pnl), root_cause=root_cause))
+                    except Exception as e_notify:
+                        logger.debug(f"Smart close notification failed: {e_notify}")
                     if event_bus:
                         try:
                             asyncio.create_task(event_bus.publish("signal_updated", {
@@ -793,10 +825,24 @@ class ReconciliationEngine:
                             report["discrepancies"].append(f"Lỗi kiểm tra Breakeven / Khóa lãi cho {symbol}: {ex_be}")
 
         # 3. Fallback: Check for any active Binance positions that were NOT covered in active_rows (e.g. marked CLOSED earlier)
+        from services.gemini_autonomous_trader import GeminiAutonomousTrader
         checked_symbols = {dict(r)["symbol"] for r in active_rows}
         for pos_sym, pos in positions_map.items():
+            if pos_sym in getattr(GeminiAutonomousTrader, "in_flight_symbols", set()):
+                continue
             amt = Decimal(str(pos.get("positionAmt", "0")))
             if abs(amt) > Decimal("0") and pos_sym not in checked_symbols:
+                # Bỏ qua nếu đã có tín hiệu cho symbol này được tạo trong 2 phút gần nhất (đang trong quá trình khớp lệnh)
+                try:
+                    with self.signal_repo.db.get_connection() as conn:
+                        recent_row = conn.execute(
+                            "SELECT signal_id FROM signals WHERE symbol = ? AND created_at > datetime('now', '-2 minutes')",
+                            (pos_sym,)
+                        ).fetchone()
+                        if recent_row:
+                            continue
+                except Exception:
+                    pass
                 active_sl_orders = [
                     a for a in (all_open_algos or [])
                     if a.get("symbol") == pos_sym

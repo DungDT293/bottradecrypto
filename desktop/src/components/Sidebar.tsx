@@ -2,20 +2,15 @@ import React from "react";
 import {
   LayoutDashboard,
   Link2,
-  Users,
-  Radio,
   TrendingUp,
   History,
   BarChart2,
-  CheckSquare,
   FileText,
   Settings,
   ShieldCheck,
-  Trophy,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import type { NavTab } from "../context/AppContext";
-import { api } from "../services/api";
 
 interface NavItemDef {
   key: NavTab;
@@ -26,26 +21,15 @@ interface NavItemDef {
 
 export const Sidebar: React.FC = () => {
   const { tab, setTab, snapshot } = useApp();
-  const [reviewCount, setReviewCount] = React.useState<number>(0);
-
-  React.useEffect(() => {
-    api.getSignals("NEEDS_REVIEW").then((sigs) => {
-      setReviewCount(sigs.length);
-    }).catch(() => {});
-  }, [snapshot]);
 
   const unreadAlerts = snapshot?.unread_alerts_count ?? (snapshot?.alerts?.filter((a) => !a.read).length || 0);
 
   const navItems: NavItemDef[] = [
     { key: "overview", label: "Tổng quan", icon: LayoutDashboard },
-    { key: "connections", label: "Kết nối", icon: Link2 },
-    { key: "groups", label: "Nhóm Telegram", icon: Users },
-    { key: "leaderboard", label: "Đánh giá & Xếp hạng", icon: Trophy },
-    { key: "signals", label: "Tín hiệu", icon: Radio },
     { key: "trading", label: "Đang giao dịch", icon: TrendingUp },
     { key: "history", label: "Lịch sử", icon: History },
-    { key: "stats", label: "Thống kê", icon: BarChart2 },
-    { key: "reviews", label: "Chờ xác nhận", icon: CheckSquare, badge: reviewCount },
+    { key: "stats", label: "Thống kê & PnL", icon: BarChart2 },
+    { key: "connections", label: "Kết nối", icon: Link2 },
     { key: "logs", label: "Nhật ký & Cảnh báo", icon: FileText, badge: unreadAlerts },
     { key: "settings", label: "Cài đặt", icon: Settings },
   ];
@@ -56,7 +40,7 @@ export const Sidebar: React.FC = () => {
         <ShieldCheck size={24} className="text-success" />
         <div>
           <h1>Signal Executor</h1>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v2.5.0 Quantum Dual-AI</div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v2.6.0 Quantum Dual-AI</div>
         </div>
 
       </div>

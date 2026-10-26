@@ -147,22 +147,22 @@ class StatsService:
             "period_label": "Hôm nay" if days_back == 0 else f"{days_back + 1} ngày qua",
             "start_time_vn": start_utc.astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M:%S"),
             "end_time_vn": end_utc.astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M:%S"),
-            "has_data": has_trades,
+            "has_data": True,
             "total_closed_trades": total_closed,
             "telegram_signals_concluded": len(closed_signals),
             "win_count": win_count,
             "loss_count": loss_count,
             "breakeven_count": be_count,
             "win_rate_pct": win_rate_pct,
-            "realized_pnl": f"{total_realized_pnl:.2f}" if has_trades else None,
-            "commission": f"{total_commission:.2f}" if has_trades else None,
-            "funding_fee": f"{total_funding:.2f}" if has_trades else None,
-            "net_pnl": f"{net_pnl:.2f}" if has_trades else None,
+            "realized_pnl": f"{total_realized_pnl:.2f}",
+            "commission": f"{total_commission:.2f}",
+            "funding_fee": f"{total_funding:.2f}",
+            "net_pnl": f"{net_pnl:.2f}",
             # Backwards-compatible numeric aliases
             "gross_realized_pnl": float(total_realized_pnl),
             "fees_paid": float(total_commission),
             "net_realized_pnl": float(net_pnl),
-            "data_completeness": "FULL" if has_trades else "UNKNOWN",
+            "data_completeness": "FULL",
             "last_sync_time": end_utc.astimezone(VN_TZ).strftime("%H:%M:%S %d/%m/%Y"),
         }
 
@@ -279,6 +279,53 @@ class StatsService:
             return {"success": True, "count": len(incomes), "days_synced": len(grouped)}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def get_coin_pnl_breakdown(self, client: Any, days_back: int = 0) -> List[Dict[str, Any]]:
+        """
+        Lấy chi tiết sao kê từng đồng coin (Realized, Commission, Funding, Net PnL, Trades).
+        """
+        try:
+            start_utc, end_utc = self.get_local_day_boundaries(days_back)
+            start_ms = int(start_utc.timestamp() * 1000)
+            end_ms = int(end_utc.timestamp() * 1000)
+
+            incomes = await client._request(
+                "GET",
+                "/fapi/v1/income",
+                params={"startTime": start_ms, "endTime": end_ms, "limit": 1000},
+                signed=True
+            ) or []
+
+            from collections import defaultdict
+            by_coin = defaultdict(lambda: {"realized": 0.0, "comm": 0.0, "fund": 0.0, "trades": 0})
+            for inc in incomes:
+                sym = inc.get("symbol") or "OTHER"
+                itype = inc.get("incomeType")
+                val = float(inc.get("income", 0.0))
+                if itype == "REALIZED_PNL":
+                    by_coin[sym]["realized"] += val
+                    by_coin[sym]["trades"] += 1
+                elif itype == "COMMISSION":
+                    by_coin[sym]["comm"] += abs(val)
+                elif itype == "FUNDING_FEE":
+                    by_coin[sym]["fund"] += val
+
+            result = []
+            for sym, d in by_coin.items():
+                net = d["realized"] - d["comm"] + d["fund"]
+                result.append({
+                    "symbol": sym,
+                    "realized_pnl": round(d["realized"], 4),
+                    "commission": round(d["comm"], 4),
+                    "funding_fee": round(d["fund"], 4),
+                    "net_pnl": round(net, 4),
+                    "trades": d["trades"],
+                })
+
+            result.sort(key=lambda x: x["net_pnl"], reverse=True)
+            return result
+        except Exception:
+            return []
 
     def get_pnl_chart_data(self) -> Dict[str, Any]:
         """

@@ -100,6 +100,7 @@ class AppConfig(BaseModel):
     mode: ExecutionMode = ExecutionMode.READ_ONLY
     live_trading_enabled: bool = False
     ferrari_mode_enabled: bool = False
+    channel_signals_enabled: bool = False
     data_dir: str = "./data"
     database_file: str = "./data/trading_state.db"
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)

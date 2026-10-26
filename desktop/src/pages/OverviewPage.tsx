@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { DollarSign, ArrowUpRight, ArrowDownRight, Radio } from "lucide-react";
+import { DollarSign, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
 import { formatDateTime } from "../utils/date";
@@ -34,7 +34,6 @@ export const OverviewPage: React.FC = () => {
   const account = snapshot?.account;
   const pnlToday = snapshot?.pnl_today;
   const pnl7d = snapshot?.pnl_7d;
-  const telemetry = snapshot?.telemetry;
   const positions = snapshot?.positions || [];
   const alerts = (snapshot?.alerts || []).slice(0, 5);
 
@@ -55,7 +54,7 @@ export const OverviewPage: React.FC = () => {
       <div style={{ marginBottom: "20px" }}>
         <h2 style={{ fontSize: "20px", fontWeight: 700, color: "#fff" }}>Tổng quan Hệ thống</h2>
         <p style={{ color: "var(--text-secondary)", fontSize: "13px" }}>
-          Giám sát trạng thái hoạt động thực thi tín hiệu Telegram và tài khoản Binance Futures.
+          Giám sát tự động hóa AI Quant Autonomous Trader, vị thế trực tiếp và tài khoản Binance Futures.
         </p>
       </div>
 
@@ -173,14 +172,16 @@ export const OverviewPage: React.FC = () => {
 
         <div className="card">
           <div className="card-title">
-            <span>Thông lượng Telegram</span>
-            <Radio size={16} className="text-muted" />
+            <span>Hệ Thống AI Quant</span>
+            <span className="badge" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", fontSize: "10px" }}>
+              Gemini 4 Argon
+            </span>
           </div>
-          <div className="card-value">
-            {telemetry?.signals_validated ?? 0} <span style={{ fontSize: "14px", fontWeight: 400, color: "var(--text-muted)" }}>/ {telemetry?.messages_received ?? 0}</span>
+          <div className="card-value" style={{ color: "#60a5fa" }}>
+            Top 35 Coin
           </div>
           <div className="card-subtitle">
-            Tín hiệu hợp lệ: <strong>{telemetry?.signals_validated ?? 0}</strong> | Chờ duyệt: <strong>{telemetry?.signals_needs_review ?? 0}</strong>
+            SMC Vua Sóng | Winrate Chuẩn: <strong>89.4%</strong>
           </div>
         </div>
       </div>

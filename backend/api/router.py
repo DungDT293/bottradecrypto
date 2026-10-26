@@ -157,6 +157,9 @@ def create_api_router(
     async def run_listener_loop():
         if getattr(trading_svc, "_listener_started", False):
             return
+        if not getattr(config, "channel_signals_enabled", False):
+            print("[TELEGRAM] Quét tín hiệu kênh Telegram đang tắt (Ưu tiên AI Quant Autonomous Trader).")
+            return
         trading_svc._listener_started = True
         await asyncio.sleep(1.0)
         try:
@@ -1401,6 +1404,24 @@ def create_api_router(
     @router.get("/stats/telemetry", dependencies=[Depends(verify_token)])
     async def get_stats_telemetry():
         return stats_svc.get_telegram_telemetry()
+
+    @router.get("/stats/coins", dependencies=[Depends(verify_token)])
+    async def get_stats_coins(days_back: int = Query(0, ge=0, le=3650)):
+        if binance_svc.has_credentials():
+            client = None
+            try:
+                client = BinanceFuturesClient(config)
+                coins = await stats_svc.get_coin_pnl_breakdown(client, days_back=days_back)
+                return {"success": True, "coins": coins}
+            except Exception as e:
+                return {"success": False, "coins": [], "error": str(e)}
+            finally:
+                if client is not None:
+                    try:
+                        await client.close()
+                    except Exception:
+                        pass
+        return {"success": True, "coins": []}
 
     # -------------------------------------------------------------
     # 7. Alerts & Logs

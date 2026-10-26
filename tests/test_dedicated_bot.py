@@ -136,71 +136,46 @@ async def test_dedicated_bot_remote_actions():
     bot.config.live_trading_enabled = True
     bot.send_message = AsyncMock(return_value=True)
 
-    # 1. Close single position via callback act_cls_SOLUSDT
-    with patch("exchange.binance_client.BinanceFuturesClient.cancel_all_symbol_orders", new_callable=AsyncMock) as mock_cancel, \
-         patch("exchange.binance_client.BinanceFuturesClient.get_position", new_callable=AsyncMock) as mock_get_pos, \
-         patch("exchange.binance_client.BinanceFuturesClient.create_standard_order", new_callable=AsyncMock) as mock_order, \
-         patch("exchange.binance_client.BinanceFuturesClient.get_income_history", new_callable=AsyncMock) as mock_income, \
-         patch("exchange.binance_client.BinanceFuturesClient.close", new_callable=AsyncMock):
-
-        mock_get_pos.return_value = {"symbol": "SOLUSDT", "positionAmt": "-2.54"}
-        mock_income.return_value = [{"symbol": "SOLUSDT", "income": "3.50", "incomeType": "REALIZED_PNL"}]
-
-        update_cls = {
-            "update_id": 201,
-            "callback_query": {
-                "id": "cb_cls_1",
-                "from": {"id": 123456},
-                "data": "act_cls_SOLUSDT",
-                "message": {"chat": {"id": 123456}}
-            }
+    # 1. Close single position via callback act_cls_SOLUSDT is strictly rejected by Safety Notice
+    update_cls = {
+        "update_id": 201,
+        "callback_query": {
+            "id": "cb_cls_1",
+            "from": {"id": 123456},
+            "data": "act_cls_SOLUSDT",
+            "message": {"chat": {"id": 123456}}
         }
-        await bot.handle_update(update_cls)
-        assert mock_cancel.called
-        assert mock_order.called
-        assert any("ĐÃ ĐÓNG VỊ THẾ SOLUSDT" in str(c) for c in bot.send_message.call_args_list)
+    }
+    await bot.handle_update(update_cls)
+    assert any("CHẾ ĐỘ GIÁM SÁT AN TOÀN" in str(c) for c in bot.send_message.call_args_list)
 
-    # 2. Move SL to Break-Even via callback act_be_SOLUSDT
+    # 2. Move SL to Break-Even via callback act_be_SOLUSDT is strictly rejected by Safety Notice
     bot.send_message.reset_mock()
-    with patch("exchange.binance_client.BinanceFuturesClient.get_position", new_callable=AsyncMock) as mock_get_pos, \
-         patch("exchange.binance_client.BinanceFuturesClient.get_symbol_filter", new_callable=AsyncMock) as mock_filter, \
-         patch("exchange.binance_client.BinanceFuturesClient.get_open_algo_orders", new_callable=AsyncMock) as mock_algos, \
-         patch("exchange.binance_client.BinanceFuturesClient.create_algo_order", new_callable=AsyncMock) as mock_algo_order, \
-         patch("exchange.binance_client.BinanceFuturesClient.close", new_callable=AsyncMock):
-
-        mock_get_pos.return_value = {"symbol": "SOLUSDT", "positionAmt": "-2.54", "entryPrice": "100.10", "markPrice": "98.50"}
-        mock_filter.return_value = SymbolFilterInfo("SOLUSDT", Decimal("0.01"), Decimal("0.01"), Decimal("0.01"), Decimal("10000"), Decimal("5.0"), True)
-        mock_algos.return_value = []
-
-        update_be = {
-            "update_id": 202,
-            "callback_query": {
-                "id": "cb_be_1",
-                "from": {"id": 123456},
-                "data": "act_be_SOLUSDT",
-                "message": {"chat": {"id": 123456}}
-            }
+    update_be = {
+        "update_id": 202,
+        "callback_query": {
+            "id": "cb_be_1",
+            "from": {"id": 123456},
+            "data": "act_be_SOLUSDT",
+            "message": {"chat": {"id": 123456}}
         }
-        await bot.handle_update(update_be)
-        assert mock_algo_order.called
-        assert any("KÍCH HOẠT KÈO BẤT TỬ SOLUSDT" in str(c) for c in bot.send_message.call_args_list)
+    }
+    await bot.handle_update(update_be)
+    assert any("CHẾ ĐỘ GIÁM SÁT AN TOÀN" in str(c) for c in bot.send_message.call_args_list)
 
-    # 3. Toggle Ferrari Mode via callback act_toggle_ferrari
+    # 3. Toggle Ferrari Mode via callback act_toggle_ferrari informs user it's centrally managed on Desktop
     bot.send_message.reset_mock()
-    with patch("config.config.save_config"):
-        curr_ferrari = bot.config.ferrari_mode_enabled
-        update_ferrari = {
-            "update_id": 203,
-            "callback_query": {
-                "id": "cb_ferrari_1",
-                "from": {"id": 123456},
-                "data": "act_toggle_ferrari",
-                "message": {"chat": {"id": 123456}}
-            }
+    update_ferrari = {
+        "update_id": 203,
+        "callback_query": {
+            "id": "cb_ferrari_1",
+            "from": {"id": 123456},
+            "data": "act_toggle_ferrari",
+            "message": {"chat": {"id": 123456}}
         }
-        await bot.handle_update(update_ferrari)
-        assert bot.config.ferrari_mode_enabled == (not curr_ferrari)
-        assert any("FERRARI MODE" in str(c) for c in bot.send_message.call_args_list)
+    }
+    await bot.handle_update(update_ferrari)
+    assert any("CẤU HÌNH ĐƯỢC QUẢN LÝ TẬP TRUNG TRÊN DESKTOP" in str(c) for c in bot.send_message.call_args_list)
 
     # 4. Margin Health via /margin
     bot.send_message.reset_mock()

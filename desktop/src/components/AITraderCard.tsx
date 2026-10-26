@@ -539,9 +539,9 @@ export const AITraderCard: React.FC = () => {
                     handleSaveParams(scanInterval, val);
                   }}
                 >
-                  <option value={80}>Tier 80% (SMC Liquidity Sweep - Chuẩn Winrate 79.5%)</option>
-                  <option value={85}>Tier 85% (SMC Order Block Retest - Chuẩn Winrate 81.3%)</option>
-                  <option value={90}>Tier 90% (Trend Continuation Vua Sóng - Chuẩn Winrate 89.4%)</option>
+                  <option value={80}>Tier 80%+ (Mở Rộng: Quét tất cả từ 80%, 85% &amp; 90% - Bắt trọn mọi kèo ngon)</option>
+                  <option value={85}>Tier 85%+ (Tiêu Chuẩn: Bắt Order Block &amp; Vua Sóng &gt;= 85% - WR 81.3%)</option>
+                  <option value={90}>Tier 90%+ (Siêu Chọn Lọc: Chỉ bắt Trend Continuation Vua Sóng &gt;= 90% - WR 89.4%)</option>
                 </select>
               </div>
             </div>
@@ -550,8 +550,14 @@ export const AITraderCard: React.FC = () => {
 
         {/* Watchlist Chips */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
-          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Danh sách theo dõi:</span>
-          {(aiStatus?.watchlist || ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "NEARUSDT", "AVAXUSDT", "PEPEUSDT", "APTUSDT", "ADAUSDT", "LINKUSDT", "PENGUUSDT", "ENAUSDT"]).map((sym) => (
+          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Danh sách theo dõi (Top 35 Coin):</span>
+          {(aiStatus?.watchlist || [
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT",
+            "LINKUSDT", "SUIUSDT", "NEARUSDT", "PEPEUSDT", "APTUSDT", "FETUSDT", "TAOUSDT", "RENDERUSDT",
+            "WIFUSDT", "SHIBUSDT", "ARBUSDT", "OPUSDT", "TIAUSDT", "INJUSDT", "SEIUSDT", "DOTUSDT",
+            "ATOMUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT", "AAVEUSDT", "FILUSDT", "FTMUSDT", "ORDIUSDT",
+            "BONKUSDT", "FLOKIUSDT", "ENAUSDT"
+          ]).map((sym) => (
             <span
               key={sym}
               style={{

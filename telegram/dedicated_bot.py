@@ -148,13 +148,13 @@ def set_dedicated_bot(bot: "DedicatedTelegramBot") -> None:
 
 
 def get_main_reply_keyboard() -> Dict[str, Any]:
-    """Bàn phím tác vụ nhanh 1-chạm cố định dưới đáy màn hình chat."""
+    """Bàn phím tác vụ nhanh 1-chạm cố định dưới đáy màn hình chat (Chế độ Giám sát An toàn)."""
     return {
         "keyboard": [
             [{"text": "📊 Vị Thế Đang Mở"}, {"text": "📈 Lãi Lỗ Chi Tiết Từng Coin"}],
             [{"text": "🏛️ 35 Top Coin AI"}, {"text": "🎯 Jarvis Radar Quét Kèo"}],
             [{"text": "🚀 Dự Báo Lãi Kép 300$/1000$"}, {"text": "🛡️ Kèo Bất Tử (BE)"}],
-            [{"text": "⚡ Bật/Tắt Ferrari"}, {"text": "🏥 Sức Khỏe Ký Quỹ"}],
+            [{"text": "⚡ Trạng Thái Hệ Thống"}, {"text": "🏥 Sức Khỏe Ký Quỹ"}],
             [{"text": "🚨 Phân Tích Vĩ Mô BTC"}, {"text": "📡 Ping & VPS Health"}],
             [{"text": "❓ Hướng Dẫn Jarvis"}]
         ],
@@ -164,7 +164,7 @@ def get_main_reply_keyboard() -> Dict[str, Any]:
 
 
 def get_main_inline_keyboard() -> Dict[str, Any]:
-    """Các nút điều khiển nhanh đính kèm tin nhắn."""
+    """Các nút điều khiển nhanh đính kèm tin nhắn (Chế độ Giám sát An toàn)."""
     return {
         "inline_keyboard": [
             [
@@ -180,7 +180,7 @@ def get_main_inline_keyboard() -> Dict[str, Any]:
                 {"text": "🛡️ Kèo Bất Tử (BE)", "callback_data": "nav_immortal"}
             ],
             [
-                {"text": "⚡ Bật/Tắt Ferrari", "callback_data": "act_toggle_ferrari"},
+                {"text": "⚡ Trạng Thái Hệ Thống", "callback_data": "nav_status"},
                 {"text": "🏥 Sức Khỏe Ký Quỹ", "callback_data": "nav_margin"}
             ],
             [
@@ -789,21 +789,16 @@ class DedicatedTelegramBot:
             lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             lines.append(f"💰 <b>Tổng Unrealized PnL:</b> {upnl_emoji} <b>{total_upnl:+.2f} USDT</b>")
 
-            keyboard_rows = []
-            for p in positions:
-                sym = p.get("symbol", "")
-                short_c = sym.replace("USDT", "")
-                keyboard_rows.append([
-                    {"text": f"🛡️ BE {short_c}", "callback_data": f"act_be_{sym}"},
-                    {"text": f"🛑 Đóng {short_c}", "callback_data": f"act_cls_{sym}"}
-                ])
-            keyboard_rows.append([
-                {"text": "🚨 ĐÓNG TOÀN BỘ VỊ THẾ", "callback_data": "act_close_all_confirm"}
-            ])
-            keyboard_rows.append([
-                {"text": "🔄 Làm Mới Vị Thế", "callback_data": "nav_positions"},
-                {"text": "📈 Lãi Lỗ Từng Coin", "callback_data": "nav_pnl"}
-            ])
+            keyboard_rows = [
+                [
+                    {"text": "🔄 Làm Mới Vị Thế", "callback_data": "nav_positions"},
+                    {"text": "📈 Lãi Lỗ Từng Coin", "callback_data": "nav_pnl"}
+                ],
+                [
+                    {"text": "🏥 Sức Khỏe Ký Quỹ", "callback_data": "nav_margin"},
+                    {"text": "🛡️ Kèo Bất Tử (BE)", "callback_data": "nav_immortal"}
+                ]
+            ]
 
             await self.send_message(
                 chat_id,
@@ -1129,14 +1124,15 @@ class DedicatedTelegramBot:
             ferrari_txt = "🟢 BẬT (x35 - x40, Tối đa 20 vị thế)" if is_ferrari else "⚪ TẮT (Chế độ an toàn 20x)"
 
             text = (
-                "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR v2.5.0 (JARVIS MARK 85)</b>\n"
+                "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR v2.6.0 (JARVIS QUANTUM SENTINEL)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"• Chế độ giao dịch: <b>{mode} (TIỀN THẬT LIVE)</b>\n"
                 f"• Ferrari Mode: <b>{ferrari_txt}</b>\n"
                 "• Bảo vệ rủi ro: 🟢 <b>Zero-Liquidation Invariant (Bất biến)</b>\n"
                 "• Kèo Bất Tử: 🟢 <b>Kích hoạt sớm (+0.8% Gain = +16% ROE)</b>\n"
                 "• Bộ lọc vĩ mô 4H: 🟢 <b>4H Macro Trend Shield (Chặn ngược trend)</b>\n"
-                "• Số lượng kênh tinh hoa: <b>7 Kênh đã duyệt</b>\n"
+                "• Hệ thống Quant AI: 🟢 <b>Gemini 4 Argon (Top 35 Coin)</b>\n"
+                "• Giám sát từ xa: 🟢 <b>Chế độ Read-Only An Toàn Tuyệt Đối</b>\n"
                 "• Trợ lý AI Jarvis: 🟢 <b>Trực tuyến 24/7 (Đã kết nối Ngài Leon)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "<i>Hệ thống trực tiếp đối soát lệnh SL/TP trên server Binance mỗi giây.</i>"
@@ -1151,339 +1147,54 @@ class DedicatedTelegramBot:
             await self.send_message(chat_id, f"❌ <i>Lỗi kiểm tra trạng thái: {e}</i>", reply_to_message_id=reply_to_id)
 
     # =========================================================================
-    # REMOTE EXECUTION & ACTIONS (TRADE CONTROL)
+    # READ-ONLY SAFETY PROTOCOL (CHẾ ĐỘ GIÁM SÁT AN TOÀN 100%)
     # =========================================================================
 
-    async def _action_close_position(self, chat_id: int, symbol: str, reply_to_id: Optional[int] = None) -> None:
-        """Đóng khẩn cấp một vị thế thị trường và hủy toàn bộ lệnh điều kiện của coin đó."""
-        sym = symbol.upper().strip().replace("<", "").replace(">", "")
-        if not sym.endswith("USDT"):
-            sym += "USDT"
-
-        from config.config import exchange_writes_enabled
-        if not exchange_writes_enabled(self.config):
-            await self.send_message(
-                chat_id,
-                f"⚠️ <b>LỆNH BỊ TỪ CHỐI:</b> Hệ thống đang ở chế độ READ_ONLY hoặc chưa bật 'Giao dịch thật'. "
-                f"Không thể can thiệp đóng vị thế {sym}.",
-                reply_to_message_id=reply_to_id
-            )
-            return
-
+    async def _send_read_only_safety_notice(self, chat_id: int, reply_to_id: Optional[int] = None) -> None:
+        """Thông báo nguyên tắc an toàn: Bot Telegram chỉ có nhiệm vụ thông báo & giám sát."""
+        notice = (
+            "🔒 <b>CHẾ ĐỘ GIÁM SÁT AN TOÀN (READ-ONLY MONITORING)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "<i>Thưa Ngài Leon, theo quy chuẩn quản trị an toàn vốn tuyệt đối:\n"
+            "Telegram Bot chỉ đóng vai trò <b>THÔNG BÁO &amp; GIÁM SÁT TỪ XA</b>.\n"
+            "Bot hoàn toàn <b>KHÔNG CÓ QUYỀN</b> mở/đóng lệnh, sửa SL/TP hay can thiệp trực tiếp vào tài khoản Binance "
+            "nhằm triệt tiêu 100% rủi ro bảo mật và thao tác nhầm trên điện thoại.\n\n"
+            "Mọi thao tác quản lý vị thế chỉ được thực hiện trực tiếp trên Ứng Dụng Desktop của Ngài!</i>"
+        )
         await self.send_message(
             chat_id,
-            f"⏳ <i>Jarvis đang gửi lệnh Market đóng vị thế {sym} và thu hồi toàn bộ lệnh chờ trên Binance...</i>",
-            reply_to_message_id=reply_to_id
+            notice,
+            reply_to_message_id=reply_to_id,
+            reply_markup=get_main_inline_keyboard()
         )
 
-        try:
-            from exchange.binance_client import BinanceFuturesClient
-            from core.enums import OrderSide, OrderType
-
-            client = BinanceFuturesClient(self.config)
-
-            # 1. Hủy toàn bộ lệnh SL/TP/Limit của symbol này
-            await client.cancel_all_symbol_orders(sym)
-
-            # 2. Lấy vị thế hiện tại
-            pos = await client.get_position(sym)
-            amt = float(pos.get("positionAmt", 0)) if pos else 0.0
-
-            if amt == 0.0:
-                await client.close()
-                await self.send_message(
-                    chat_id,
-                    f"ℹ️ <i>Vị thế <b>{sym}</b> hiện không còn mở trên Binance (có thể đã chốt hoặc chạm SL trước đó).</i>",
-                    reply_to_message_id=reply_to_id,
-                    reply_markup=get_main_inline_keyboard()
-                )
-                return
-
-            # 3. Gửi lệnh MARKET ngược chiều để đóng vị thế
-            close_side = OrderSide.SELL if amt > 0 else OrderSide.BUY
-            close_qty = Decimal(str(abs(amt)))
-
-            await client.create_standard_order(
-                symbol=sym,
-                side=close_side,
-                order_type=OrderType.MARKET,
-                quantity=close_qty,
-                reduce_only=True
-            )
-
-            # Đợi 1 giây để khớp và kiểm tra lịch sử Realized PnL
-            await asyncio.sleep(1.0)
-            incomes = await client.get_income_history(income_type="REALIZED_PNL", limit=10)
-            realized = 0.0
-            for inc in (incomes or []):
-                if inc.get("symbol") == sym:
-                    realized = float(inc.get("income", 0.0))
-                    break
-
-            await client.close()
-
-            # 4. Cập nhật Repository cục bộ
-            try:
-                from storage.database import DatabaseManager
-                from storage.repository import SignalRepository, OrderRepository
-                from core.enums import SignalState
-                db = DatabaseManager()
-                sig_repo = SignalRepository(db)
-                ord_repo = OrderRepository(db)
-                ord_repo.cancel_open_orders_for_symbol(sym)
-                active_sig = sig_repo.get_active_signal_for_symbol(sym)
-                if active_sig:
-                    sig_repo.update_signal_state(active_sig["signal_id"], SignalState.CLOSED, "Đóng thủ công qua Telegram Jarvis")
-            except Exception as e_db:
-                logger.debug(f"DB update error on close: {e_db}")
-
-            sign = "+" if realized >= 0 else ""
-            emoji = "🟢" if realized >= 0 else "🔴"
-
-            text = (
-                f"🛑 <b>[JARVIS ACTION: ĐÃ ĐÓNG VỊ THẾ {sym}]</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"• Cặp giao dịch: <b>{sym}</b>\n"
-                f"• Chiều đóng: <code>{'BÁN (Đóng Long)' if close_side == OrderSide.SELL else 'MUA (Đóng Short)'}</code>\n"
-                f"• Khối lượng đã đóng: <code>{abs(amt)}</code> (Khớp ngay lệnh Market)\n"
-                f"• Lệnh chờ: <b>Đã hủy 100% SL &amp; TP của {sym}</b>\n"
-                f"• Realized PnL: {emoji} <b>{sign}{realized:.2f} USDT</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🛡️ <i>Thưa Ngài Leon, vị thế đã được tất toán an toàn! Số dư ký quỹ đã được giải phóng vào tài khoản.</i>"
-            )
-            await self.send_message(
-                chat_id,
-                text,
-                reply_markup={"inline_keyboard": [
-                    [{"text": "📊 Xem Vị Thế Còn Lại", "callback_data": "nav_positions"}, {"text": "📈 Lãi Lỗ Từng Coin", "callback_data": "nav_pnl"}]
-                ]}
-            )
-        except Exception as e:
-            logger.error(f"Error in close position {sym}: {e}", exc_info=True)
-            await self.send_message(chat_id, f"❌ <i>Lỗi thực thi đóng {sym}: {e}</i>", reply_to_message_id=reply_to_id)
+    async def _action_close_position(self, chat_id: int, symbol: str, reply_to_id: Optional[int] = None) -> None:
+        """Từ chối đóng lệnh từ xa qua Telegram."""
+        await self._send_read_only_safety_notice(chat_id, reply_to_id)
 
     async def _action_close_all_confirm(self, chat_id: int, reply_to_id: Optional[int] = None) -> None:
-        """Hiển thị hộp thoại cảnh báo và yêu cầu xác nhận đóng toàn bộ vị thế."""
-        text = (
-            "🚨 <b>CẢNH BÁO TỐI CAO: ĐÓNG TOÀN BỘ VỊ THẾ (EMERGENCY CLOSE ALL)</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "Thưa Ngài Leon, lệnh này sẽ thực thi ngay lập tức:\n"
-            "1. Bán/Mua Market để đóng <b>TẤT CẢ các vị thế đang mở</b> trên Binance Futures.\n"
-            "2. Hủy toàn bộ 100% các lệnh Limit, Stop Loss và Take Profit chờ.\n"
-            "3. Thu hồi 100% vốn ký quỹ về tài khoản tiền mặt (USDT).\n\n"
-            "⚠️ <b>Ngài có chắc chắn muốn giải phóng toàn bộ tài khoản ngay bây giờ không?</b>"
-        )
-        markup = {
-            "inline_keyboard": [
-                [
-                    {"text": "⚠️ XÁC NHẬN ĐÓNG TOÀN BỘ", "callback_data": "act_close_all_execute"},
-                    {"text": "❌ HỦY BỎ THAO TÁC", "callback_data": "act_close_all_cancel"}
-                ]
-            ]
-        }
-        await self.send_message(chat_id, text, reply_to_message_id=reply_to_id, reply_markup=markup)
+        """Từ chối đóng lệnh toàn bộ qua Telegram."""
+        await self._send_read_only_safety_notice(chat_id, reply_to_id)
 
     async def _action_close_all_execute(self, chat_id: int, reply_to_id: Optional[int] = None) -> None:
-        """Thực thi đóng khẩn cấp toàn bộ các vị thế đang mở."""
-        from config.config import exchange_writes_enabled
-        if not exchange_writes_enabled(self.config):
-            await self.send_message(chat_id, "⚠️ <b>LỆNH BỊ CHẶN:</b> Chế độ READ_ONLY đang bật.", reply_to_message_id=reply_to_id)
-            return
-
-        try:
-            from exchange.binance_client import BinanceFuturesClient
-            from core.enums import OrderSide, OrderType
-
-            client = BinanceFuturesClient(self.config)
-            positions = await client.get_open_positions()
-
-            if not positions:
-                await client.close()
-                await self.send_message(
-                    chat_id,
-                    "ℹ️ <i>Không có vị thế nào đang mở. Tài khoản của Ngài Leon đã an toàn 100%!</i>",
-                    reply_to_message_id=reply_to_id,
-                    reply_markup=get_main_inline_keyboard()
-                )
-                return
-
-            closed_list = []
-            for p in positions:
-                sym = p.get("symbol", "")
-                amt = float(p.get("positionAmt", 0))
-                if amt != 0.0:
-                    try:
-                        await client.cancel_all_symbol_orders(sym)
-                        close_side = OrderSide.SELL if amt > 0 else OrderSide.BUY
-                        await client.create_standard_order(
-                            symbol=sym,
-                            side=close_side,
-                            order_type=OrderType.MARKET,
-                            quantity=Decimal(str(abs(amt))),
-                            reduce_only=True
-                        )
-                        closed_list.append(sym)
-                    except Exception as err:
-                        logger.error(f"Error closing {sym}: {err}")
-
-            await client.close()
-
-            # Clean local state
-            try:
-                from storage.database import DatabaseManager
-                from storage.repository import SignalRepository, OrderRepository
-                from core.enums import SignalState
-                db = DatabaseManager()
-                sig_repo = SignalRepository(db)
-                ord_repo = OrderRepository(db)
-                for sym in closed_list:
-                    ord_repo.cancel_open_orders_for_symbol(sym)
-                    act = sig_repo.get_active_signal_for_symbol(sym)
-                    if act:
-                        sig_repo.update_signal_state(act["signal_id"], SignalState.CLOSED, "Đóng khẩn cấp toàn bộ qua Telegram Jarvis")
-            except Exception as e_db:
-                logger.debug(f"DB cleanup error: {e_db}")
-
-            text = (
-                "🚨 <b>[JARVIS DEFENSE: ĐÃ ĐÓNG TOÀN BỘ VỊ THẾ THÀNH CÔNG]</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"Thưa Ngài Leon, hệ thống vừa đóng khẩn cấp <b>{len(closed_list)} vị thế</b>:\n"
-                f"• Các coin đã đóng: <code>{', '.join(closed_list) if closed_list else 'Không có'}</code>\n"
-                "• Lệnh chờ: <b>Đã hủy toàn bộ lệnh điều kiện SL/TP sàn Binance</b>\n"
-                "• Trạng thái ví: 🟢 <b>100% USDT tiền mặt an toàn</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🛡️ <i>Toàn bộ rủi ro đã bị triệt tiêu hoàn toàn!</i>"
-            )
-            await self.send_message(chat_id, text, reply_markup=get_main_inline_keyboard())
-        except Exception as e:
-            logger.error(f"Error executing close all: {e}", exc_info=True)
-            await self.send_message(chat_id, f"❌ <i>Lỗi thực thi đóng toàn bộ: {e}</i>", reply_to_message_id=reply_to_id)
+        """Từ chối thực thi đóng toàn bộ."""
+        await self._send_read_only_safety_notice(chat_id, reply_to_id)
 
     async def _action_move_breakeven(self, chat_id: int, symbol: str, reply_to_id: Optional[int] = None) -> None:
-        """Thủ công dời Stop Loss về Entry (+0.05% bù phí), biến vị thế thành Kèo Bất Tử."""
-        sym = symbol.upper().strip().replace("<", "").replace(">", "")
-        if not sym.endswith("USDT"):
-            sym += "USDT"
-
-        from config.config import exchange_writes_enabled
-        if not exchange_writes_enabled(self.config):
-            await self.send_message(chat_id, "⚠️ <b>LỆNH BỊ CHẶN:</b> Chế độ READ_ONLY đang bật.", reply_to_message_id=reply_to_id)
-            return
-
-        try:
-            from exchange.binance_client import BinanceFuturesClient, _format_decimal
-            from core.enums import OrderSide, OrderType
-
-            client = BinanceFuturesClient(self.config)
-            pos = await client.get_position(sym)
-            amt = float(pos.get("positionAmt", 0)) if pos else 0.0
-
-            if amt == 0.0:
-                await client.close()
-                await self.send_message(chat_id, f"⚠️ <i>Vị thế <b>{sym}</b> hiện không còn mở để kéo BE.</i>", reply_to_message_id=reply_to_id)
-                return
-
-            entry_p = Decimal(str(pos.get("entryPrice", 0)))
-            mark_p = Decimal(str(pos.get("markPrice", 0)))
-            is_long = amt > 0
-
-            filter_info = await client.get_symbol_filter(sym)
-            tick_size = filter_info.tick_size
-
-            if is_long:
-                be_price = entry_p * Decimal("1.0005")
-                be_price = (be_price // tick_size) * tick_size
-                sl_side = OrderSide.SELL
-            else:
-                be_price = entry_p * Decimal("0.9995")
-                be_price = (be_price // tick_size) * tick_size
-                sl_side = OrderSide.BUY
-
-            # Hủy các lệnh SL algo cũ của symbol này
-            algo_orders = await client.get_open_algo_orders(sym)
-            for a in (algo_orders or []):
-                ot = str(a.get("orderType", "")).upper()
-                if "STOP" in ot:
-                    aid = a.get("algoId")
-                    caid = a.get("clientAlgoId")
-                    try:
-                        await client.cancel_algo_order(sym, algo_id=str(aid) if aid else None, client_algo_id=caid)
-                    except Exception:
-                        pass
-
-            # Đặt lệnh SL mới tại mốc Break-Even
-            client_algo_id = f"jarvis_be_{int(time.time() * 1000)}"[:32]
-            await client.create_algo_order(
-                symbol=sym,
-                side=sl_side,
-                order_type=OrderType.STOP_MARKET,
-                trigger_price=be_price,
-                quantity=Decimal(str(abs(amt))),
-                client_algo_id=client_algo_id,
-                close_position=False,
-                reduce_only=True
-            )
-            await client.close()
-
-            text = (
-                f"🛡️ <b>[JARVIS DEFENSE: ĐÃ KÍCH HOẠT KÈO BẤT TỬ {sym}]</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"• Cặp giao dịch: <b>{sym}</b>\n"
-                f"• Chiều vị thế: <code>{'LONG' if is_long else 'SHORT'}</code>\n"
-                f"• Giá vào (Entry): <code>{float(entry_p)}</code>\n"
-                f"• Giá hiện tại (Mark): <code>{float(mark_p)}</code>\n"
-                f"• Mốc SL Bất Tử mới: <code>{_format_decimal(be_price)}</code> (+0.05% bù phí sàn)\n"
-                f"• Trạng thái rủi ro: 🟢 <b>100% Risk-Free (Bất khả chiến bại)</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💎 <i>Kỷ luật sắt: Ngài Leon tuyệt đối không thể thua ở kèo này nữa! Hãy an tâm gồng lời tới TP.</i>"
-            )
-            await self.send_message(
-                chat_id,
-                text,
-                reply_markup={"inline_keyboard": [
-                    [{"text": "📊 Xem Vị Thế", "callback_data": "nav_positions"}, {"text": "📈 Lãi Lỗ Từng Coin", "callback_data": "nav_pnl"}]
-                ]}
-            )
-        except Exception as e:
-            logger.error(f"Error in move breakeven {sym}: {e}", exc_info=True)
-            await self.send_message(chat_id, f"❌ <i>Lỗi kích hoạt Kèo Bất Tử {sym}: {e}</i>", reply_to_message_id=reply_to_id)
+        """Từ chối can thiệp lệnh SL qua Telegram."""
+        await self._send_read_only_safety_notice(chat_id, reply_to_id)
 
     async def _action_toggle_ferrari(self, chat_id: int, reply_to_id: Optional[int] = None) -> None:
-        """Bật / Tắt Ferrari Mode từ xa qua Telegram và lưu vào cấu hình."""
-        from config.config import save_config
-        curr = bool(getattr(self.config, "ferrari_mode_enabled", False))
-        new_val = not curr
-        self.config.ferrari_mode_enabled = new_val
-        try:
-            save_config(self.config)
-        except Exception as e_cfg:
-            logger.warning(f"Could not save config: {e_cfg}")
-
-        if new_val:
-            text = (
-                "⚡ <b>[FERRARI MODE: ĐÃ KÍCH HOẠT THÀNH CÔNG]</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🏎️ <i>Động cơ lượng tử V12 đã mở khóa toàn bộ công suất:</i>\n"
-                "• Đòn bẩy danh định: <b>x35 - x40 CROSS</b>\n"
-                "• Giới hạn vị thế: <b>Tối đa 20 vị thế</b> cùng lúc\n"
-                "• Giới hạn cùng chiều: <b>Tối đa 15 lệnh Short/Long</b> liên tiếp\n"
-                "• Chế độ: <b>Hyper-Growth Lãi Kép</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🛡️ <i>Vệ binh Zero-Liquidation &amp; Kèo Bất Tử vẫn bảo vệ nghiêm ngặt 24/7.</i>"
-            )
-        else:
-            text = (
-                "🛡️ <b>[FERRARI MODE: ĐÃ TẮT - TRỞ VỀ CHẾ ĐỘ AN TOÀN]</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "☕ <i>Hệ thống trở về chế độ phòng thủ tiêu chuẩn:</i>\n"
-                "• Đòn bẩy an toàn: <b>20x CROSS</b>\n"
-                "• Giới hạn vị thế: <b>Tối đa 10 vị thế</b>\n"
-                "• Giới hạn cùng chiều: <b>Tối đa 3 lệnh</b> liên tiếp\n"
-                "• Bảo toàn vốn tối đa: <b>Standard Mode</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "✅ <i>Cấu hình an toàn đã được áp dụng tức thì.</i>"
-            )
-        await self.send_message(chat_id, text, reply_to_message_id=reply_to_id, reply_markup=get_main_inline_keyboard())
+        """Thông báo Ferrari Mode được quản lý trực tiếp trên Desktop UI."""
+        await self.send_message(
+            chat_id,
+            "🔒 <b>CẤU HÌNH ĐƯỢC QUẢN LÝ TẬP TRUNG TRÊN DESKTOP</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "<i>Thưa Ngài Leon, chế độ Ferrari Mode được quản lý an toàn trên Ứng Dụng Desktop "
+            "để đảm bảo không bị bật/tắt ngoài ý muốn. Vui lòng thao tác trực tiếp trên giao diện Desktop!</i>",
+            reply_to_message_id=reply_to_id,
+            reply_markup=get_main_inline_keyboard()
+        )
 
     # =========================================================================
     # DIAGNOSTICS & TELEMETRY
@@ -1757,7 +1468,7 @@ class DedicatedTelegramBot:
             logger.debug(f"Morning intel error: {e}")
 
     async def _send_evening_growth_recap(self) -> None:
-        """23:00 PM VN: Báo cáo tăng trưởng & lãi kép cuối ngày."""
+        """23:00 PM VN: Báo cáo tăng trưởng & lãi kép cuối ngày chi tiết từng coin và dự phóng mục tiêu."""
         try:
             from exchange.binance_client import BinanceFuturesClient
 
@@ -1768,26 +1479,89 @@ class DedicatedTelegramBot:
             equity = float(await client.get_account_equity() or 92.21)
             await client.close()
 
-            realized = sum(float(i.get("income", 0)) for i in (incomes or []) if i.get("incomeType") == "REALIZED_PNL")
-            comm = sum(abs(float(i.get("income", 0))) for i in (incomes or []) if i.get("incomeType") == "COMMISSION")
-            net = realized - comm
-            sign = "+" if net >= 0 else ""
-            emoji = "🟢" if net >= 0 else "🔴"
+            # Phân tách chi tiết theo từng đồng coin
+            by_coin = defaultdict(lambda: {"realized": 0.0, "comm": 0.0, "fund": 0.0, "trades": 0, "wins": 0, "losses": 0})
+            for inc in (incomes or []):
+                sym = inc.get("symbol") or "OTHER"
+                itype = inc.get("incomeType")
+                val = float(inc.get("income", 0.0))
+                if itype == "REALIZED_PNL":
+                    by_coin[sym]["realized"] += val
+                    by_coin[sym]["trades"] += 1
+                    if val > 0:
+                        by_coin[sym]["wins"] += 1
+                    elif val < 0:
+                        by_coin[sym]["losses"] += 1
+                elif itype == "COMMISSION":
+                    by_coin[sym]["comm"] += abs(val)
+                elif itype == "FUNDING_FEE":
+                    by_coin[sym]["fund"] += val
 
-            text = (
-                "🌙 <b>[JARVIS RECAP: TỔNG KẾT TĂNG TRƯỞNG NGÀY &amp; DỰ BÁO LÃI KÉP 23:00 PM]</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"Thưa Ngài Leon, một ngày giao dịch kiên cường đã khép lại:\n\n"
-                f"• Lãi ròng hôm nay: {emoji} <b>{sign}{net:.2f} USDT</b> (Realized: <code>{realized:+.2f}</code> | Phí: <code>-{comm:.2f}</code>)\n"
-                f"• Quy mô tài khoản hiện tại: <b>${equity:.2f} USDT</b>\n"
-                f"• Trạng thái hệ thống: 🟢 <b>Trực chiến 24/7 trên VPS</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "💤 <i>Ngài hãy nghỉ ngơi thư giãn. Giáp phòng thủ Zero-Liquidation sẽ canh gác tài khoản suốt đêm!</i>"
+            total_realized = sum(d["realized"] for d in by_coin.values())
+            total_comm = sum(d["comm"] for d in by_coin.values())
+            total_fund = sum(d["fund"] for d in by_coin.values())
+            total_net = total_realized - total_comm + total_fund
+            total_trades = sum(d["trades"] for d in by_coin.values())
+            total_wins = sum(d["wins"] for d in by_coin.values())
+            total_losses = sum(d["losses"] for d in by_coin.values())
+            winrate = (total_wins / total_trades * 100.0) if total_trades > 0 else 0.0
+
+            sorted_coins = sorted(
+                by_coin.items(),
+                key=lambda x: (x[1]["realized"] - x[1]["comm"] + x[1]["fund"]),
+                reverse=True
             )
+
+            sign = "+" if total_net >= 0 else ""
+            emoji = "🟢" if total_net >= 0 else "🔴"
+
+            lines = [
+                "🌙 <b>[JARVIS RECAP: TỔNG KẾT TĂNG TRƯỞNG &amp; LÃI KÉP CUỐI NGÀY]</b>",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                "Thưa Ngài Leon, bản tổng kết kết quả tác chiến hôm nay đã sẵn sàng:\n",
+                f"💰 <b>LÃI RÒNG HÔM NAY:</b> {emoji} <b>{sign}{total_net:.2f} USDT</b>",
+                f"• Realized: <code>{total_realized:+.2f}</code> | Phí sàn: <code>-{total_comm:.2f}</code> | Funding: <code>{total_fund:+.2f}</code>",
+                f"• Tổng số lệnh chốt: <b>{total_trades}</b> (Thắng: <b>{total_wins}</b> | Thua: <b>{total_losses}</b> | WR: <b>{winrate:.1f}%</b>)",
+                f"• Quy mô tài khoản hiện tại: <b>${equity:.2f} USDT</b>",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                "📊 <b>CHI TIẾT SAO KÊ TỪNG ĐỒNG COIN:</b>"
+            ]
+
+            for sym, d in sorted_coins:
+                c_net = d["realized"] - d["comm"] + d["fund"]
+                c_sign = "+" if c_net >= 0 else ""
+                c_emoji = "🟢" if c_net > 0.01 else ("🔴" if c_net < -0.01 else "⚪")
+                lines.append(
+                    f"• <b>{sym}</b>: {c_emoji} <b>{c_sign}{c_net:.2f} USDT</b>\n"
+                    f"  (Realized: <code>{d['realized']:+.2f}</code> | Phí: <code>-{d['comm']:.2f}</code> | {d['trades']} lệnh)"
+                )
+
+            if not sorted_coins:
+                lines.append("<i>Chưa có giao dịch chốt lệnh nào trong ngày.</i>")
+
+            # Tính toán lộ trình lãi kép $300 / $500 / $1000
+            lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            lines.append("🚀 <b>DỰ BÁO LỘ TRÌNH CHINH PHỤC CÁC CỘT MỐC LỚN:</b>")
+            targets = [300.0, 500.0, 1000.0]
+            daily_growth_rate = 0.05  # Kịch bản cơ sở 5%/ngày
+            for tgt in targets:
+                if tgt <= equity:
+                    lines.append(f"• Mốc <b>${int(tgt)} USDT</b>: 🟢 <i>ĐÃ HOÀN THÀNH!</i>")
+                else:
+                    days = math.ceil(math.log(tgt / equity) / math.log(1 + daily_growth_rate))
+                    lines.append(f"• Mốc <b>${int(tgt)} USDT</b>: Dự kiến <b>~{days} ngày</b> (đà tăng 5%/ngày)")
+
+            lines.append("")
+            lines.append("🎯 <b>MỤC TIÊU NGÀY TIẾP THEO:</b>")
+            lines.append(f"• Target lợi nhuận: <b>+${equity * 0.05:.2f} đến +${equity * 0.075:.2f} USDT</b> (+5% - 7.5% NAV)")
+            lines.append("• Tuyệt đối bảo toàn vốn: Zero-Liquidation 24/7.")
+            lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            lines.append("💤 <i>Ngài hãy an tâm nghỉ ngơi. Hệ thống sẽ tiếp tục canh gác thị trường suốt đêm!</i>")
+
             markup = {"inline_keyboard": [
                 [{"text": "🚀 Dự Báo Lãi Kép", "callback_data": "nav_forecast"}, {"text": "📈 Chi Tiết PnL", "callback_data": "nav_pnl"}]
             ]}
-            await self.broadcast(text, reply_markup=markup)
+            await self.broadcast("\n".join(lines), reply_markup=markup)
         except Exception as e:
             logger.debug(f"Evening recap error: {e}")
 
