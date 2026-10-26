@@ -195,6 +195,24 @@ class AlertService:
             return item
 
     async def _dispatch_notify(self, title: str, message: str, level: AlertLevel) -> None:
+        try:
+            from telegram.dedicated_bot import get_dedicated_bot
+            bot = get_dedicated_bot()
+            if bot and bot.is_configured:
+                t_upper = title.upper()
+                m_upper = message.upper()
+                import re
+                match = re.search(r"([A-Z0-9]+USDT)", f"{title} {message}")
+                sym = match.group(1) if match else "VỊ THẾ"
+                if "TP1" in t_upper or "KÈO BẤT TỬ" in t_upper or "TP1" in m_upper:
+                    await bot.notify_tp1_hit(symbol=sym, tp_price="Mục tiêu 1", entry_price="Entry")
+                elif "TP3" in t_upper or "FULL TP" in t_upper or "GRAND SLAM" in t_upper:
+                    await bot.notify_full_tp(symbol=sym)
+                elif "CẮT LỖ" in t_upper or "STOP LOSS" in t_upper or "CHẠM SL" in t_upper or "STOPPED" in t_upper:
+                    await bot.notify_sl_hit(symbol=sym, sl_price="SL", root_cause=message)
+        except Exception:
+            pass
+
         if not self._notifier:
             return
         emoji = "ℹ️" if level == AlertLevel.INFO else ("⚠️" if level == AlertLevel.WARNING else "🚨")
