@@ -113,6 +113,10 @@ def create_app(
         if hasattr(app.state, "ai_trader_task_starter") and callable(app.state.ai_trader_task_starter):
             ai_trader_task = asyncio.create_task(app.state.ai_trader_task_starter())
 
+        dedicated_bot_task = None
+        if hasattr(app.state, "dedicated_bot_task_starter") and callable(app.state.dedicated_bot_task_starter):
+            dedicated_bot_task = asyncio.create_task(app.state.dedicated_bot_task_starter())
+
         yield
         # Shutdown hook: Clean up metadata
         if listener_task and not listener_task.done():
@@ -121,6 +125,8 @@ def create_app(
             reconciliation_task.cancel()
         if ai_trader_task and not ai_trader_task.done():
             ai_trader_task.cancel()
+        if dedicated_bot_task and not dedicated_bot_task.done():
+            dedicated_bot_task.cancel()
         if handshake_mgr:
             handshake_mgr.cleanup()
 
@@ -174,6 +180,8 @@ def create_app(
         app.state.reconciliation_task_starter = api_router.reconciliation_task_starter
     if hasattr(api_router, "ai_trader_task_starter"):
         app.state.ai_trader_task_starter = api_router.ai_trader_task_starter
+    if hasattr(api_router, "dedicated_bot_task_starter"):
+        app.state.dedicated_bot_task_starter = api_router.dedicated_bot_task_starter
 
     app.include_router(api_router, prefix="/api")
     app.include_router(api_router, prefix="")

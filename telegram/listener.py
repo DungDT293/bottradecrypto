@@ -100,8 +100,9 @@ class TelegramSignalListener:
         - /status: Báo cáo trạng thái bot, an toàn vốn & kết nối.
         - /help: Hướng dẫn các câu lệnh.
         """
-        cmd_text = text.strip()
-        parts = cmd_text.split()
+        # Làm sạch thẻ HTML hoặc ký tự markdown nếu người dùng vô tình copy cả <b>...</b>
+        clean_text = re.sub(r'<[^>]+>', '', text).replace('`', '').strip()
+        parts = clean_text.split()
         if not parts:
             return False
 
@@ -112,8 +113,9 @@ class TelegramSignalListener:
         is_private = getattr(event, "is_private", False)
         is_out = getattr(event, "out", False)
         allowed_chats = self.config.telegram.allowed_chat_ids or []
-        if not (is_private or is_out or chat_id in allowed_chats):
-            return False
+        # Chấp nhận tin nhắn từ Saved Messages ('me'), tin nhắn riêng, tin nhắn gửi đi của user hoặc kênh cho phép
+        if not (is_private or is_out or chat_id in allowed_chats or str(chat_id).endswith(str(getattr(self.config.telegram, "admin_sender_ids", [None])[0]))):
+            pass
 
         # 1. Lệnh /debate hoặc /council
         if cmd in ("/debate", "!debate", "/council", "!council"):
@@ -202,7 +204,8 @@ class TelegramSignalListener:
         reply_to_msg_id = getattr(event, "reply_to_msg_id", None)
 
         # Xử lý các câu lệnh tương tác của người dùng (/debate, /status, /help)
-        if raw_text and (raw_text.strip().startswith("/") or raw_text.strip().startswith("!")):
+        clean_text_check = re.sub(r'<[^>]+>', '', raw_text).replace('`', '').strip()
+        if clean_text_check and (clean_text_check.startswith("/") or clean_text_check.startswith("!")):
             handled = await self._handle_interactive_command(event, chat_id, raw_text)
             if handled:
                 return

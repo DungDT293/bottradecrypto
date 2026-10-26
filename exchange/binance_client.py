@@ -437,6 +437,16 @@ class BinanceFuturesClient:
                 pass
         return active
 
+    async def get_symbol_price(self, symbol: str) -> Optional[Decimal]:
+        """Returns the latest mark or ticker price for a symbol."""
+        try:
+            res = await self._request("GET", "/fapi/v1/ticker/price", params={"symbol": symbol})
+            if res and "price" in res:
+                return Decimal(str(res["price"]))
+        except Exception:
+            pass
+        return None
+
     async def get_market_trend_context(self, symbol: str) -> Dict[str, Any]:
         """
         Retrieves 24h ticker, funding rate, 1h klines (EMA20 trend), and BTC market context.

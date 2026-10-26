@@ -202,9 +202,21 @@ def create_api_router(
 
     router.listener_task_starter = run_listener_loop
 
+    # Dedicated Telegram Bot Runner (Interactive AI Council & Telemetry)
+    async def run_dedicated_bot_loop():
+        token = getattr(getattr(config, "notifications", None), "notification_bot_token", None) or os.environ.get("TELEGRAM_BOT_TOKEN")
+        if token:
+            from telegram.dedicated_bot import DedicatedTelegramBot
+            bot = DedicatedTelegramBot(bot_token=token, config=config)
+            if bot.is_configured:
+                await bot.run()
+
+    router.dedicated_bot_task_starter = run_dedicated_bot_loop
+
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(run_listener_loop())
+        loop.create_task(run_dedicated_bot_loop())
     except RuntimeError:
         pass
 
@@ -388,6 +400,27 @@ def create_api_router(
             "USER",
         )
         return {"success": True, "allowed_chat_ids": config.telegram.allowed_chat_ids}
+
+    class DedicatedBotTokenModel(BaseModel):
+        bot_token: str
+        chat_id: Optional[int] = None
+
+    @router.post("/telegram/bot-token", dependencies=[Depends(verify_token)])
+    async def set_dedicated_bot_token(body: DedicatedBotTokenModel):
+        if not getattr(config, "notifications", None):
+            from config.config import NotificationsConfig
+            config.notifications = NotificationsConfig()
+        token = body.bot_token.strip()
+        config.notifications.notification_bot_token = token
+        config.notifications.telegram_notification_enabled = True
+        if body.chat_id:
+            config.notifications.notification_chat_id = body.chat_id
+        save_config(config)
+        from telegram.dedicated_bot import DedicatedTelegramBot
+        bot = DedicatedTelegramBot(bot_token=token, config=config)
+        if bot.is_configured:
+            asyncio.create_task(bot.run())
+        return {"success": True, "bot_configured": True}
 
     @router.post("/telegram/auto-join-elite", dependencies=[Depends(verify_token)])
     async def auto_join_elite():
