@@ -40,7 +40,7 @@ export const Sidebar: React.FC = () => {
         <ShieldCheck size={24} className="text-success" />
         <div>
           <h1>Signal Executor</h1>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v2.6.0 Quantum Dual-AI</div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>v2.7.0 Quantum VPS Master</div>
         </div>
 
       </div>
