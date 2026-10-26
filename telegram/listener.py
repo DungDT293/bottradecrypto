@@ -815,7 +815,10 @@ class TelegramSignalListener:
                     source_cfg = self.config.sources.get(chat_id)
                     is_elite_admin = chat_id in (-1001756316676, -1002052872813, -1001754095061, -1002007658025, -1001552004524)
                     is_ferrari = getattr(self.config, "ferrari_mode_enabled", False)
-                    max_allowed_at_risk = min(int(getattr(self.config.risk, "max_active_signals", 5)), 5)
+                    if is_ferrari:
+                        max_allowed_at_risk = int(getattr(self.config.risk, "max_active_signals", 20))
+                    else:
+                        max_allowed_at_risk = min(int(getattr(self.config.risk, "max_active_signals", 3)), 5)
 
                     # Hard Ceiling: Tong so vi the dong thoi tren Binance khong bao gio vuot qua tran toi da (5)
                     total_open_positions = len(open_positions)

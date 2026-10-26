@@ -117,9 +117,9 @@ export const Header: React.FC = () => {
       const res = await api.toggleFerrariMode(!isFerrariMode);
       addToast(
         res.ferrari_mode_enabled
-          ? "🏎️ ĐÃ BẬT FERRARI MODE (Đòn bẩy x35-40, Khớp mọi kèo không chặn)!"
-          : "🏎️ Đã tắt Ferrari Mode (Trở về mức đòn bẩy tiêu chuẩn).",
-        res.ferrari_mode_enabled ? "success" : "info"
+          ? "🏎️ ĐÃ BẬT FERRARI MODE (Xác nhận chấp nhận rủi ro lớn để săn lợi nhuận lớn: Đòn bẩy 35x-40x, Bỏ van chờ 15p, Khớp mọi kèo)!"
+          : "🛡️ ĐÃ KÍCH HOẠT CHẾ ĐỘ AN TOÀN (Bảo toàn vốn: Đòn bẩy 15x-20x, Giãn cách 15p, Rủi ro 1.5%, Zero-Liquidation)!",
+        res.ferrari_mode_enabled ? "warning" : "success"
       );
       await refreshSnapshot();
     } catch (err: any) {

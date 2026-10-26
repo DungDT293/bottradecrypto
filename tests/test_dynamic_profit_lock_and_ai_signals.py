@@ -162,6 +162,129 @@ async def test_dynamic_profit_lock_activates_on_large_gain(recon_setup):
 
 
 @pytest.mark.asyncio
+async def test_dynamic_breakeven_activates_at_0_8pct_gain(recon_setup):
+    """Verifies that an early +0.85% gain immediately activates Breakeven SL without waiting for 1.5%."""
+    recon, client, db = recon_setup
+    sig_repo = SignalRepository(db)
+    ord_repo = OrderRepository(db)
+
+    cid = -999001
+    mid = 12347
+    sig_repo.save_message(cid, mid, cid, datetime.utcnow(), datetime.utcnow(), "AI Signal", "AI Signal")
+    meta = SourceMetadata(chat_id=cid, message_id=mid, telegram_timestamp=datetime.utcnow())
+    parsed = ParsedSignal(
+        signal_id="sig_dyn_early_be",
+        metadata=meta,
+        symbol_raw="UNI/USDT",
+        symbol_candidate="UNIUSDT",
+        side=PositionSide.SHORT,
+        entries=[Decimal("6.8470")],
+        stop_loss=Decimal("7.0020"),
+        take_profits=[Decimal("6.4800")],
+        validation_status=SignalState.OPEN_PROTECTED,
+    )
+    sig_repo.save_signal(parsed)
+
+    sl_ord = Order(
+        client_order_id="sl_dyn_early_be",
+        signal_id="sig_dyn_early_be",
+        symbol="UNIUSDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.STOP_MARKET,
+        trigger_price=Decimal("7.0020"),
+        quantity=Decimal("33.0"),
+        is_reduce_only=True,
+        is_algo=True,
+        status="NEW",
+    )
+    ord_repo.save_order(sl_ord)
+
+    # Position: Short at 6.8470, mark price at 6.7785 (+1.0% gain in favor)
+    client.positions["UNIUSDT"] = {
+        "symbol": "UNIUSDT",
+        "positionAmt": "-33.0",
+        "entryPrice": "6.8470",
+        "markPrice": "6.7785",
+        "leverage": 20,
+    }
+    await client.create_algo_order(
+        "UNIUSDT", OrderSide.BUY, OrderType.STOP_MARKET,
+        Decimal("7.0020"), Decimal("33.0"), client_algo_id="sl_dyn_early_be"
+    )
+
+    report = await recon.reconcile_all()
+    assert report["breakeven_activated"] >= 1
+    assert any("KÈO BẤT TỬ CHỦ ĐỘNG" in d for d in report["discrepancies"])
+
+    open_algos = await client.get_open_algo_orders("UNIUSDT")
+    assert len(open_algos) == 1
+    new_sl_price = Decimal(str(open_algos[0]["triggerPrice"]))
+    # Short BE should be below entry: 6.8470 * (1 - 0.001) ~ 6.8401
+    assert new_sl_price <= Decimal("6.8450")
+
+
+@pytest.mark.asyncio
+async def test_dynamic_profit_lock_activates_at_1_2pct_gain(recon_setup):
+    """Verifies that reaching +1.3% gain locks in at least +0.5% profit."""
+    recon, client, db = recon_setup
+    sig_repo = SignalRepository(db)
+    ord_repo = OrderRepository(db)
+
+    cid = -999001
+    mid = 12348
+    sig_repo.save_message(cid, mid, cid, datetime.utcnow(), datetime.utcnow(), "AI Signal", "AI Signal")
+    meta = SourceMetadata(chat_id=cid, message_id=mid, telegram_timestamp=datetime.utcnow())
+    parsed = ParsedSignal(
+        signal_id="sig_dyn_lock_1_2",
+        metadata=meta,
+        symbol_raw="POLYX/USDT",
+        symbol_candidate="POLYXUSDT",
+        side=PositionSide.SHORT,
+        entries=[Decimal("0.03423")],
+        stop_loss=Decimal("0.03420"),  # Already at Breakeven
+        take_profits=[Decimal("0.03100")],
+        validation_status=SignalState.OPEN_PROTECTED,
+    )
+    sig_repo.save_signal(parsed)
+
+    sl_ord = Order(
+        client_order_id="be_sig_dyn_lock_1_2",
+        signal_id="sig_dyn_lock_1_2",
+        symbol="POLYXUSDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.STOP_MARKET,
+        trigger_price=Decimal("0.03420"),
+        quantity=Decimal("5000.0"),
+        is_reduce_only=True,
+        is_algo=True,
+        status="NEW",
+    )
+    ord_repo.save_order(sl_ord)
+
+    # Position: Short at 0.03423, price drops to 0.03378 (+1.31% gain)
+    client.positions["POLYXUSDT"] = {
+        "symbol": "POLYXUSDT",
+        "positionAmt": "-5000.0",
+        "entryPrice": "0.03423",
+        "markPrice": "0.03378",
+        "leverage": 20,
+    }
+    await client.create_algo_order(
+        "POLYXUSDT", OrderSide.BUY, OrderType.STOP_MARKET,
+        Decimal("0.03420"), Decimal("5000.0"), client_algo_id="be_sig_dyn_lock_1_2"
+    )
+
+    report = await recon.reconcile_all()
+    assert any("KHÓA LÃI TỰ ĐỘNG" in d for d in report["discrepancies"])
+
+    open_algos = await client.get_open_algo_orders("POLYXUSDT")
+    assert len(open_algos) == 1
+    new_sl_price = Decimal(str(open_algos[0]["triggerPrice"]))
+    # Must lock in at least +0.5% profit: 0.03423 * (1 - 0.005) = 0.03405885
+    assert new_sl_price <= Decimal("0.03410")
+
+
+@pytest.mark.asyncio
 async def test_ai_trader_accepts_quantum_ai_sources_and_executes_safely(tmp_path):
     from services.gemini_autonomous_trader import GeminiAutonomousTrader
     from exchange.mock_exchange import MockBinanceFuturesClient

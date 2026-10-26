@@ -148,6 +148,27 @@ def test_settings_live_gates_reject_unauthorized_live(mock_app):
     assert resp_safe.status_code == 200
     assert resp_safe.json()["settings"]["mode"] == "SHADOW"
 
+    # Test FIXED_35_35_30 and Ferrari mode settings persistence
+    ferrari_payload = {
+        "mode": "SHADOW",
+        "live_trading_enabled": False,
+        "risk_per_signal_pct": 5.0,
+        "max_daily_loss_pct": 5.0,
+        "max_leverage": 40,
+        "margin_mode": "CROSSED",
+        "entry_range_policy": "MID_POINT",
+        "multi_tp_default_weight_mode": "FIXED_35_35_30",
+        "tp1_target_weight_pct": 35.0,
+        "ferrari_mode_enabled": True,
+        "max_active_signals": 20,
+    }
+    resp_ferrari = client.post("/settings", headers=headers, json=ferrari_payload)
+    assert resp_ferrari.status_code == 200
+    settings = resp_ferrari.json()["settings"]
+    assert settings["multi_tp_default_weight_mode"] == "FIXED_35_35_30"
+    assert settings["ferrari_mode_enabled"] is True
+    assert settings["max_active_signals"] == 20
+
 
 def test_websocket_first_message_auth(mock_app):
     client, token, _ = mock_app

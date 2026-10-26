@@ -204,7 +204,7 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
         .spawn()
         .map_err(|e| format!("Không thể khởi chạy backend: {e}"))?;
 
-    let child_pid = child.id();
+    let _child_pid = child.id();
 
     // 2. Wait for fresh handshake file to be written and marked READY by the child process
     let start = Instant::now();

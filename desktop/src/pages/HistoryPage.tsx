@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Calendar, RefreshCw } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { api } from "../services/api";
+import { PnLChart } from "../components/PnLChart";
 import type { PnLSummary, TradeRecord } from "../types/api";
 
 const toFiniteNumber = (value: unknown): number | null => {
@@ -21,6 +22,7 @@ export const HistoryPage: React.FC = () => {
   const [pnlData, setPnlData] = useState<PnLSummary | null>(null);
   const [trades, setTrades] = useState<TradeRecord[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<string>("ALL");
+  const [filterType, setFilterType] = useState<"ALL" | "CLOSE_ONLY" | "ENTRY_ONLY">("ALL");
   const [loading, setLoading] = useState(false);
   const requestId = useRef(0);
 
@@ -66,9 +68,13 @@ export const HistoryPage: React.FC = () => {
     : (closedFills.length > 0 ? Math.round((winFills.length / closedFills.length) * 1000) / 10 : 0);
 
   const uniqueChannels = Array.from(new Set(trades.map((tr) => tr.channel_name || "Thủ công / Khác")));
-  const filteredTrades = selectedChannel === "ALL"
-    ? trades
-    : trades.filter((tr) => (tr.channel_name || "Thủ công / Khác") === selectedChannel);
+  const filteredTrades = trades.filter((tr) => {
+    const channelMatch = selectedChannel === "ALL" || (tr.channel_name || "Thủ công / Khác") === selectedChannel;
+    const pnl = toFiniteNumber(tr.realized_pnl) || 0;
+    if (filterType === "CLOSE_ONLY") return channelMatch && pnl !== 0;
+    if (filterType === "ENTRY_ONLY") return channelMatch && pnl === 0;
+    return channelMatch;
+  });
 
   return (
     <div>
@@ -98,6 +104,9 @@ export const HistoryPage: React.FC = () => {
           </select>
         </div>
       </div>
+
+      {/* Visual PnL Chart (Daily / Weekly / Monthly & Bar / Line) */}
+      <PnLChart />
 
       {/* Summary KPI Cards for the period */}
       <div className="card-grid">
@@ -141,7 +150,19 @@ export const HistoryPage: React.FC = () => {
         <div className="table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="table-title">Lịch Sử Khớp Lệnh Sàn Binance Futures ({filteredTrades.length} / {trades.length})</div>
           <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Lọc theo Nhóm:</span>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Lọc lệnh:</span>
+            <select
+              className="form-input"
+              style={{ width: "auto", padding: "4px 10px", fontSize: "12px" }}
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as any)}
+            >
+              <option value="ALL">Tất cả ({trades.length})</option>
+              <option value="CLOSE_ONLY">🟢 Đóng lệnh / Chốt PnL ({trades.filter(t => (toFiniteNumber(t.realized_pnl) || 0) !== 0).length})</option>
+              <option value="ENTRY_ONLY">🔵 Mở vị thế ({trades.filter(t => (toFiniteNumber(t.realized_pnl) || 0) === 0).length})</option>
+            </select>
+
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", marginLeft: "4px" }}>Nhóm:</span>
             <select
               className="form-input"
               style={{ width: "auto", padding: "4px 10px", fontSize: "12px" }}
@@ -164,6 +185,7 @@ export const HistoryPage: React.FC = () => {
               <th>Mã lệnh sàn (ID)</th>
               <th>Nhóm Nguồn</th>
               <th>Cặp giao dịch</th>
+              <th>Phân loại</th>
               <th>Chiều</th>
               <th>Giá khớp</th>
               <th>Khối lượng</th>
@@ -174,7 +196,7 @@ export const HistoryPage: React.FC = () => {
           <tbody>
             {filteredTrades.length === 0 ? (
               <tr>
-                <td colSpan={9} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                <td colSpan={10} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
                   {loading ? "Đang truy vấn lịch sử khớp lệnh từ Binance..." : "Không có giao dịch khớp lệnh nào phù hợp bộ lọc."}
                 </td>
               </tr>
@@ -201,6 +223,17 @@ export const HistoryPage: React.FC = () => {
                   </td>
                   <td className="mono" style={{ fontWeight: 700, color: "#fff" }}>{tr.symbol}</td>
                   <td>
+                    {toFiniteNumber(tr.realized_pnl) !== null && toFiniteNumber(tr.realized_pnl)! !== 0 ? (
+                      <span className={`badge ${toFiniteNumber(tr.realized_pnl)! > 0 ? "badge-success" : "badge-live"}`} style={{ fontSize: "11px", fontWeight: 700 }}>
+                        {toFiniteNumber(tr.realized_pnl)! > 0 ? "CHỐT LÃI" : "CẮT LỖ"}
+                      </span>
+                    ) : (
+                      <span className="badge badge-info" style={{ fontSize: "11px" }}>
+                        MỞ VỊ THẾ
+                      </span>
+                    )}
+                  </td>
+                  <td>
                     <span className={`badge ${tr.side.includes("BUY") || tr.side.includes("MUA") ? "badge-read-only" : "badge-live"}`}>
                       {tr.side}
                     </span>
@@ -209,7 +242,11 @@ export const HistoryPage: React.FC = () => {
                   <td className="mono">{tr.qty}</td>
                   <td className="mono" style={{ fontSize: "12px", color: "var(--text-muted)" }}>{tr.commission}</td>
                   <td className={`mono ${toFiniteNumber(tr.realized_pnl) === null ? "text-muted" : toFiniteNumber(tr.realized_pnl)! > 0 ? "text-success" : toFiniteNumber(tr.realized_pnl)! < 0 ? "text-danger" : "text-muted"}`} style={{ fontWeight: 700 }}>
-                    {toFiniteNumber(tr.realized_pnl) === null ? "—" : `${toFiniteNumber(tr.realized_pnl)! >= 0 ? "+" : ""}${toFiniteNumber(tr.realized_pnl)!.toFixed(2)} USDT`}
+                    {toFiniteNumber(tr.realized_pnl) === null ? "—" : toFiniteNumber(tr.realized_pnl)! === 0 ? (
+                      <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>0.00 USDT (Mở)</span>
+                    ) : (
+                      `${toFiniteNumber(tr.realized_pnl)! >= 0 ? "+" : ""}${toFiniteNumber(tr.realized_pnl)!.toFixed(2)} USDT`
+                    )}
                   </td>
                 </tr>
               ))

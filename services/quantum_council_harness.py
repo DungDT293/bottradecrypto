@@ -678,7 +678,8 @@ class RedTeamSkepticAgent:
 
         # -------------------------------------------------------------
         # CHECK COOLDOWN: BỘ ĐỆM LÀM NGUỘI THỊ TRƯỜNG (Per-Symbol Market Cooldown)
-        # (Sau khi đóng vị thế đồng coin X, cấm vào lại trong ít nhất 30 phút = 1800s)
+        # (Nếu coin vừa bị dính SL / Lỗ: cấm vào lại trong 4 tiếng = 14400s để triệt tiêu Revenge Trading)
+        # (Nếu đóng vị thế hòa vốn / có lãi: cấm vào lại trong 30 phút = 1800s)
         # -------------------------------------------------------------
         last_closed_val = market_data.get("last_closed_at")
         if last_closed_val is not None:
@@ -688,12 +689,19 @@ class RedTeamSkepticAgent:
                 else:
                     closed_ts = datetime.fromisoformat(str(last_closed_val).replace("Z", "+00:00")).timestamp()
                 time_since_close = time.time() - closed_ts
-                if 0 <= time_since_close < 1800:
-                    remaining_s = int(1800 - time_since_close)
+                is_stopout = bool(
+                    market_data.get("last_trade_was_loss") 
+                    or market_data.get("last_trade_was_stopout") 
+                    or float(market_data.get("last_trade_pnl", 0)) < 0
+                )
+                req_cooldown = 14400 if is_stopout else 1800
+                if 0 <= time_since_close < req_cooldown:
+                    remaining_s = int(req_cooldown - time_since_close)
                     elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                    reason_desc = f"vừa dính STOP LOSS (< {req_cooldown//60} phút)" if is_stopout else f"vừa đóng vị thế (< {req_cooldown//60} phút)"
                     red_flag = (
-                        f"COOLDOWN_VETO: Đồng {symbol} vừa đóng vị thế trong vòng {int(time_since_close)}s (< 1800s). "
-                        f"Kích hoạt bộ đệm làm nguội để chống Revenge Trading!"
+                        f"COOLDOWN_VETO: Đồng {symbol} {reason_desc}. "
+                        f"Kích hoạt bộ đệm làm nguội nghiêm ngặt (còn {remaining_s}s) để triệt tiêu bẫy Cay cú (Revenge Trading)!"
                     )
                     return AgentOpinion(
                         agent_id=self.agent_id,
@@ -702,12 +710,75 @@ class RedTeamSkepticAgent:
                         vote=CouncilVote.VETO,
                         confidence=0,
                         rationale=red_flag,
-                        key_metrics={"time_since_close_s": time_since_close, "remaining_s": remaining_s, "check": "per_symbol_cooldown"},
+                        key_metrics={
+                            "time_since_close_s": time_since_close,
+                            "remaining_s": remaining_s,
+                            "req_cooldown": req_cooldown,
+                            "is_stopout": is_stopout,
+                            "check": "per_symbol_cooldown",
+                        },
                         red_flag=red_flag,
                         execution_time_ms=elapsed_ms,
                     )
             except Exception as e_cd:
                 logger.debug(f"Per-symbol cooldown check error: {e_cd}")
+
+        # -------------------------------------------------------------
+        # CHECK WEEKEND LIQUIDITY SHIELD (LÁ CHẮN THANH KHOẢN CUỐI TUẦN)
+        # (Từ 00:00 Thứ Bảy đến 06:00 Thứ Hai giờ VN: Khóa Altcoin thanh khoản mỏng < 100M$)
+        # (Chỉ duy trì BTC/ETH với tiêu chuẩn phê duyệt Sniper >= 90%)
+        # -------------------------------------------------------------
+        try:
+            now_utc = datetime.now(timezone.utc)
+            vn_hour = (now_utc.hour + 7) % 24
+            vn_day_shift = 1 if (now_utc.hour + 7) >= 24 else 0
+            vn_weekday = (now_utc.weekday() + vn_day_shift) % 7  # 0=Mon, 5=Sat, 6=Sun
+            
+            is_weekend = (vn_weekday == 5) or (vn_weekday == 6) or (vn_weekday == 0 and vn_hour < 6)
+            if is_weekend:
+                clean_sym = symbol.upper().replace("/", "").replace(":", "")
+                is_major = clean_sym in ("BTCUSDT", "ETHUSDT", "BTC", "ETH")
+                setup_conf = int(trade_params.get("confidence", market_data.get("confidence", 85)))
+                
+                if is_major:
+                    if setup_conf < 90:
+                        elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                        red_flag = (
+                            f"WEEKEND_LIQUIDITY_VETO: Thị trường cuối tuần mỏng thanh khoản. "
+                            f"{clean_sym} chỉ được phê duyệt khi đạt chuẩn Sniper Master (>= 90%). Kèo hiện tại chỉ đạt {setup_conf}%!"
+                        )
+                        return AgentOpinion(
+                            agent_id=self.agent_id,
+                            agent_name=self.agent_name,
+                            role=self.role,
+                            vote=CouncilVote.VETO,
+                            confidence=0,
+                            rationale=red_flag,
+                            key_metrics={"is_weekend": True, "confidence": setup_conf, "check": "weekend_shield"},
+                            red_flag=red_flag,
+                            execution_time_ms=elapsed_ms,
+                        )
+                else:
+                    vol_24h = float(market_data.get("quote_volume_24h", market_data.get("quoteVolume", 0.0)))
+                    if vol_24h < 100_000_000:
+                        elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+                        red_flag = (
+                            f"WEEKEND_LIQUIDITY_VETO: Cuối tuần tự động đóng băng Altcoins thanh khoản mỏng "
+                            f"({clean_sym} 24h Vol: ${vol_24h/1e6:.1f}M < $100M). Nguy cơ bị râu nến quét Stop Loss oan uổng!"
+                        )
+                        return AgentOpinion(
+                            agent_id=self.agent_id,
+                            agent_name=self.agent_name,
+                            role=self.role,
+                            vote=CouncilVote.VETO,
+                            confidence=0,
+                            rationale=red_flag,
+                            key_metrics={"is_weekend": True, "vol_24h": vol_24h, "check": "weekend_altcoin_shield"},
+                            red_flag=red_flag,
+                            execution_time_ms=elapsed_ms,
+                        )
+        except Exception as e_wk:
+            logger.debug(f"Weekend liquidity check error: {e_wk}")
         vol_r = float(market_data.get("vol_ratio", 1.0))
         chg_24h = float(market_data.get("change_24h", 0.0))
 
@@ -1157,6 +1228,49 @@ class QuantumCouncilArbiter:
         return "\n".join(lines)
 
 
+# =============================================================================
+# 6. QUANTUM COUNCIL SUPERVISOR (ĐẶC VỤ GIÁM SÁT ĐỘC LẬP - DUAL-AI CHECKER)
+# =============================================================================
+class QuantumCouncilSupervisor:
+    """
+    QuantumCouncilSupervisor (Đặc Vụ Giám Sát Độc Lập - AI Checker Tối Cao):
+    Hoàn thiện kiến trúc Maker-Checker (Dual-AI Autonomous Architecture):
+    - Maker (AI 1): Đề xuất ý tưởng giao dịch (Quantum AI Engine / Gemini Autonomous Trader).
+    - Checker (AI 2): Giám sát, đối soát đa khung, bắt bẫy và VETO các kèo rủi ro.
+    - Tuyệt đối không có chuyện 'AI tự tung tự tác' mà không có AI khác độc lập thẩm định!
+    """
+
+    def __init__(
+        self,
+        arbiter: Optional[QuantumCouncilArbiter] = None,
+        config: Optional[AppConfig] = None,
+        binance_client: Optional[Any] = None,
+    ):
+        self.arbiter = arbiter or QuantumCouncilArbiter(config=config, binance_client=binance_client)
+
+    async def audit_setup(
+        self,
+        symbol: str,
+        snapshot: Dict[str, Any],
+        candidate_setup: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, Optional[str], CouncilDeliberationResult]:
+        """
+        Thẩm định toàn diện một tín hiệu giao dịch qua Hội đồng 4 Đặc vụ.
+        Trả về: (is_approved: bool, veto_reason: Optional[str], deliberation: CouncilDeliberationResult)
+        """
+        market_data = dict(snapshot)
+        if candidate_setup:
+            market_data["candidate_setup"] = candidate_setup
+            market_data["direction"] = candidate_setup.get("direction", market_data.get("direction", "NEUTRAL"))
+            market_data["confidence"] = candidate_setup.get("confidence", 85)
+            market_data["entry_price"] = candidate_setup.get("entry_price")
+            market_data["stop_loss"] = candidate_setup.get("stop_loss")
+            market_data["leverage"] = candidate_setup.get("leverage", 20)
+
+        deliberation = await self.arbiter.deliberate(symbol, market_data)
+        return deliberation.is_approved, deliberation.veto_reason, deliberation
+
+
 __all__ = [
     "CouncilVote",
     "AgentOpinion",
@@ -1166,4 +1280,5 @@ __all__ = [
     "SentimentSentinelAgent",
     "RedTeamSkepticAgent",
     "QuantumCouncilArbiter",
+    "QuantumCouncilSupervisor",
 ]

@@ -56,6 +56,9 @@ class MockBinanceFuturesClient:
     async def set_margin_type_isolated(self, symbol: str) -> None:
         await self.set_margin_type(symbol, "ISOLATED")
 
+    async def get_max_leverage(self, symbol: str) -> int:
+        return 20
+
     async def set_leverage(self, symbol: str, leverage: int) -> int:
         self.leverages[symbol] = leverage
         return leverage

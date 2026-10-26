@@ -121,6 +121,27 @@ export interface PnLSummary {
   last_sync_time?: string;
 }
 
+export interface PnLChartItem {
+  period_key: string;
+  label: string;
+  full_date?: string;
+  net_pnl: number;
+  realized_pnl: number;
+  fees: number;
+  win_count: number;
+  loss_count: number;
+  total_trades: number;
+  win_rate: number;
+  cumulative_pnl: number;
+}
+
+export interface PnLChartResponse {
+  success: boolean;
+  daily: PnLChartItem[];
+  weekly: PnLChartItem[];
+  monthly: PnLChartItem[];
+}
+
 export interface TradeRecord {
   id: string;
   order_id?: string;
@@ -274,6 +295,7 @@ export interface AppSnapshot {
   mode: string;
   live_trading_enabled: boolean;
   ferrari_mode_enabled?: boolean;
+  max_active_signals?: number;
   engine_status: string;
   entry_enabled: boolean;
   account: BinanceAccountSnapshot;

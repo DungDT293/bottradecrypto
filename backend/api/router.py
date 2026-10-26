@@ -224,7 +224,7 @@ def create_api_router(
         # Clean health check: NEVER exposes session token
         return {
             "status": "HEALTHY",
-            "version": "1.3.7",
+            "version": "2.4.0",
             "mode": config.mode.value,
             "live_trading_enabled": config.live_trading_enabled,
             "engine_status": trading_svc.get_engine_status().value,
@@ -277,6 +277,7 @@ def create_api_router(
             "mode": config.mode.value,
             "live_trading_enabled": config.live_trading_enabled,
             "ferrari_mode_enabled": bool(getattr(config, "ferrari_mode_enabled", False)),
+            "max_active_signals": int(getattr(config.risk, "max_active_signals", 20 if getattr(config, "ferrari_mode_enabled", False) else 3)),
             "engine_status": trading_svc.get_engine_status().value,
             "entry_enabled": trading_svc.is_entry_enabled(),
             "account": account.model_dump(),
@@ -835,6 +836,50 @@ def create_api_router(
                 status_code=404,
                 detail=make_error_response("SIGNAL_NOT_FOUND", f"Không tìm thấy tín hiệu {signal_id}"),
             )
+
+        # Bổ sung thông tin kết quả Lãi/Lỗ thực tế (Trade Outcome) từ Binance cho vị thế
+        sig = detail.get("signal", {})
+        sym = sig.get("symbol")
+        if sym and binance_svc.has_credentials():
+            try:
+                client = BinanceFuturesClient(config)
+                raw_trades = await client._request("GET", "/fapi/v1/userTrades", params={"symbol": sym, "limit": 30}, signed=True)
+                await client.close()
+                if raw_trades:
+                    sig_created_str = sig.get("created_at") or "2000-01-01"
+                    try:
+                        sig_created_ts = int(datetime.fromisoformat(sig_created_str.replace("Z", "+00:00")).timestamp() * 1000) - 60000
+                    except Exception:
+                        sig_created_ts = 0
+
+                    sig_order_ids = {str(o.get("exchange_order_id")) for o in detail.get("orders", []) if o.get("exchange_order_id")}
+                    matching_trades = [
+                        t for t in raw_trades
+                        if str(t.get("orderId")) in sig_order_ids or t.get("time", 0) >= sig_created_ts
+                    ]
+                    if matching_trades:
+                        realized_pnl_total = sum(float(t.get("realizedPnl", 0)) for t in matching_trades)
+                        comm_total = sum(float(t.get("commission", 0)) for t in matching_trades)
+                        close_fills = [t for t in matching_trades if float(t.get("realizedPnl", 0)) != 0]
+                        exit_price = float(close_fills[-1].get("price")) if close_fills else None
+                        close_time_ms = close_fills[-1].get("time") if close_fills else None
+
+                        detail["trade_outcome"] = {
+                            "realized_pnl": round(realized_pnl_total, 4),
+                            "commission": round(comm_total, 4),
+                            "net_pnl": round(realized_pnl_total - comm_total, 4),
+                            "exit_price": exit_price,
+                            "close_time": (
+                                datetime.fromtimestamp(close_time_ms / 1000, tz=timezone.utc)
+                                .astimezone(VN_TZ)
+                                .strftime("%d/%m/%Y %H:%M:%S")
+                                if close_time_ms else None
+                            ),
+                            "fills_count": len(matching_trades),
+                        }
+            except Exception as e:
+                logger.debug(f"Không thể truy vấn kết quả khớp lệnh Binance cho {sym}: {e}")
+
         return detail
 
     class ResolveSignalModel(BaseModel):
@@ -971,6 +1016,7 @@ def create_api_router(
                 
                 # Pre-fetch order -> signal -> chat_id mapping
                 order_channel_map = {}
+                symbol_channel_map = {}
                 try:
                     with db.get_connection() as conn:
                         c = conn.cursor()
@@ -983,6 +1029,14 @@ def create_api_router(
                         for r in c.fetchall():
                             if r[0]:
                                 order_channel_map[str(r[0])] = r[1]
+                        c.execute("""
+                            SELECT symbol, chat_id
+                            FROM signals
+                            ORDER BY updated_at ASC
+                        """)
+                        for r in c.fetchall():
+                            if r[0] and r[1]:
+                                symbol_channel_map[r[0]] = r[1]
                 except Exception:
                     pass
 
@@ -998,18 +1052,21 @@ def create_api_router(
                     )
                     pnl_val = float(tr.get("realizedPnl", 0))
                     ord_id = str(tr.get("orderId", ""))
-                    chat_id = order_channel_map.get(ord_id)
+                    sym = str(tr.get("symbol", ""))
+                    chat_id = order_channel_map.get(ord_id) or symbol_channel_map.get(sym)
                     channel_name = KNOWN_CHANNELS.get(chat_id, "Thủ công / Khác") if chat_id else "Thủ công / Khác"
 
                     trades_list.append({
                         "id": str(tr.get("id")),
                         "order_id": ord_id,
-                        "symbol": str(tr.get("symbol")),
+                        "symbol": sym,
                         "side": "MUA (BUY)" if str(tr.get("side")).upper() == "BUY" else "BÁN (SELL)",
                         "price": str(tr.get("price")),
                         "qty": str(tr.get("qty")),
                         "commission": f"{float(tr.get('commission', 0)):.4f} {tr.get('commissionAsset', 'USDT')}",
                         "realized_pnl": pnl_val,
+                        "is_closing": (pnl_val != 0),
+                        "trade_type": "CHỐT LÃI / LỖ" if pnl_val != 0 else "MỞ VỊ THẾ",
                         "time": t_str,
                         "channel_name": channel_name,
                         "chat_id": chat_id,
@@ -1269,6 +1326,26 @@ def create_api_router(
         summary = stats_svc.get_pnl_summary(days_back=days_back)
         return summary
 
+    @router.get("/stats/pnl-chart", dependencies=[Depends(verify_token)])
+    async def get_stats_pnl_chart():
+        if binance_svc.has_credentials():
+            if time.time() - last_income_sync["time"] > 30.0:
+                client = None
+                try:
+                    client = BinanceFuturesClient(config)
+                    await stats_svc.sync_binance_income(client, days_back=60)
+                    last_income_sync["time"] = time.time()
+                except Exception:
+                    pass
+                finally:
+                    if client is not None:
+                        try:
+                            await client.close()
+                        except Exception:
+                            pass
+
+        return stats_svc.get_pnl_chart_data()
+
     @router.post("/stats/sync", dependencies=[Depends(verify_token)])
     async def post_sync_stats():
         if not binance_svc.has_credentials():
@@ -1437,7 +1514,18 @@ def create_api_router(
                 config.risk.max_total_open_risk_pct = Decimal("150.0")
                 config.risk.max_margin_per_trade_pct = Decimal("15.0")
                 config.risk.risk_per_signal_pct = Decimal("5.0")
-                config.risk.max_active_signals = min(int(getattr(config.risk, "max_active_signals", 5)), 5)
+                config.risk.max_active_signals = 20
+                config.risk.breakeven_after_tp1_default = True
+                config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_35_35_30
+                config.execution.tp1_target_weight_pct = Decimal("35.0")
+                config.execution.breakeven_trigger_tp_index = 1
+            else:
+                config.risk.max_leverage = 20
+                config.risk.default_leverage = 15
+                config.risk.max_total_open_risk_pct = Decimal("20.0")
+                config.risk.max_margin_per_trade_pct = Decimal("5.0")
+                config.risk.risk_per_signal_pct = Decimal("1.5")
+                config.risk.max_active_signals = 3
                 config.risk.breakeven_after_tp1_default = True
                 config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_35_35_30
                 config.execution.tp1_target_weight_pct = Decimal("35.0")
@@ -1486,16 +1574,18 @@ def create_api_router(
             config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_35_35_30
             config.execution.tp1_target_weight_pct = Decimal("35.0")
             config.execution.breakeven_trigger_tp_index = 1
-            msg = "Đã kích hoạt CHẾ ĐỘ FERRARI (Đòn bẩy 35x-40x, Chốt 35/35/30, Max Volume, Không chặn kèo)!"
+            msg = "Đã BẬT FERRARI MODE (Xác nhận chấp nhận rủi ro lớn để săn lợi nhuận lớn: Đòn bẩy 35x-40x, Khối lượng 5.0%, Bỏ van chờ 15 phút, Khớp mọi kèo đạt chuẩn)!"
         else:
-            config.risk.max_leverage = 25
-            config.risk.default_leverage = 20
-            config.risk.max_total_open_risk_pct = Decimal("25.0")
-            config.risk.max_margin_per_trade_pct = Decimal("7.0")
-            config.risk.risk_per_signal_pct = Decimal("2.5")
-            config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_20_40_40
-            config.execution.tp1_target_weight_pct = Decimal("20.0")
-            msg = "Đã tắt Chế độ Ferrari, quay về chế độ an toàn tiêu chuẩn."
+            config.risk.max_leverage = 20
+            config.risk.default_leverage = 15
+            config.risk.max_total_open_risk_pct = Decimal("20.0")
+            config.risk.max_margin_per_trade_pct = Decimal("5.0")
+            config.risk.risk_per_signal_pct = Decimal("1.5")
+            config.risk.max_active_signals = 3
+            config.execution.multi_tp_default_weight_mode = MultiTPWeightMode.FIXED_35_35_30
+            config.execution.tp1_target_weight_pct = Decimal("35.0")
+            config.execution.breakeven_trigger_tp_index = 1
+            msg = "Đã TẮT Ferrari Mode ➔ TỰ ĐỘNG KÍCH HOẠT CHẾ ĐỘ AN TOÀN (Đòn bẩy 15x-20x, Giãn cách 15p, Rủi ro 1.5%, Bảo toàn vốn Zero-Liquidation)!"
 
         save_config(config)
         await event_bus.publish("backend_status_changed", {"ferrari_mode_enabled": config.ferrari_mode_enabled})
@@ -1563,7 +1653,13 @@ def create_api_router(
             ai_trader.scan_interval_minutes = val
             config.ai.scan_interval_minutes = val
         if body.min_confidence is not None:
-            val = max(50, min(100, body.min_confidence))
+            c_val = int(body.min_confidence)
+            if c_val <= 82:
+                val = 80
+            elif c_val <= 87:
+                val = 85
+            else:
+                val = 90
             ai_trader.min_confidence = val
             config.ai.min_confidence = val
         if body.watchlist is not None:
@@ -1613,7 +1709,7 @@ def create_api_router(
                 status_code=403,
                 detail=make_error_response("EXCHANGE_WRITE_BLOCKED", "AI execution bị chặn trong mode hiện tại."),
             )
-        res = await ai_trader.execute_setup(body.setup)
+        res = await ai_trader.execute_setup(body.setup, bypass_cooldown=True)
         if res.get("status") == "SUCCESS":
             alert_svc.add_alert(
                 AlertLevel.INFO,

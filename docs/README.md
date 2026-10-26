@@ -1,5 +1,5 @@
 # THƯ VIỆN TÀI LIỆU HỆ THỐNG (MASTER DOCUMENTATION INDEX)
-## TELEGRAM BINANCE SIGNAL EXECUTOR (v1.3.3 PRO)
+## TELEGRAM BINANCE SIGNAL EXECUTOR (v2.4.0 QUANTUM DUAL-AI)
 
 Chào mừng bạn đến với trung tâm tài liệu toàn diện của dự án **Telegram Binance Signal Executor**. Thư mục này tập hợp, hệ thống hóa và lưu trữ toàn bộ các tài liệu kỹ thuật, đặc tả kiến trúc, quy chuẩn chính sách giao dịch, cơ sở tri thức tín hiệu và lộ trình quản trị vốn.
 
@@ -9,7 +9,9 @@ Chào mừng bạn đến với trung tâm tài liệu toàn diện của dự �
 
 ```mermaid
 mindmap
-  root((Thư Viện Docs v1.3.3))
+  root((Thư Viện Docs v2.4.0))
+    Bản Phát Hành & Cập Nhật
+      RELEASE_NOTES_v2.4.0.md["0. Bản Phát Hành v2.4.0 Quantum & Sniper"]
     Kiến Trúc & Kỹ Thuật
       SYSTEM_ARCHITECTURE_AND_FEATURE_SPEC.md["1. Kiến Trúc & Tính Năng Toàn Diện"]
       SYSTEM_QUANT_ARCHITECTURE.md["2. Bản Vẽ Định Lượng & Đồng Bộ PnL"]

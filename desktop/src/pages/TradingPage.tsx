@@ -45,6 +45,8 @@ export const TradingPage: React.FC = () => {
   const orders: OrderRecord[] = localOrders ?? snapshot?.orders ?? [];
   const isReadOnly = snapshot?.mode === "READ_ONLY";
   const isTestnet = snapshot?.mode === "TESTNET";
+  const isFerrari = Boolean(snapshot?.ferrari_mode_enabled);
+  const maxPositions = snapshot?.max_active_signals || (isFerrari ? 20 : 3);
 
   const handleClosePosition = async () => {
     if (!closingSymbol) return;
@@ -219,10 +221,10 @@ export const TradingPage: React.FC = () => {
             }}
           >
             <div style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              Số Vị Thế Mở / Trần An Toàn
+              Số Vị Thế Mở / Trần {isFerrari ? "Ferrari (Tối đa)" : "An Toàn"}
             </div>
-            <div style={{ fontSize: "18px", fontWeight: 700, color: positions.length <= 5 ? "#10b981" : "#f59e0b", marginTop: "4px" }}>
-              {positions.length} / 5 vị thế {positions.length > 5 ? "(Vượt trần khống chế)" : "(An toàn)"}
+            <div style={{ fontSize: "18px", fontWeight: 700, color: positions.length <= maxPositions ? "#10b981" : "#f59e0b", marginTop: "4px" }}>
+              {positions.length} / {maxPositions} vị thế {positions.length > maxPositions ? "(Vượt trần khống chế)" : isFerrari ? "(Ferrari Mode)" : "(An toàn)"}
             </div>
           </div>
 

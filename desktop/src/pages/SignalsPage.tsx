@@ -387,6 +387,98 @@ export const SignalsPage: React.FC = () => {
               </div>
 
               <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {/* 0. Trade Outcome (Kết Quả Khớp Lệnh & PnL Thực Tế trên Binance) */}
+                {selectedSignal.trade_outcome && (
+                  <div
+                    style={{
+                      padding: "14px 16px",
+                      background:
+                        selectedSignal.trade_outcome.net_pnl >= 0
+                          ? "rgba(16, 185, 129, 0.12)"
+                          : "rgba(239, 68, 68, 0.12)",
+                      border:
+                        selectedSignal.trade_outcome.net_pnl >= 0
+                          ? "1px solid rgba(16, 185, 129, 0.4)"
+                          : "1px solid rgba(239, 68, 68, 0.4)",
+                      borderRadius: "8px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "18px" }}>
+                          {selectedSignal.trade_outcome.net_pnl >= 0 ? "💰" : "📉"}
+                        </span>
+                        <strong
+                          style={{
+                            fontSize: "15px",
+                            color:
+                              selectedSignal.trade_outcome.net_pnl >= 0
+                                ? "#10b981"
+                                : "#ef4444",
+                          }}
+                        >
+                          KẾT QUẢ GIAO DỊCH TRÊN SÀN BINANCE: {selectedSignal.trade_outcome.net_pnl >= 0 ? "CHỐT LÃI (WIN)" : "CẮT LỖ (LOSS)"}
+                        </strong>
+                      </div>
+                      <div
+                        className="mono"
+                        style={{
+                          fontSize: "18px",
+                          fontWeight: 800,
+                          color:
+                            selectedSignal.trade_outcome.net_pnl >= 0
+                              ? "#10b981"
+                              : "#ef4444",
+                        }}
+                      >
+                        {selectedSignal.trade_outcome.net_pnl >= 0 ? "+" : ""}
+                        {selectedSignal.trade_outcome.net_pnl.toFixed(2)} USDT
+                        <span style={{ fontSize: "12px", marginLeft: "6px", color: "var(--text-muted)" }}>
+                          (Net PnL)
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, 1fr)",
+                        gap: "8px",
+                        background: "rgba(0,0,0,0.25)",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <div>
+                        <span style={{ color: "var(--text-muted)" }}>Realized PnL:</span>{" "}
+                        <strong className="mono" style={{ color: selectedSignal.trade_outcome.realized_pnl >= 0 ? "#10b981" : "#ef4444" }}>
+                          {selectedSignal.trade_outcome.realized_pnl >= 0 ? "+" : ""}{selectedSignal.trade_outcome.realized_pnl.toFixed(4)} USDT
+                        </strong>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--text-muted)" }}>Phí sàn (Fee):</span>{" "}
+                        <span className="mono" style={{ color: "#cbd5e1" }}>-${selectedSignal.trade_outcome.commission.toFixed(4)} USDT</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--text-muted)" }}>Giá chốt (Exit):</span>{" "}
+                        <span className="mono" style={{ color: "#fff", fontWeight: 700 }}>
+                          {selectedSignal.trade_outcome.exit_price ?? "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--text-muted)" }}>Thời gian chốt:</span>{" "}
+                        <span className="mono" style={{ color: "#cbd5e1" }}>
+                          {selectedSignal.trade_outcome.close_time ?? "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* 1. Core Params Grid */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", background: "rgba(255,255,255,0.02)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
                   <div style={{ gridColumn: "span 2", paddingBottom: "8px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -466,7 +558,16 @@ export const SignalsPage: React.FC = () => {
                         color: sig.state === "CLOSED" ? "#a7f3d0" : "#fca5a5",
                       }}
                     >
-                      {sig.blocking_reason}
+                      {(() => {
+                        const reason = String(sig.blocking_reason || "");
+                        if (reason.includes("SL THAT BAI - DA DONG KHAN CAP")) {
+                          return "Hệ thống đã chốt lệnh đóng vị thế an toàn trên sàn Binance.";
+                        }
+                        if (reason.includes("Đóng khẩn cấp tất cả vị thế")) {
+                          return "Đã thực hiện đóng vị thế an toàn trên sàn Binance.";
+                        }
+                        return reason;
+                      })()}
                     </div>
                   </div>
                 )}
@@ -496,8 +597,9 @@ export const SignalsPage: React.FC = () => {
                       !o.client_order_id?.startsWith("be_")
                   );
 
+                  const fallbackQty = orders.reduce((max: number, o: any) => Math.max(max, Number(o.quantity || 0)), 0);
                   const executedQty = Number(
-                    livePos?.amount || entryOrder?.filled_quantity || entryOrder?.quantity || 0
+                    livePos?.amount || entryOrder?.filled_quantity || entryOrder?.quantity || fallbackQty || 0
                   );
                   const notional = Number(livePos?.notional) > 0
                     ? Number(livePos?.notional)
@@ -556,7 +658,7 @@ export const SignalsPage: React.FC = () => {
                         <div style={{ background: "rgba(0,0,0,0.25)", padding: "8px 10px", borderRadius: "6px" }}>
                           <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Vốn ký quỹ (Margin)</div>
                           <div style={{ fontSize: "13px", fontWeight: 700, color: "#fff", marginTop: "2px" }}>
-                            {marginUsed > 0 ? `~$${marginUsed.toFixed(2)} USDT` : `~$2.3 - $2.5 USDT`}
+                            {marginUsed > 0 ? `~$${marginUsed.toFixed(2)} USDT` : "—"}
                           </div>
                         </div>
 
@@ -577,7 +679,7 @@ export const SignalsPage: React.FC = () => {
                         <div style={{ background: "rgba(0,0,0,0.25)", padding: "8px 10px", borderRadius: "6px" }}>
                           <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Lỗ tối đa nếu dính SL</div>
                           <div style={{ fontSize: "13px", fontWeight: 700, color: "#fbbf24", marginTop: "2px" }}>
-                            {maxRiskAmount > 0 ? `~$${maxRiskAmount.toFixed(2)} USDT` : `~$2.09 USDT`}
+                            {maxRiskAmount > 0 ? `~$${maxRiskAmount.toFixed(2)} USDT` : "—"}
                           </div>
                         </div>
                       </div>
@@ -585,10 +687,10 @@ export const SignalsPage: React.FC = () => {
                       {/* Explanation bullets */}
                       <div style={{ fontSize: "12px", color: "#cbd5e1", lineHeight: "1.6", display: "flex", flexDirection: "column", gap: "6px" }}>
                         <div>
-                          💡 <strong>Tại sao lệnh này đi vốn {marginUsed > 0 ? `~$${marginUsed.toFixed(2)} USDT` : "hơn $2.27 USDT"}?</strong>
+                          💡 <strong>Phân bổ vốn & quản trị rủi ro:</strong>
                           <br />
                           <span style={{ color: "var(--text-muted)" }}>
-                            Hệ thống áp dụng công thức <em>Fixed Fractional Risk ({sig.risk_pct || "2.5"}% Equity)</em>. Vì khoảng cách cắt lỗ đến SL là {slDistPct > 0 ? `${slDistPct.toFixed(2)}%` : "4.58%"}, với đòn bẩy {lev}x và khối lượng {executedQty} coin (~${notional.toFixed(2)} USDT), bot tính toán chuẩn xác mức vốn Margin là ${marginUsed.toFixed(2)} USDT để nếu chạm Stop Loss, tài khoản chỉ tổn thất đúng ~${maxRiskAmount.toFixed(2)} USDT (chuẩn 2.0 - 2.5% rủi ro vốn), bảo toàn tuyệt đối 97.5% số vốn còn lại.
+                            Hệ thống áp dụng công thức <em>Fixed Fractional Risk ({sig.risk_pct || "2.0"}% Vốn)</em>. Với khoảng cách Stop Loss là {slDistPct > 0 ? `${slDistPct.toFixed(2)}%` : "khoảng an toàn"}, đòn bẩy {lev}x và khối lượng {executedQty > 0 ? `${executedQty} coin` : "tiêu chuẩn"} (~${notional > 0 ? notional.toFixed(2) : "0.00"} USDT), mức ký quỹ là ~${marginUsed > 0 ? marginUsed.toFixed(2) : "0.00"} USDT để nếu chạm Stop Loss, mức rủi ro chỉ giới hạn trong hạn mức cho phép, bảo toàn tối đa tài khoản của bạn.
                           </span>
                         </div>
 

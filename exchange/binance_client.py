@@ -251,10 +251,14 @@ class BinanceFuturesClient:
                         )
 
                     if code == -4120 or "STOP_ORDER_SWITCH_ALGO" in msg:
-                        raise ExchangeAdapterError(
+                        err = ExchangeAdapterError(
                             f"Loi Binance -4120: Lenh conditional bat buoc phai gui qua endpoint /fapi/v1/algoOrder: {msg}"
                         )
-                    raise ExchangeAdapterError(f"Binance API Error {code}: {msg}")
+                        err.code = code
+                        raise err
+                    err = ExchangeAdapterError(f"Binance API Error {code}: {msg}")
+                    err.code = code
+                    raise err
                 return data
         except (asyncio.TimeoutError, TimeoutError):
             if _retry_count < 2:
@@ -345,14 +349,63 @@ class BinanceFuturesClient:
         await self.set_margin_type(symbol, "ISOLATED")
 
     # 4. Set Leverage
+    async def get_max_leverage(self, symbol: str) -> int:
+        """Queries the maximum initial leverage allowed for this symbol via leverageBracket."""
+        if not hasattr(self, "_leverage_brackets_cache"):
+            self._leverage_brackets_cache = {}
+        if symbol in self._leverage_brackets_cache:
+            return self._leverage_brackets_cache[symbol]
+        try:
+            data = await self._request("GET", "/fapi/v1/leverageBracket", params={"symbol": symbol}, signed=True)
+            if data:
+                brackets = []
+                if isinstance(data, list) and len(data) > 0:
+                    brackets = data[0].get("brackets", [])
+                elif isinstance(data, dict):
+                    brackets = data.get("brackets", [])
+                if brackets:
+                    max_lev = int(brackets[0].get("initialLeverage", 20))
+                    self._leverage_brackets_cache[symbol] = max_lev
+                    return max_lev
+        except Exception:
+            pass
+        return 20
+
     async def set_leverage(self, symbol: str, leverage: int) -> int:
-        data = await self._request(
-            "POST",
-            "/fapi/v1/leverage",
-            params={"symbol": symbol, "leverage": leverage},
-            signed=True,
-        )
-        return int(data.get("leverage", leverage))
+        target_lev = leverage
+        try:
+            max_lev = await self.get_max_leverage(symbol)
+            if target_lev > max_lev:
+                target_lev = max_lev
+        except Exception:
+            pass
+
+        try:
+            data = await self._request(
+                "POST",
+                "/fapi/v1/leverage",
+                params={"symbol": symbol, "leverage": target_lev},
+                signed=True,
+            )
+            return int(data.get("leverage", target_lev))
+        except Exception as e:
+            err_code = getattr(e, "code", None)
+            err_msg = str(e)
+            if err_code == -4028 or "-4028" in err_msg or "Leverage is not valid" in err_msg:
+                # Auto-fallback: try lower valid leverages
+                for fallback_lev in [25, 20, 15, 10, 5, 2, 1]:
+                    if fallback_lev < target_lev:
+                        try:
+                            data = await self._request(
+                                "POST",
+                                "/fapi/v1/leverage",
+                                params={"symbol": symbol, "leverage": fallback_lev},
+                                signed=True,
+                            )
+                            return int(data.get("leverage", fallback_lev))
+                        except Exception:
+                            continue
+            raise
 
     # 5. Account Balances & Equity
     async def get_account_equity(self) -> Decimal:

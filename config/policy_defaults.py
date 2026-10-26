@@ -97,6 +97,8 @@ class ExecutionPolicyConfig(BaseModel):
     @field_validator("entry_range_policy", mode="before")
     @classmethod
     def normalize_entry_range(cls, v):
+        if isinstance(v, EntryRangePolicy):
+            return v
         if isinstance(v, str):
             v_upper = v.upper().strip()
             if v_upper in ("MID", "MID_POINT", "MIDPOINT"):
@@ -107,16 +109,26 @@ class ExecutionPolicyConfig(BaseModel):
                 return EntryRangePolicy.SPLIT_2_LIMITS
             if v_upper == "NEEDS_POLICY":
                 return EntryRangePolicy.NEEDS_POLICY
+            try:
+                return EntryRangePolicy(v_upper)
+            except ValueError:
+                pass
         return v
 
     @field_validator("multi_tp_default_weight_mode", mode="before")
     @classmethod
     def normalize_multi_tp(cls, v):
+        if isinstance(v, MultiTPWeightMode):
+            return v
         if isinstance(v, str):
             v_upper = v.upper().strip()
+            if v_upper in ("FIXED_35_35_30", "35_35_30", "FIXED_35"):
+                return MultiTPWeightMode.FIXED_35_35_30
+            if v_upper in ("FIXED_20_40_40", "20_40_40", "FIXED_20"):
+                return MultiTPWeightMode.FIXED_20_40_40
             if v_upper in ("EQUAL", "EQUAL_SPLIT"):
                 return MultiTPWeightMode.EQUAL_SPLIT
-            if v_upper in ("CUSTOM", "CUSTOM_TP1_RATIO"):
+            if v_upper in ("CUSTOM", "CUSTOM_TP1_RATIO", "CUSTOM_TP1"):
                 return MultiTPWeightMode.CUSTOM_TP1_RATIO
             if v_upper in ("FRONT", "FRONT_LOADED_50_30_20"):
                 return MultiTPWeightMode.FRONT_LOADED_50_30_20
@@ -124,6 +136,10 @@ class ExecutionPolicyConfig(BaseModel):
                 return MultiTPWeightMode.EXPLICIT
             if v_upper == "NEEDS_POLICY":
                 return MultiTPWeightMode.NEEDS_POLICY
+            try:
+                return MultiTPWeightMode(v_upper)
+            except ValueError:
+                pass
         return v
 
 

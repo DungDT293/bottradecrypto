@@ -32,7 +32,7 @@ export const AITraderCard: React.FC = () => {
   const [togglingEnabled, setTogglingEnabled] = useState<boolean>(false);
   const [executingSymbol, setExecutingSymbol] = useState<string | null>(null);
   const [scanInterval, setScanInterval] = useState<number>(15);
-  const [minConfidence, setMinConfidence] = useState<number>(75);
+  const [minConfidence, setMinConfidence] = useState<number>(80);
   const [selectedModel, setSelectedModel] = useState<string>("gemini-3.6-flash");
 
   const fetchStatus = useCallback(async () => {
@@ -40,7 +40,7 @@ export const AITraderCard: React.FC = () => {
       const data = await api.getAIStatus();
       setAiStatus(data);
       setScanInterval(data.scan_interval_minutes || 15);
-      setMinConfidence(data.min_confidence || 75);
+      setMinConfidence(data.min_confidence || 80);
       if (data.preferred_model) setSelectedModel(data.preferred_model);
     } catch {
       // Ignored if backend not ready yet
@@ -527,7 +527,7 @@ export const AITraderCard: React.FC = () => {
 
               <div>
                 <label style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>
-                  Độ tin cậy tối thiểu
+                  Phân cấp tin cậy tối thiểu
                 </label>
                 <select
                   className="input"
@@ -539,10 +539,9 @@ export const AITraderCard: React.FC = () => {
                     handleSaveParams(scanInterval, val);
                   }}
                 >
-                  <option value={70}>70% (Nhiều tín hiệu)</option>
-                  <option value={75}>75% (Tiêu chuẩn cân bằng)</option>
-                  <option value={80}>80% (Chắt lọc cao)</option>
-                  <option value={85}>85% (Siêu khắt khe)</option>
+                  <option value={80}>Tier 80% (Trend Continuation - Chuẩn Winrate 89.4%)</option>
+                  <option value={85}>Tier 85% (SMC Order Block - Chuẩn Winrate 81.3%)</option>
+                  <option value={90}>Tier 90% (SMC Liquidity Sweep - Chuẩn Winrate 79.5%)</option>
                 </select>
               </div>
             </div>
@@ -552,7 +551,7 @@ export const AITraderCard: React.FC = () => {
         {/* Watchlist Chips */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "16px" }}>
           <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Danh sách theo dõi:</span>
-          {(aiStatus?.watchlist || ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "NEARUSDT", "AVAXUSDT", "PEPEUSDT"]).map((sym) => (
+          {(aiStatus?.watchlist || ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "NEARUSDT", "AVAXUSDT", "PEPEUSDT", "APTUSDT", "ADAUSDT", "LINKUSDT", "PENGUUSDT", "ENAUSDT"]).map((sym) => (
             <span
               key={sym}
               style={{
@@ -657,12 +656,25 @@ export const AITraderCard: React.FC = () => {
                               fontSize: "11px",
                               padding: "2px 6px",
                               borderRadius: "4px",
-                              background: "rgba(59, 130, 246, 0.15)",
-                              color: "#60a5fa",
-                              fontWeight: 600,
+                              background: setup.confidence >= 90
+                                ? "rgba(168, 85, 247, 0.2)"
+                                : setup.confidence >= 85
+                                  ? "rgba(59, 130, 246, 0.2)"
+                                  : "rgba(16, 185, 129, 0.2)",
+                              color: setup.confidence >= 90
+                                ? "#c084fc"
+                                : setup.confidence >= 85
+                                  ? "#60a5fa"
+                                  : "#34d399",
+                              fontWeight: 700,
+                              border: setup.confidence >= 90
+                                ? "1px solid rgba(168, 85, 247, 0.4)"
+                                : setup.confidence >= 85
+                                  ? "1px solid rgba(59, 130, 246, 0.4)"
+                                  : "1px solid rgba(16, 185, 129, 0.4)",
                             }}
                           >
-                            {setup.confidence}% Tin cậy
+                            Tier {setup.confidence}% ({setup.confidence >= 90 ? "Sweep Reversal" : setup.confidence >= 85 ? "Order Block" : "Trend Sóng"})
                           </span>
                         </div>
                       </div>

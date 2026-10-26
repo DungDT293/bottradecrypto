@@ -260,3 +260,141 @@ class StatsService:
             return {"success": True, "count": len(incomes), "days_synced": len(grouped)}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def get_pnl_chart_data(self) -> Dict[str, Any]:
+        """
+        Aggregates daily_pnl into Day, Week, and Month timeframes with cumulative equity curve.
+        """
+        from collections import defaultdict
+        with self.db.get_connection() as conn:
+            rows = conn.execute("SELECT * FROM daily_pnl ORDER BY date_str ASC").fetchall()
+
+        daily_data = []
+        cum_pnl = Decimal("0.0")
+
+        for r in rows:
+            d_str = r["date_str"]
+            net = Decimal(str(r["net_pnl"]))
+            realized = Decimal(str(r["realized_pnl"]))
+            fees = Decimal(str(r["fees_paid"]))
+            wins = int(r["win_count"] or 0)
+            losses = int(r["loss_count"] or 0)
+            trades = int(r["total_trades"] or 0)
+            cum_pnl += net
+            wr = round((wins / (wins + losses)) * 100, 1) if (wins + losses) > 0 else 0.0
+
+            try:
+                dt = datetime.strptime(d_str, "%Y-%m-%d")
+                label_str = dt.strftime("%d/%m")
+                full_date_str = dt.strftime("%d/%m/%Y")
+            except Exception:
+                label_str = d_str
+                full_date_str = d_str
+
+            daily_data.append({
+                "period_key": d_str,
+                "label": label_str,
+                "full_date": full_date_str,
+                "net_pnl": round(float(net), 2),
+                "realized_pnl": round(float(realized), 2),
+                "fees": round(float(fees), 2),
+                "win_count": wins,
+                "loss_count": losses,
+                "total_trades": trades,
+                "win_rate": wr,
+                "cumulative_pnl": round(float(cum_pnl), 2),
+            })
+
+        # Group by Week
+        weekly_groups = defaultdict(lambda: {
+            "net": Decimal("0"), "realized": Decimal("0"), "fees": Decimal("0"),
+            "wins": 0, "losses": 0, "trades": 0, "dates": []
+        })
+        for r in rows:
+            d_str = r["date_str"]
+            try:
+                dt = datetime.strptime(d_str, "%Y-%m-%d")
+                year, week, _ = dt.isocalendar()
+                w_key = f"{year}-W{week:02d}"
+                weekly_groups[w_key]["net"] += Decimal(str(r["net_pnl"]))
+                weekly_groups[w_key]["realized"] += Decimal(str(r["realized_pnl"]))
+                weekly_groups[w_key]["fees"] += Decimal(str(r["fees_paid"]))
+                weekly_groups[w_key]["wins"] += int(r["win_count"] or 0)
+                weekly_groups[w_key]["losses"] += int(r["loss_count"] or 0)
+                weekly_groups[w_key]["trades"] += int(r["total_trades"] or 0)
+                weekly_groups[w_key]["dates"].append(dt)
+            except Exception:
+                pass
+
+        weekly_data = []
+        w_cum = Decimal("0.0")
+        for w_key in sorted(weekly_groups.keys()):
+            wg = weekly_groups[w_key]
+            w_cum += wg["net"]
+            d_min = min(wg["dates"]).strftime("%d/%m") if wg["dates"] else ""
+            d_max = max(wg["dates"]).strftime("%d/%m") if wg["dates"] else ""
+            wr = round((wg["wins"] / (wg["wins"] + wg["losses"])) * 100, 1) if (wg["wins"] + wg["losses"]) > 0 else 0.0
+            w_num = w_key.split("-W")[1] if "-W" in w_key else w_key
+            weekly_data.append({
+                "period_key": w_key,
+                "label": f"Tuần {w_num} ({d_min} - {d_max})",
+                "net_pnl": round(float(wg["net"]), 2),
+                "realized_pnl": round(float(wg["realized"]), 2),
+                "fees": round(float(wg["fees"]), 2),
+                "win_count": wg["wins"],
+                "loss_count": wg["losses"],
+                "total_trades": wg["trades"],
+                "win_rate": wr,
+                "cumulative_pnl": round(float(w_cum), 2),
+            })
+
+        # Group by Month
+        monthly_groups = defaultdict(lambda: {
+            "net": Decimal("0"), "realized": Decimal("0"), "fees": Decimal("0"),
+            "wins": 0, "losses": 0, "trades": 0, "dates": []
+        })
+        for r in rows:
+            d_str = r["date_str"]
+            try:
+                dt = datetime.strptime(d_str, "%Y-%m-%d")
+                m_key = dt.strftime("%Y-%m")
+                monthly_groups[m_key]["net"] += Decimal(str(r["net_pnl"]))
+                monthly_groups[m_key]["realized"] += Decimal(str(r["realized_pnl"]))
+                monthly_groups[m_key]["fees"] += Decimal(str(r["fees_paid"]))
+                monthly_groups[m_key]["wins"] += int(r["win_count"] or 0)
+                monthly_groups[m_key]["losses"] += int(r["loss_count"] or 0)
+                monthly_groups[m_key]["trades"] += int(r["total_trades"] or 0)
+                monthly_groups[m_key]["dates"].append(dt)
+            except Exception:
+                pass
+
+        monthly_data = []
+        m_cum = Decimal("0.0")
+        for m_key in sorted(monthly_groups.keys()):
+            mg = monthly_groups[m_key]
+            m_cum += mg["net"]
+            try:
+                dt = datetime.strptime(m_key, "%Y-%m")
+                m_label = dt.strftime("Tháng %m/%Y")
+            except Exception:
+                m_label = m_key
+            wr = round((mg["wins"] / (mg["wins"] + mg["losses"])) * 100, 1) if (mg["wins"] + mg["losses"]) > 0 else 0.0
+            monthly_data.append({
+                "period_key": m_key,
+                "label": m_label,
+                "net_pnl": round(float(mg["net"]), 2),
+                "realized_pnl": round(float(mg["realized"]), 2),
+                "fees": round(float(mg["fees"]), 2),
+                "win_count": mg["wins"],
+                "loss_count": mg["losses"],
+                "total_trades": mg["trades"],
+                "win_rate": wr,
+                "cumulative_pnl": round(float(m_cum), 2),
+            })
+
+        return {
+            "success": True,
+            "daily": daily_data,
+            "weekly": weekly_data,
+            "monthly": monthly_data,
+        }

@@ -268,8 +268,8 @@ export const SettingsPage: React.FC = () => {
                   </div>
                   <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
                     {settings.ferrari_mode_enabled
-                      ? "ĐANG BẬT: Đòn bẩy x35-40, chốt lời TP1 35% + Breakeven tức thì. Mở khóa toàn bộ kèo Telegram không bị chặn."
-                      : "ĐÃ TẮT: Áp dụng hạn mức chuẩn an toàn."}
+                      ? "ĐANG BẬT: Xác nhận chấp nhận rủi ro lớn để săn lợi nhuận lớn: Đòn bẩy x35-40, Rủi ro 5.0%, Bỏ van chờ 15 phút, Khớp mọi kèo đạt chuẩn."
+                      : "ĐÃ TẮT: Tự động kích hoạt CHẾ ĐỘ AN TOÀN (Bảo toàn vốn: Đòn bẩy 15x-20x, Giãn cách 15p, Rủi ro 1.5%, Zero-Liquidation)."}
                   </div>
                 </div>
                 <input
@@ -280,10 +280,12 @@ export const SettingsPage: React.FC = () => {
                     setSettings((prev) => ({
                       ...prev,
                       ferrari_mode_enabled: enabled,
-                      max_leverage: enabled ? 40 : prev.max_leverage,
-                      multi_tp_default_weight_mode: enabled ? "FIXED_35_35_30" : prev.multi_tp_default_weight_mode,
-                      tp1_target_weight_pct: enabled ? 35 : prev.tp1_target_weight_pct,
-                      max_total_open_risk_pct: enabled ? 150 : 15,
+                      max_leverage: enabled ? 40 : 20,
+                      risk_per_signal_pct: enabled ? 5.0 : 1.5,
+                      max_active_signals: enabled ? 20 : 3,
+                      multi_tp_default_weight_mode: "FIXED_35_35_30",
+                      tp1_target_weight_pct: 35,
+                      max_total_open_risk_pct: enabled ? 150 : 20,
                     }));
                   }}
                   style={{ width: "22px", height: "22px", cursor: "pointer", accentColor: "#ef4444" }}

@@ -37,6 +37,16 @@ DEFAULT_WATCHLIST = [
     "NEARUSDT",
     "AVAXUSDT",
     "PEPEUSDT",
+    "APTUSDT",
+    "ADAUSDT",
+    "LINKUSDT",
+    "PENGUUSDT",
+    "ENAUSDT",
+    "OPUSDT",
+    "ARBUSDT",
+    "TIAUSDT",
+    "INJUSDT",
+    "FETUSDT",
 ]
 
 def calculate_ema(prices: List[float], period: int) -> float:
@@ -114,7 +124,7 @@ class GeminiAutonomousTrader:
         self.gemini_api_key: Optional[str] = (getattr(ai_cfg, "api_key", None) if ai_cfg else None) or os.getenv("GEMINI_API_KEY")
         self.scan_interval_minutes: int = getattr(ai_cfg, "scan_interval_minutes", 15) if ai_cfg else 15
         self.preferred_model: str = getattr(ai_cfg, "preferred_model", "gemini-3.6-flash") if ai_cfg else "gemini-3.6-flash"
-        self.min_confidence: int = getattr(ai_cfg, "min_confidence", 75) if ai_cfg else 75
+        self.min_confidence: int = getattr(ai_cfg, "min_confidence", 80) if ai_cfg else 80
         self.watchlist: List[str] = list(getattr(ai_cfg, "watchlist", DEFAULT_WATCHLIST)) if ai_cfg else list(DEFAULT_WATCHLIST)
         self._top_watchlist_cache: List[str] = []
         self._top_watchlist_time: float = 0.0
@@ -158,28 +168,35 @@ class GeminiAutonomousTrader:
 
         # V2.3 Market Cooldown Buffer & Trade Interval Tracking
         self.symbol_last_closed: Dict[str, float] = {}
+        self.symbol_last_was_loss: Dict[str, bool] = {}
         self.last_trade_opened_at: float = self._get_last_trade_from_db()
         if hasattr(self, "council_arbiter") and self.council_arbiter:
             self.council_arbiter.last_trade_opened_at = self.last_trade_opened_at
 
-    def _get_last_closed_from_db(self, symbol: str) -> float:
-        """Truy vấn thời điểm đóng vị thế gần nhất của symbol từ Database."""
+    def _get_last_closed_info_from_db(self, symbol: str) -> Tuple[float, bool]:
+        """Truy vấn thời điểm đóng vị thế và kết quả (lỗ/stop-loss hay không) từ Database."""
         if not self.db:
-            return 0.0
+            return 0.0, False
         try:
             with self.db.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT updated_at FROM signals WHERE symbol = ? AND state = 'CLOSED' ORDER BY updated_at DESC LIMIT 1",
+                    "SELECT updated_at, blocking_reason FROM signals WHERE symbol = ? AND state = 'CLOSED' ORDER BY updated_at DESC LIMIT 1",
                     (symbol,)
                 )
                 row = cursor.fetchone()
                 if row and row[0]:
                     dt = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
-                    return dt.timestamp()
+                    reason = str(row[1] or "").upper()
+                    was_loss = "STOP_LOSS" in reason or "SL" in reason or "LOSS" in reason
+                    return dt.timestamp(), was_loss
         except Exception as e:
             logger.debug(f"Error querying last closed from DB for {symbol}: {e}")
-        return 0.0
+        return 0.0, False
+
+    def _get_last_closed_from_db(self, symbol: str) -> float:
+        ts, _ = self._get_last_closed_info_from_db(symbol)
+        return ts
 
     def _get_last_trade_from_db(self) -> float:
         """Truy vấn thời điểm mở lệnh gần nhất toàn hệ thống từ Database."""
@@ -199,11 +216,12 @@ class GeminiAutonomousTrader:
             logger.debug(f"Error querying last trade from DB: {e}")
         return 0.0
 
-    def record_position_closed(self, symbol: str, closed_at: Optional[float] = None) -> None:
-        """Ghi nhận thời điểm đóng vị thế cho coin X để kích hoạt Market Cooldown Buffer 30m."""
+    def record_position_closed(self, symbol: str, closed_at: Optional[float] = None, was_loss: bool = False) -> None:
+        """Ghi nhận thời điểm đóng vị thế và kết quả cho coin X để kích hoạt Market Cooldown Buffer."""
         sym = symbol.upper().replace("/", "").replace(":", "")
         ts = closed_at or time.time()
         self.symbol_last_closed[sym] = ts
+        self.symbol_last_was_loss[sym] = was_loss
         if hasattr(self, "council_arbiter") and self.council_arbiter:
             self.council_arbiter.record_position_closed(sym, ts)
 
@@ -215,16 +233,24 @@ class GeminiAutonomousTrader:
             self.council_arbiter.record_trade_opened(symbol, ts)
 
     def get_symbol_cooldown_remaining(self, symbol: str) -> int:
-        """Trả về số giây làm nguội còn lại của coin X (30 phút = 1800s kể từ lúc đóng vị thế)."""
+        """
+        Trả về số giây làm nguội còn lại của coin X:
+        - Nếu vừa dính SL / Lỗ: 4 tiếng = 14400s (chống bẫy Revenge Trading).
+        - Nếu đóng hòa vốn / lãi: 30 phút = 1800s.
+        """
         sym = symbol.upper().replace("/", "").replace(":", "")
         last_closed = self.symbol_last_closed.get(sym, 0.0)
+        was_loss = self.symbol_last_was_loss.get(sym, False)
         if last_closed <= 0.0 and self.db:
-            last_closed = self._get_last_closed_from_db(sym)
+            last_closed, db_was_loss = self._get_last_closed_info_from_db(sym)
             if last_closed > 0.0:
                 self.symbol_last_closed[sym] = last_closed
+                self.symbol_last_was_loss[sym] = db_was_loss
+                was_loss = db_was_loss
+        req_cooldown = 14400 if was_loss else 1800
         elapsed = time.time() - last_closed
-        if 0 <= elapsed < 1800:
-            return int(1800 - elapsed)
+        if 0 <= elapsed < req_cooldown:
+            return int(req_cooldown - elapsed)
         return 0
 
     def get_global_trade_interval_remaining(self) -> int:
@@ -349,7 +375,7 @@ class GeminiAutonomousTrader:
         """Collects technical indicators and recent candles for a symbol from Binance."""
         try:
             session = await self.client._get_session()
-            url = f"{self.client.base_url}/fapi/v1/klines?symbol={symbol}&interval=1h&limit=60"
+            url = f"{self.client.base_url}/fapi/v1/klines?symbol={symbol}&interval=1h&limit=120"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
                 if resp.status != 200:
                     return None
@@ -376,6 +402,16 @@ class GeminiAutonomousTrader:
             sweep = detect_liquidity_sweep(highs, lows, closes, opens)
             ob = detect_order_block(opens, highs, lows, closes)
             
+            # 4H Macro Trend Alignment (20-bar 4H ~ 80h, 50-bar 4H ~ 120h)
+            ema_4h_20 = calculate_ema(closes, min(len(closes), 80))
+            ema_4h_50 = calculate_ema(closes, min(len(closes), 120))
+            if current_p > ema_4h_50 and ema_4h_20 >= ema_4h_50:
+                trend_4h = "BULLISH"
+            elif current_p < ema_4h_50 and ema_4h_20 <= ema_4h_50:
+                trend_4h = "BEARISH"
+            else:
+                trend_4h = "CHOPPY"
+
             # Trend calculation
             if current_p > ema20 > ema50:
                 trend = "STRONG_BULLISH"
@@ -415,6 +451,9 @@ class GeminiAutonomousTrader:
                 "current_price": current_p,
                 "ema20": round(ema20, 6),
                 "ema50": round(ema50, 6),
+                "ema_4h_20": round(ema_4h_20, 6),
+                "ema_4h_50": round(ema_4h_50, 6),
+                "trend_4h": trend_4h,
                 "rsi_14": round(rsi, 2),
                 "rsi": round(rsi, 2),
                 "atr_14": round(atr, 6),
@@ -469,6 +508,7 @@ class GeminiAutonomousTrader:
 Analyze this 1h market snapshot for {snapshot['symbol']}:
 - Current Price: {snapshot['current_price']}
 - Trend: {snapshot['trend']}
+- 4H Macro Trend: {snapshot.get('trend_4h', 'CHOPPY')}
 - EMA 20: {snapshot['ema20']}, EMA 50: {snapshot['ema50']}
 - RSI (14): {snapshot['rsi_14']}
 - ATR (14): {snapshot['atr_14']}
@@ -479,24 +519,24 @@ Follow this strict Dialectical Committee Workflow:
 1. BULL RESEARCHER: Identifies all positive bullish price action signals, support levels, and upward continuation factors.
 2. BEAR RESEARCHER: Identifies all bearish headwinds, resistance walls, RSI exhaustion, or false breakout risks.
 3. RISK GUARDIAN: Evaluates whether a valid trade exists with R:R >= 2.0 and structural Stop Loss between 1.5% and 5.0%. If conflicting or high risk, issue VETO.
-4. HEAD TRADER: Synthesizes the debate. Approves LONG/SHORT only if confidence >= 75% and Risk Guardian approves. Otherwise, reject trade.
+4. HEAD TRADER: Synthesizes the debate. STRICT RULE: Must align with 4H Macro Trend (e.g. if 4H is BEARISH, NEVER approve LONG; if 4H is BULLISH, NEVER approve SHORT). Approves LONG/SHORT only if confidence >= 80% (strictly calibrated to tiers: 80% Trend Continuation, 85% Order Block Retest, 90% Liquidity Sweep) and Risk Guardian approves. Otherwise, reject trade.
 
 Respond with ONLY valid JSON strictly matching this schema:
 {{
     "has_setup": true or false,
     "direction": "LONG" or "SHORT",
-    "confidence": integer between 0 and 100,
+    "confidence": integer strictly one of [80, 85, 90],
     "bull_arguments": "Vietnamese 1-sentence summary of the strongest Bull argument",
     "bear_arguments": "Vietnamese 1-sentence summary of the key Bear risk/counter-argument",
     "risk_verdict": "APPROVED" or "VETOED",
     "rationale": "Vietnamese concise synthesis explaining the entry thesis and level invalidation",
     "entry_price": float (optimal entry price near current price),
     "stop_loss": float (structural invalidation level),
-    "take_profit_1": float (conservative 1.5R - 2R),
-    "take_profit_2": float (2.5R - 3R),
-    "take_profit_3": float (4R+ runner)
+    "take_profit_1": float (quick scalp profit lock 0.9R - 1.0R, ~1.0% - 1.5% price move),
+    "take_profit_2": float (trend target 2.0R - 2.5R),
+    "take_profit_3": float (3.5R - 4.5R runner)
 }}
-If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and explain reason in "rationale"."""
+If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and explain reason in "rationale"."""
 
         # Strict directive: only models 3.6 and above
         available_36_plus_models = [
@@ -580,22 +620,26 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         rsi = snapshot["rsi_14"]
         atr = snapshot["atr_14"]
         sym = snapshot["symbol"]
+        trend_4h = snapshot.get("trend_4h", "CHOPPY")
 
         if atr <= 0 or p <= 0:
             return None
 
         # Setup A: Bullish Trend Pullback (Price > EMA50, RSI pulled back to 38-48 range)
         if p > ema50 and 38.0 <= rsi <= 50.0 and ema20 >= ema50:
-            sl_dist = max(atr * 1.5, p * 0.02)
+            if trend_4h == "BEARISH":
+                return None
+            sl_dist = max(atr * 1.3, p * 0.018)
             sl = p - sl_dist
-            tp1 = p + (sl_dist * 1.5)
-            tp2 = p + (sl_dist * 2.5)
-            tp3 = p + (sl_dist * 4.0)
+            tp1 = p + (sl_dist * 0.95)
+            tp2 = p + (sl_dist * 2.0)
+            tp3 = p + (sl_dist * 3.5)
             return {
                 "has_setup": True,
                 "symbol": sym,
                 "direction": "LONG",
-                "confidence": 78,
+                "archetype": "TREND_CONTINUATION",
+                "confidence": 80,
                 "bull_arguments": f"Giá duy trì vững chắc trên đường xu hướng EMA 50 ({ema50}), phe mua kiểm soát cấu trúc tăng.",
                 "bear_arguments": "Cần thận trọng nếu RSI suy giảm xuyên thủng mốc 35 hoặc thủng đáy gần nhất.",
                 "risk_verdict": "APPROVED",
@@ -610,16 +654,19 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
 
         # Setup B: Bearish Trend Pullback (Price < EMA50, RSI bounced to 50-62 range)
         if p < ema50 and 50.0 <= rsi <= 62.0 and ema20 <= ema50:
-            sl_dist = max(atr * 1.5, p * 0.02)
+            if trend_4h == "BULLISH":
+                return None
+            sl_dist = max(atr * 1.3, p * 0.018)
             sl = p + sl_dist
-            tp1 = p - (sl_dist * 1.5)
-            tp2 = p - (sl_dist * 2.5)
-            tp3 = p - (sl_dist * 4.0)
+            tp1 = p - (sl_dist * 0.95)
+            tp2 = p - (sl_dist * 2.0)
+            tp3 = p - (sl_dist * 3.5)
             return {
                 "has_setup": True,
                 "symbol": sym,
                 "direction": "SHORT",
-                "confidence": 78,
+                "archetype": "TREND_CONTINUATION",
+                "confidence": 80,
                 "bull_arguments": "Phe mua có nhịp hồi phục kỹ thuật nhẹ nhưng khối lượng không đột biến.",
                 "bear_arguments": f"Cản động EMA 50 ({ema50}) đè nặng lên giá, RSI ({rsi}) suy kiệt xung lực hồi phục.",
                 "risk_verdict": "APPROVED",
@@ -632,63 +679,17 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
                 "source": "Quant Engine Fallback",
             }
 
-        # Setup C: Extreme RSI Oversold Mean Reversion (RSI < 28)
-        if rsi < 28.0:
-            sl_dist = max(atr * 1.8, p * 0.025)
-            sl = p - sl_dist
-            tp1 = p + (sl_dist * 1.5)
-            tp2 = p + (sl_dist * 2.5)
-            tp3 = p + (sl_dist * 3.5)
-            return {
-                "has_setup": True,
-                "symbol": sym,
-                "direction": "LONG",
-                "confidence": 75,
-                "bull_arguments": f"RSI 1h rớt sâu vào vùng quá bán cực đoan ({rsi} < 28), lực bán xả đã cạn kiệt.",
-                "bear_arguments": "Đà giảm dốc đứng có thể tạo thêm 1 nhịp quét râu trước khi bật dậy.",
-                "risk_verdict": "APPROVED",
-                "rationale": f"Phân kỳ quá bán RSI 1h cực đoan ({rsi} < 28), khả năng cao xuất hiện sóng hồi phục kỹ thuật mạnh.",
-                "entry_price": p,
-                "stop_loss": round(sl, 6),
-                "take_profit_1": round(tp1, 6),
-                "take_profit_2": round(tp2, 6),
-                "take_profit_3": round(tp3, 6),
-                "source": "Quant Engine Fallback",
-            }
-
-        # Setup D: Extreme RSI Overbought Mean Reversion (RSI > 72)
-        if rsi > 72.0:
-            sl_dist = max(atr * 1.8, p * 0.025)
-            sl = p + sl_dist
-            tp1 = p - (sl_dist * 1.5)
-            tp2 = p - (sl_dist * 2.5)
-            tp3 = p - (sl_dist * 3.5)
-            return {
-                "has_setup": True,
-                "symbol": sym,
-                "direction": "SHORT",
-                "confidence": 75,
-                "bull_arguments": "Đà tăng dốc đứng của phe mua rất mạnh nhưng đã rơi vào vùng hưng phấn cực độ.",
-                "bear_arguments": f"RSI 1h vượt mốc {rsi} (> 72), áp lực chốt lời diện rộng sẵn sàng kích hoạt.",
-                "risk_verdict": "APPROVED",
-                "rationale": f"Quá mua RSI 1h cực đoan ({rsi} > 72), xuất hiện lực ép chốt lời ngắn hạn từ phe mua.",
-                "entry_price": p,
-                "stop_loss": round(sl, 6),
-                "take_profit_1": round(tp1, 6),
-                "take_profit_2": round(tp2, 6),
-                "take_profit_3": round(tp3, 6),
-                "source": "Quant Engine Fallback",
-            }
-
+        # Setup C & D (Blind RSI Mean Reversion) have been deprecated:
+        # Bắt dao rơi RSI đơn thuần bị loại bỏ hoàn toàn để bảo vệ 100% kỷ luật bảo toàn vốn.
         return None
 
     EXCLUDE_SYMBOLS = {
         "USDCUSDT", "FDUSDUSDT", "BUSDUSDT", "TUSDUSDT", "EURUSDT", "AEURUSDT"
     }
 
-    async def get_top_liquid_watchlist(self, limit: int = 100) -> List[str]:
+    async def get_top_liquid_watchlist(self, limit: int = 25) -> List[str]:
         """
-        Dynamically retrieves Top 100 liquid USDT-M perpetual contracts from Binance.
+        Dynamically retrieves Top 25 liquid USDT-M perpetual contracts from Binance.
         Caches results for 1 hour to prevent redundant ticker requests.
         """
         if self._top_watchlist_cache and (time.time() - self._top_watchlist_time < 3600):
@@ -746,8 +747,10 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         """
         if symbols:
             target_symbols = symbols
+        elif self.watchlist:
+            target_symbols = self.watchlist
         else:
-            target_symbols = await self.get_top_liquid_watchlist(limit=100)
+            target_symbols = await self.get_top_liquid_watchlist(limit=25)
         target_symbols, skipped_symbols = await self._filter_valid_symbols(target_symbols)
 
         setups: List[Dict[str, Any]] = []
@@ -895,7 +898,7 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         if residual > Decimal("0"):
             raise RuntimeError(f"Emergency close chưa xác nhận vị thế {symbol} về 0 (còn {residual})")
 
-    async def execute_setup(self, setup: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def execute_setup(self, setup: Dict[str, Any], bypass_cooldown: bool = False) -> Optional[Dict[str, Any]]:
         """Execute only a fresh, scanned setup while protected lifecycle is active."""
         gate_reason = self._execution_gate_reason()
         if gate_reason:
@@ -928,20 +931,46 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         if direction not in ("LONG", "SHORT"):
             return {"status": "ERROR", "reason": "Hướng giao dịch không hợp lệ"}
 
-        # Check Per-symbol Cooldown (30 phút = 1800s kể từ lúc đóng vị thế)
+        # Check Per-symbol Cooldown (30 phút hoặc 4 tiếng nếu dính SL)
         sym_cd_rem = self.get_symbol_cooldown_remaining(sym)
         if sym_cd_rem > 0:
+            was_loss = self.symbol_last_was_loss.get(sym, False)
+            cd_type = "4 tiếng (triệt tiêu bẫy cay cú sau khi dính SL)" if was_loss else "30 phút"
             return {
                 "status": "SKIPPED",
-                "reason": f"SYMBOL_COOLDOWN: Đồng {sym} vừa đóng vị thế trong vòng 30 phút (còn {sym_cd_rem}s làm nguội) để tránh bẫy trả thù lệnh (Revenge trading)",
+                "reason": f"SYMBOL_COOLDOWN: Đồng {sym} vừa đóng vị thế trong vòng {cd_type} (còn {sym_cd_rem}s làm nguội) để tránh bẫy trả thù lệnh (Revenge trading)",
             }
 
-        # Check Global Trade Interval (15 phút = 900s giữa 2 lần mở vị thế)
+        # Check Weekend Liquidity Shield (Lá Chắn Thanh Khoản Cuối Tuần)
+        now_utc = datetime.now(timezone.utc)
+        vn_hour = (now_utc.hour + 7) % 24
+        vn_day_shift = 1 if (now_utc.hour + 7) >= 24 else 0
+        vn_weekday = (now_utc.weekday() + vn_day_shift) % 7
+        is_weekend = (vn_weekday == 5) or (vn_weekday == 6) or (vn_weekday == 0 and vn_hour < 6)
+        if is_weekend:
+            is_major = sym in ("BTCUSDT", "ETHUSDT")
+            if is_major:
+                if confidence < 90:
+                    return {
+                        "status": "SKIPPED",
+                        "reason": f"WEEKEND_LIQUIDITY_SHIELD: Cuối tuần chỉ cho phép giao dịch {sym} khi đạt chuẩn Sniper Master (>= 90%). Kèo hiện tại chỉ đạt {confidence}%.",
+                    }
+            else:
+                vol_24h = float(setup.get("quote_volume_24h", setup.get("quoteVolume", 0.0)))
+                if vol_24h < 100_000_000:
+                    return {
+                        "status": "SKIPPED",
+                        "reason": f"WEEKEND_LIQUIDITY_SHIELD: Cuối tuần tự động đóng băng Altcoins thanh khoản mỏng ({sym} 24h Vol: ${vol_24h/1e6:.1f}M < $100M) để tránh bẫy quét râu nến ảo.",
+                    }
+
+        # Check Global Trade Interval (15 phút ở chế độ An Toàn; Bỏ qua khi BẬT Ferrari Mode)
+        is_ferrari = getattr(self.config, "ferrari_mode_enabled", False)
         global_cd_rem = self.get_global_trade_interval_remaining()
-        if global_cd_rem > 0 and confidence < 92:
+        min_bypass_conf = 80 if is_ferrari else 92
+        if not bypass_cooldown and not is_ferrari and global_cd_rem > 0 and confidence < min_bypass_conf:
             return {
                 "status": "SKIPPED",
-                "reason": f"GLOBAL_INTERVAL: Khoảng cách giữa 2 lần mở vị thế chưa đủ 15 phút (còn {global_cd_rem}s) và điểm consensus ({confidence}/100) chưa đạt ngưỡng đặc cách >= 92",
+                "reason": f"GLOBAL_INTERVAL: Chế độ An Toàn đang giãn cách 15 phút giữa 2 lệnh (còn {global_cd_rem}s). Bật Ferrari Mode hoặc đợi hết đếm lùi.",
             }
 
         # Sentinel Black-Swan Gate
@@ -969,23 +998,29 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             positions = await self.client.get_open_positions()
             if any(p.get("symbol") == sym and float(p.get("positionAmt", 0)) != 0 for p in (positions or [])):
                 return {"status": "SKIPPED", "reason": f"Dang co vi the {sym} tren san"}
-            limit = min(int(getattr(self.config.risk, "max_active_signals", 5)), 5)
+            is_ferrari = getattr(self.config, "ferrari_mode_enabled", False)
+            if is_ferrari:
+                limit = int(getattr(self.config.risk, "max_active_signals", 20))
+            else:
+                limit = min(int(getattr(self.config.risk, "max_active_signals", 3)), 5)
             active_count = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) != 0])
             if active_count >= limit:
-                return {"status": "SKIPPED", "reason": f"Đã đạt hạn mức an toàn tối đa {limit} vị thế đồng thời ({active_count}/{limit}) để bảo toàn ký quỹ"}
+                mode_label = "Ferrari Mode" if is_ferrari else "Chế độ An Toàn"
+                return {"status": "SKIPPED", "reason": f"Đã đạt hạn mức tối đa {limit} vị thế đồng thời ({active_count}/{limit}) của {mode_label} để bảo toàn ký quỹ"}
 
-            # Directional Exposure Cap (Tối đa không quá 3 vị thế cùng chiều: Max 3 SHORTs, Max 3 LONGs)
+            # Directional Exposure Cap (An Toàn: Max 3 cùng chiều; Ferrari: trần mở rộng)
             open_longs = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) > 0])
             open_shorts = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) < 0])
-            if direction == "SHORT" and open_shorts >= 3:
+            max_directional = max(10, limit // 2) if is_ferrari else 3
+            if direction == "SHORT" and open_shorts >= max_directional:
                 return {
                     "status": "SKIPPED",
-                    "reason": "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế SHORT. Chặn để phòng ngừa rủi ro Short Squeeze khi thị trường đảo chiều!",
+                    "reason": f"DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa {max_directional} vị thế SHORT. Chặn để phòng ngừa rủi ro Short Squeeze khi thị trường đảo chiều!",
                 }
-            if direction == "LONG" and open_longs >= 3:
+            if direction == "LONG" and open_longs >= max_directional:
                 return {
                     "status": "SKIPPED",
-                    "reason": "DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa 3 vị thế LONG. Chặn để phòng ngừa rủi ro Long Squeeze khi thị trường đảo chiều!",
+                    "reason": f"DIRECTIONAL_CAP_VETO: Đã đạt trần tối đa {max_directional} vị thế LONG. Chặn để phòng ngừa rủi ro Long Squeeze khi thị trường đảo chiều!",
                 }
         except Exception as e:
             return {"status": "ERROR", "reason": f"Khong the kiem tra vi the: {e}"}
@@ -1034,8 +1069,8 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
             return {"status": "ERROR", "reason": "Khoang cach SL bang 0"}
 
         is_ferrari = getattr(self.config, "ferrari_mode_enabled", False)
-        max_lev = 25 if is_ferrari else 20
-        target_lev = 20 if is_ferrari else 15
+        max_lev = 35 if is_ferrari else 20
+        target_lev = 30 if is_ferrari else 15
 
         # Macro Bearish Panic Clamp for Altcoin Longs: Clamp leverage to 15x-18x
         try:
@@ -1052,14 +1087,15 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         order_side = OrderSide.BUY if side == PositionSide.LONG else OrderSide.SELL
         close_side = OrderSide.SELL if side == PositionSide.LONG else OrderSide.BUY
 
-        # Sizing: 5.0% in Ferrari Mode, 2.0% standard
+        # Sizing: 5.0% in Ferrari Mode, 1.5% in Safe Mode
         try:
             equity = Decimal(str(await self.client.get_account_equity()))
         except Exception as exc:
             return {"status": "ERROR", "reason": f"Không thể xác minh equity: {exc}"}
         if not equity.is_finite() or equity <= 0:
             return {"status": "ERROR", "reason": "Equity không hợp lệ hoặc bằng 0"}
-        risk_pct = Decimal("0.05") if is_ferrari else Decimal("0.02")
+        safe_risk = Decimal(str(getattr(getattr(self.config, "risk", None), "risk_per_signal_pct", "1.5"))) / Decimal("100")
+        risk_pct = Decimal("0.05") if is_ferrari else min(Decimal("0.02"), max(Decimal("0.005"), safe_risk))
         risk_budget = equity * risk_pct
         dollar_sl_dist = abs(entry_p - sl_p)
         raw_qty = (risk_budget / dollar_sl_dist).quantize(step_size)
@@ -1075,8 +1111,9 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
         try:
             await self.client.set_margin_type_cross(sym)
             applied_lev = await self.client.set_leverage(sym, safe_lev)
-            if int(applied_lev) != safe_lev:
-                return {"status": "ERROR", "reason": "Sàn không xác nhận đúng mức đòn bẩy an toàn"}
+            if int(applied_lev) <= 0:
+                return {"status": "ERROR", "reason": "Sàn không xác nhận mức đòn bẩy hợp lệ"}
+            safe_lev = int(applied_lev)
         except Exception as exc:
             return {"status": "ERROR", "reason": f"Không thể cấu hình margin/leverage an toàn: {exc}"}
 
@@ -1210,34 +1247,7 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
                     "quantity": float(tp_vol),
                 })
         except Exception as exc:
-            for tp in placed_tps:
-                try:
-                    await self.client.cancel_standard_order(sym, tp["client_order_id"])
-                except Exception:
-                    pass
-            try:
-                await self.client.cancel_algo_order(sym, client_algo_id=sl_cid)
-            except Exception:
-                pass
-            try:
-                await self.client.create_standard_order(
-                    symbol=sym,
-                    side=close_side,
-                    order_type=OrderType.MARKET,
-                    quantity=total_qty,
-                    client_order_id=f"emg_{sig_id[:8]}_{uuid.uuid4().hex[:4]}",
-                    reduce_only=True,
-                )
-            except Exception as cleanup_exc:
-                return {"status": "ERROR", "reason": f"Đặt TP thất bại; emergency close cũng thất bại: {cleanup_exc}"}
-            try:
-                pos_after_close = await self.client.get_position(sym)
-                residual = abs(Decimal(str(pos_after_close.get("positionAmt", "0")))) if pos_after_close else Decimal("0")
-                if residual > Decimal("0"):
-                    return {"status": "ERROR", "reason": f"Đặt TP thất bại; emergency close chưa xác nhận vị thế về 0 (còn {residual})"}
-            except Exception as verify_exc:
-                return {"status": "ERROR", "reason": f"Đặt TP thất bại; không xác minh được emergency close: {verify_exc}"}
-            return {"status": "ERROR", "reason": f"Đặt TP thất bại; đã đóng khẩn cấp vị thế: {exc}"}
+            logger.warning(f"Lỗi khi đặt lệnh Take Profit cho {sym}: {exc}. Vị thế vẫn được bảo vệ bởi Stop Loss {sl_p}.")
 
         # 4. Save to Database
         if self.signal_repo and self.db:
@@ -1287,7 +1297,7 @@ If no trade meets >= 75% confidence and R:R >= 2.0, set "has_setup": false and e
                             tps_saved_json,
                             safe_lev,
                             "CROSSED",
-                            2.0,
+                            float(risk_pct * Decimal("100")),
                             now_iso,
                             now_iso,
                         ),

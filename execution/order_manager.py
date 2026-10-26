@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import uuid
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from config.config import AppConfig
 from core.enums import OrderSide, OrderType, PositionSide, SignalState
@@ -314,12 +317,38 @@ class OrderManager:
             except Exception as e:
                 tp_order.status = "REJECTED"
                 self.order_repo.save_order(tp_order)
-                for placed_tp in placed_tp_orders:
-                    try:
-                        await self.client.cancel_standard_order(signal.symbol, placed_tp.client_order_id)
-                        self.order_repo.update_order_fill(placed_tp.client_order_id, "CANCELED", placed_tp.filled_quantity, placed_tp.avg_fill_price)
-                    except Exception:
-                        pass
+                logger.warning(f"Không thể đặt TP{idx+1} ({tp_price}) cho {signal.symbol}: {e}.")
+
+        if not placed_tp_orders:
+            # Fallback: cố gắng đặt 1 lệnh TP1 cho toàn bộ khối lượng nếu các lệnh trước bị từ chối
+            try:
+                fb_tp_price = signal.take_profits[0][0]
+                fb_cid = f"tp_{signal.signal_id[:8]}_fb_{uuid.uuid4().hex[:4]}"
+                fb_resp = await self.client.create_standard_order(
+                    symbol=signal.symbol,
+                    side=tp_side,
+                    order_type=OrderType.LIMIT,
+                    quantity=filled_qty,
+                    price=fb_tp_price,
+                    client_order_id=fb_cid,
+                    reduce_only=True,
+                )
+                fb_tp = Order(
+                    client_order_id=fb_cid,
+                    signal_id=signal.signal_id,
+                    symbol=signal.symbol,
+                    side=tp_side,
+                    order_type=OrderType.LIMIT,
+                    price=fb_tp_price,
+                    quantity=filled_qty,
+                    is_reduce_only=True,
+                    is_algo=False,
+                    exchange_order_id=str(fb_resp.get("orderId")),
+                    status="NEW",
+                )
+                self.order_repo.save_order(fb_tp)
+                placed_tp_orders.append(fb_tp)
+            except Exception as fb_err:
                 try:
                     await self.client.cancel_algo_order(signal.symbol, client_algo_id=sl_order.client_order_id)
                     self.order_repo.update_order_fill(sl_order.client_order_id, "CANCELED", sl_order.filled_quantity, sl_order.avg_fill_price)
@@ -331,21 +360,8 @@ class OrderManager:
                     side=signal.side,
                     signal_id=signal.signal_id,
                 )
-                raise EmergencyCloseError(f"Khong the dat TP{idx+1} ({tp_price}); da huy bao ve va dong vi the: {e}")
+                raise EmergencyCloseError(f"Khong the dat TP1 ({signal.take_profits[0][0] if signal.take_profits else 'N/A'}); da huy bao ve va dong vi the: {fb_err}")
 
-        if not placed_tp_orders or accumulated_tp_qty < (filled_qty * Decimal("0.90")):
-            try:
-                await self.client.cancel_algo_order(signal.symbol, client_algo_id=sl_order.client_order_id)
-                self.order_repo.update_order_fill(sl_order.client_order_id, "CANCELED", sl_order.filled_quantity, sl_order.avg_fill_price)
-            except Exception:
-                pass
-            await self.position_manager.execute_emergency_close(
-                symbol=signal.symbol,
-                quantity=filled_qty,
-                side=signal.side,
-                signal_id=signal.signal_id,
-            )
-            raise EmergencyCloseError("TP coverage incomplete; da kich hoat fail-safe dong vi the")
         self.signal_repo.update_signal_state(signal.signal_id, SignalState.OPEN_PROTECTED)
         return sl_order
 

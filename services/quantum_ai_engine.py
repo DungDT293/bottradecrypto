@@ -86,28 +86,34 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
     return sum(tr_list[-period:]) / period
 
 
-def calculate_stoch_rsi(closes: List[float], rsi_period: int = 14, stoch_period: int = 14, k_period: int = 3) -> Tuple[float, float]:
-    """Calculates smoothed Stochastic RSI %K and %D."""
+def calculate_stoch_rsi(closes: List[float], rsi_period: int = 14, stoch_period: int = 14, k_period: int = 3, d_period: int = 3) -> Tuple[float, float]:
+    """Calculates smoothed Stochastic RSI %K and %D with SMA smoothing."""
     rsi_arr = calculate_rsi_series(closes, period=rsi_period)
-    if len(rsi_arr) < stoch_period:
+    if len(rsi_arr) < stoch_period + k_period + d_period:
         return 50.0, 50.0
     
-    k_vals = []
-    for offset in range(k_period):
+    raw_stoch = []
+    for offset in range(k_period + d_period):
         idx = len(rsi_arr) - 1 - offset
-        if idx >= stoch_period:
+        if idx >= stoch_period - 1:
             window = rsi_arr[idx - stoch_period + 1 : idx + 1]
             min_r = min(window)
             max_r = max(window)
             if max_r - min_r <= 1e-9:
-                k_vals.append(50.0)
+                raw_stoch.append(50.0)
             else:
-                k_vals.append(100.0 * (rsi_arr[idx] - min_r) / (max_r - min_r))
+                raw_stoch.append(100.0 * (rsi_arr[idx] - min_r) / (max_r - min_r))
         else:
-            k_vals.append(50.0)
+            raw_stoch.append(50.0)
             
-    k = float(sum(k_vals) / len(k_vals))
-    d = k  # Smoothed representative
+    # Calculate %K smoothed (SMA of raw_stoch over k_period)
+    k_series = []
+    for i in range(d_period):
+        k_val = sum(raw_stoch[i : i + k_period]) / k_period
+        k_series.append(k_val)
+        
+    k = float(k_series[0])
+    d = float(sum(k_series[:d_period]) / d_period)
     return k, d
 
 
@@ -129,9 +135,9 @@ def calculate_bollinger_bands(closes: List[float], period: int = 20, num_std: fl
 
 def detect_divergence(closes: List[float], rsi_series: List[float], lookback: int = 25) -> Dict[str, bool]:
     """
-    Detects Regular Bullish (Bottom) and Regular Bearish (Top) Divergences.
-    - Bullish: Lower Price Low + Higher RSI Low (in oversold territory < 42)
-    - Bearish: Higher Price High + Lower RSI High (in overbought territory > 58)
+    Detects Regular Bullish (Bottom) and Regular Bearish (Top) Divergences with mathematical precision:
+    - Bullish: Price makes Lower Low (or tests low) while RSI makes Higher Low (in oversold zone <= 45).
+    - Bearish: Price makes Higher High (or tests high) while RSI makes Lower High (in overbought zone >= 55).
     """
     if len(closes) < lookback or len(rsi_series) < lookback:
         return {"bullish_divergence": False, "bearish_divergence": False}
@@ -142,22 +148,31 @@ def detect_divergence(closes: List[float], rsi_series: List[float], lookback: in
     curr_c = sub_c[-1]
     curr_rsi = sub_rsi[-1]
     
-    # 1. Bullish Divergence check
-    min_idx = int(np.argmin(sub_c[:-2])) if len(sub_c) > 5 else -1
+    # Exclude the most recent 2 bars to find distinct prior swing point
+    prior_c = sub_c[:-2]
+    prior_rsi_sub = sub_rsi[:-2]
+    if len(prior_c) < 5:
+        return {"bullish_divergence": False, "bearish_divergence": False}
+
+    min_idx = int(np.argmin(prior_c))
+    max_idx = int(np.argmax(prior_c))
+    
     bullish = False
-    if min_idx >= 0 and sub_c[min_idx] <= curr_c * 1.008:
-        prior_rsi = sub_rsi[min_idx]
-        if curr_rsi >= prior_rsi + 2.5 and curr_rsi <= 44.0:
-            bullish = True
-            
-    # 2. Bearish Divergence check
-    max_idx = int(np.argmax(sub_c[:-2])) if len(sub_c) > 5 else -1
+    prior_low_price = prior_c[min_idx]
+    prior_low_rsi = prior_rsi_sub[min_idx]
+    # Price Lower Low or Double Bottom: curr_c <= prior_low_price * 1.005
+    # RSI Higher Low: curr_rsi >= prior_low_rsi + 2.0
+    if curr_c <= prior_low_price * 1.005 and curr_rsi >= prior_low_rsi + 2.0 and curr_rsi <= 45.0:
+        bullish = True
+        
     bearish = False
-    if max_idx >= 0 and sub_c[max_idx] >= curr_c * 0.992:
-        prior_rsi = sub_rsi[max_idx]
-        if curr_rsi <= prior_rsi - 2.5 and curr_rsi >= 56.0:
-            bearish = True
-            
+    prior_high_price = prior_c[max_idx]
+    prior_high_rsi = prior_rsi_sub[max_idx]
+    # Price Higher High or Double Top: curr_c >= prior_high_price * 0.995
+    # RSI Lower High: curr_rsi <= prior_high_rsi - 2.0
+    if curr_c >= prior_high_price * 0.995 and curr_rsi <= prior_high_rsi - 2.0 and curr_rsi >= 55.0:
+        bearish = True
+        
     return {"bullish_divergence": bullish, "bearish_divergence": bearish}
 
 
@@ -263,7 +278,7 @@ class QuantumAIEngine:
     async def get_market_kline_analysis(self, symbol: str) -> Optional[Dict[str, Any]]:
         try:
             session = await self.client._get_session()
-            url = f"{self.client.base_url}/fapi/v1/klines?symbol={symbol}&interval=1h&limit=60"
+            url = f"{self.client.base_url}/fapi/v1/klines?symbol={symbol}&interval=1h&limit=120"
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=6.0)) as resp:
                 if resp.status != 200:
                     return None
@@ -299,6 +314,16 @@ class QuantumAIEngine:
             sweep = detect_liquidity_sweep(highs, lows, closes, opens)
             ob = detect_order_block(opens, highs, lows, closes)
 
+            # 4H Macro Trend Alignment (20-bar 4H ~ 80h, 50-bar 4H ~ 120h)
+            ema_4h_20 = calculate_ema(closes, min(len(closes), 80))
+            ema_4h_50 = calculate_ema(closes, min(len(closes), 120))
+            if current_p > ema_4h_50 and ema_4h_20 >= ema_4h_50:
+                trend_4h = "BULLISH"
+            elif current_p < ema_4h_50 and ema_4h_20 <= ema_4h_50:
+                trend_4h = "BEARISH"
+            else:
+                trend_4h = "CHOPPY"
+
             vol_ma20 = sum(volumes[-21:-1]) / 20 if len(volumes) >= 21 else volumes[-1]
             vol_ratio = volumes[-1] / vol_ma20 if vol_ma20 > 0 else 1.0
 
@@ -318,6 +343,9 @@ class QuantumAIEngine:
                 "current_price": current_p,
                 "ema20": ema20,
                 "ema50": ema50,
+                "ema_4h_20": ema_4h_20,
+                "ema_4h_50": ema_4h_50,
+                "trend_4h": trend_4h,
                 "rsi": rsi,
                 "rsi_14": rsi,
                 "rsi_series": rsi_series,
@@ -379,9 +407,15 @@ class QuantumAIEngine:
         if p <= 0 or atr <= 0:
             return None
 
+        trend_4h = m.get("trend_4h", "CHOPPY")
+
         # ==============================================================
         # 1. 85%+ BOTTOM CATCH (BẮT ĐÁY ĐA HỢP LƯU - LONG)
         # ==============================================================
+        # 4H Macro Trend Shield: Chặn tuyệt đối bắt đáy LONG khi khung 4H đang Giảm
+        if trend_4h == "BEARISH":
+            return None
+
         # Trend Bias & Falling Knife Shield:
         # Nếu nến 1H đang là xu hướng Giảm mạnh (p < ema20 và ema20 < ema50):
         # BẮT BUỘC phải có Phân kỳ dương RSI HOẶC nến Pinbar rút chân mạnh (lw_r >= 0.40)
@@ -392,8 +426,8 @@ class QuantumAIEngine:
 
         long_confluences: List[str] = []
         
-        # Confluence 1: Stop Hunt Liquidity Sweep of Swing Low
-        if sweep.get("bull_sweep") or (lw_r >= 0.38 and p <= ema50):
+        # Confluence 1: Stop Hunt Liquidity Sweep of Swing Low (Strict)
+        if sweep.get("bull_sweep"):
             long_confluences.append(f"Quét thanh khoản đáy (Wick={lw_r*100:.0f}%)")
             
         # Confluence 2: Momentum Exhaustion (GỘP NHÓM ĐỘNG LƯỢNG - LOẠI BỎ HỢP LƯU ẢO)
@@ -402,41 +436,38 @@ class QuantumAIEngine:
         elif rsi <= 35.0 or pct_b <= 0.15 or k_stoch <= 22.0:
             long_confluences.append(f"Động lượng quá bán cực hạn (RSI={rsi:.1f}, %B={pct_b:.2f})")
             
-        # Confluence 3: Order Block / EMA50 Retest
+        # Confluence 3: Order Block Retest (Smart Money OB thực thụ)
         bull_ob = ob.get("bull_ob")
         if bull_ob and p <= bull_ob["top"] * 1.01 and p >= bull_ob["bottom"] * 0.99:
             long_confluences.append("Retest Order Block Smart Money tăng giá")
-        elif abs(p - ema50) / p <= 0.008:
-            long_confluences.append("Chạm hỗ trợ động EMA50")
             
         # Confluence 4: Volume Absorption
         if vol_r >= 1.35:
             long_confluences.append(f"Volume gom hàng x{vol_r:.1f} lần TB")
 
-        # Confluence 5: Price Action Reversal Candlestick Confirmation
-        if lw_r >= 0.35 and p >= m.get("open", p):
-            long_confluences.append("Nến xanh rút chân hấp thụ lực bán")
+        # Confluence 5: Price Action Reversal Candlestick Confirmation (Pinbar >= 40%)
+        if lw_r >= 0.40 and p >= m.get("open", p):
+            long_confluences.append(f"Nến xanh rút chân Pinbar hấp thụ (Râu={lw_r*100:.0f}%)")
 
         if len(long_confluences) >= 4:
-            # High-Conviction 85%+ Bottom Setup
-            conf = 85 + (len(long_confluences) - 4) * 4  # 4 confluences = 85-88%, 5+ = 89-93%
-            conf = min(conf, 93)
+            # Calibrated Confidence: 4 confluences = 85%, 5 confluences = 90%
+            conf = 90 if len(long_confluences) >= 5 else 85
             
-            # SL strictly below liquidity sweep wick or recent low with safe buffer
-            lowest_ref = sweep.get("lowest_prior", p - atr * 1.5)
-            sl_raw = min(m.get("last_low", p - atr), lowest_ref, p - atr * 1.2) - (atr * 0.2)
+            # SL strictly below liquidity sweep wick or recent low with safe buffer (min 1.8 ATR)
+            lowest_ref = sweep.get("lowest_prior", p - atr * 1.8)
+            sl_raw = min(m.get("last_low", p - atr * 1.8), lowest_ref, p - atr * 1.8) - (atr * 0.3)
             sl = round_to_tick(sl_raw, tick)
             sl_dist = p - sl
             if sl_dist <= 0 or sl_dist > p * 0.08:
-                sl_dist = max(atr * 1.5, p * 0.035)
+                sl_dist = max(atr * 1.5, p * 0.02)
                 sl = round_to_tick(p - sl_dist, tick)
-            elif sl_dist < p * 0.028:
-                sl_dist = max(atr * 1.5, p * 0.032)
+            elif sl_dist < p * 0.018:
+                sl_dist = max(atr * 1.5, p * 0.02)
                 sl = round_to_tick(p - sl_dist, tick)
                 
-            tp1 = round_to_tick(p + (sl_dist * 1.5), tick)
-            tp2 = round_to_tick(p + (sl_dist * 2.8), tick)
-            tp3 = round_to_tick(p + (sl_dist * 4.5), tick)
+            tp1 = round_to_tick(p + (sl_dist * 0.95), tick)
+            tp2 = round_to_tick(p + (sl_dist * 2.0), tick)
+            tp3 = round_to_tick(p + (sl_dist * 3.5), tick)
 
             safe_lev = min(20, max(10, int(0.75 / (sl_dist / p))))
             
@@ -449,7 +480,7 @@ class QuantumAIEngine:
                 "has_setup": True,
                 "symbol": sym,
                 "direction": "LONG",
-                "archetype": "QUANTUM_SMC_BOTTOM_HUNT",
+                "archetype": "SMC_SWEEP_SNIPER" if conf == 90 else "SMC_OB_RETEST",
                 "confidence": conf,
                 "rationale": rationale_text,
                 "entry_price": p,
@@ -457,7 +488,7 @@ class QuantumAIEngine:
                 "take_profit_1": tp1,
                 "take_profit_2": tp2,
                 "take_profit_3": tp3,
-                "estimated_rr": round(2.8 / 1.0, 2),
+                "estimated_rr": round(2.0 / 1.0, 2),
                 "leverage": safe_lev,
                 "risk_verdict": "APPROVED",
                 "confluences": long_confluences,
@@ -467,6 +498,10 @@ class QuantumAIEngine:
         # ==============================================================
         # 2. 85%+ TOP CATCH (BẮT ĐỈNH ĐA HỢP LƯU - SHORT)
         # ==============================================================
+        # 4H Macro Trend Shield: Chặn tuyệt đối bắt đỉnh SHORT khi khung 4H đang Tăng
+        if trend_4h == "BULLISH":
+            return None
+
         # Low-Cap Pump & Whale Volume Climax Shield
         chg_24h = float(m.get("change_24h", 0.0))
         if vol_r >= 2.5 and (p >= ema20 or chg_24h >= 10.0):
@@ -486,8 +521,8 @@ class QuantumAIEngine:
 
         short_confluences: List[str] = []
         
-        # Confluence 1: Stop Hunt Liquidity Sweep of Swing High
-        if sweep.get("bear_sweep") or (uw_r >= 0.38 and p >= ema50):
+        # Confluence 1: Stop Hunt Liquidity Sweep of Swing High (Strict)
+        if sweep.get("bear_sweep"):
             short_confluences.append(f"Quét thanh khoản đỉnh (Wick={uw_r*100:.0f}%)")
             
         # Confluence 2: Momentum Exhaustion (GỘP NHÓM ĐỘNG LƯỢNG - LOẠI BỎ HỢP LƯU ẢO)
@@ -496,41 +531,38 @@ class QuantumAIEngine:
         elif rsi >= 65.0 or pct_b >= 0.85 or k_stoch >= 78.0:
             short_confluences.append(f"Động lượng quá mua cực hạn (RSI={rsi:.1f}, %B={pct_b:.2f})")
             
-        # Confluence 3: Order Block / EMA50 Resistance Retest
+        # Confluence 3: Order Block Retest (Smart Money OB thực thụ)
         bear_ob = ob.get("bear_ob")
         if bear_ob and p >= bear_ob["bottom"] * 0.99 and p <= bear_ob["top"] * 1.01:
             short_confluences.append("Retest Order Block Smart Money xả hàng")
-        elif abs(p - ema50) / p <= 0.008:
-            short_confluences.append("Chạm kháng cự động EMA50")
             
         # Confluence 4: Volume Climax
         if vol_r >= 1.35:
             short_confluences.append(f"Volume xả đè giá x{vol_r:.1f} lần TB")
 
-        # Confluence 5: Price Action Reversal Candlestick Confirmation
-        if uw_r >= 0.35 and p <= m.get("open", p):
-            short_confluences.append("Nến đỏ bị từ chối đè giá trên đỉnh")
+        # Confluence 5: Price Action Reversal Candlestick Confirmation (Pinbar >= 40%)
+        if uw_r >= 0.40 and p <= m.get("open", p):
+            short_confluences.append(f"Nến đỏ bị từ chối đè giá Pinbar (Râu={uw_r*100:.0f}%)")
 
         if len(short_confluences) >= 4:
-            # High-Conviction 85%+ Top Setup
-            conf = 85 + (len(short_confluences) - 4) * 4
-            conf = min(conf, 93)
+            # Calibrated Confidence: 4 confluences = 85%, 5 confluences = 90%
+            conf = 90 if len(short_confluences) >= 5 else 85
             
-            # SL strictly above liquidity sweep wick or recent high with safe buffer
-            highest_ref = sweep.get("highest_prior", p + atr * 1.5)
-            sl_raw = max(m.get("last_high", p + atr), highest_ref, p + atr * 1.2) + (atr * 0.2)
+            # SL strictly above liquidity sweep wick or recent high with safe buffer (min 1.8 ATR)
+            highest_ref = sweep.get("highest_prior", p + atr * 1.8)
+            sl_raw = max(m.get("last_high", p + atr * 1.8), highest_ref, p + atr * 1.8) + (atr * 0.3)
             sl = round_to_tick(sl_raw, tick)
             sl_dist = sl - p
             if sl_dist <= 0 or sl_dist > p * 0.08:
-                sl_dist = max(atr * 1.5, p * 0.035)
+                sl_dist = max(atr * 1.5, p * 0.02)
                 sl = round_to_tick(p + sl_dist, tick)
-            elif sl_dist < p * 0.028:
-                sl_dist = max(atr * 1.5, p * 0.032)
+            elif sl_dist < p * 0.018:
+                sl_dist = max(atr * 1.5, p * 0.02)
                 sl = round_to_tick(p + sl_dist, tick)
                 
-            tp1 = round_to_tick(p - (sl_dist * 1.5), tick)
-            tp2 = round_to_tick(p - (sl_dist * 2.8), tick)
-            tp3 = round_to_tick(p - (sl_dist * 4.5), tick)
+            tp1 = round_to_tick(p - (sl_dist * 0.95), tick)
+            tp2 = round_to_tick(p - (sl_dist * 2.0), tick)
+            tp3 = round_to_tick(p - (sl_dist * 3.5), tick)
 
             safe_lev = min(20, max(10, int(0.75 / (sl_dist / p))))
             
@@ -543,7 +575,7 @@ class QuantumAIEngine:
                 "has_setup": True,
                 "symbol": sym,
                 "direction": "SHORT",
-                "archetype": "QUANTUM_SMC_TOP_HUNT",
+                "archetype": "SMC_SWEEP_SNIPER" if conf == 90 else "SMC_OB_RETEST",
                 "confidence": conf,
                 "rationale": rationale_text,
                 "entry_price": p,
@@ -551,7 +583,7 @@ class QuantumAIEngine:
                 "take_profit_1": tp1,
                 "take_profit_2": tp2,
                 "take_profit_3": tp3,
-                "estimated_rr": round(2.8 / 1.0, 2),
+                "estimated_rr": round(2.0 / 1.0, 2),
                 "leverage": safe_lev,
                 "risk_verdict": "APPROVED",
                 "confluences": short_confluences,
@@ -587,20 +619,24 @@ class QuantumAIEngine:
         if p <= 0 or atr <= 0:
             return None
 
+        trend_4h = m.get("trend_4h", "CHOPPY")
+
         # ARCHETYPE 1: WHALES CIRCLE (Trend Pullback + Wick Absorption)
         # Bullish Pullback
         if p > ema50 and ema20 > ema50 and 39.0 <= rsi <= 52.0 and lw_r >= 0.28:
-            sl_dist = max(atr * 1.4, p * 0.02)
+            if trend_4h == "BEARISH":
+                return None
+            sl_dist = max(atr * 1.3, p * 0.018)
             sl = round_to_tick(p - sl_dist, tick)
-            tp1 = round_to_tick(p + (sl_dist * 1.5), tick)
-            tp2 = round_to_tick(p + (sl_dist * 2.8), tick)
-            tp3 = round_to_tick(p + (sl_dist * 4.5), tick)
-            conf = 88 if lw_r >= 0.40 else 84
+            tp1 = round_to_tick(p + (sl_dist * 0.95), tick)
+            tp2 = round_to_tick(p + (sl_dist * 2.0), tick)
+            tp3 = round_to_tick(p + (sl_dist * 3.5), tick)
+            conf = 80
             return {
                 "has_setup": True,
                 "symbol": sym,
                 "direction": "LONG",
-                "archetype": "WHALES_CIRCLE_PULLBACK",
+                "archetype": "TREND_CONTINUATION",
                 "confidence": conf,
                 "rationale": f"Mô phỏng Whales Circle: Xu hướng Tăng khung 1h, nến rút chân mạnh (Râu dưới {lw_r*100:.0f}%), RSI={rsi:.1f} chuẩn bị bật tăng từ hỗ trợ EMA50.",
                 "entry_price": p,
@@ -608,7 +644,7 @@ class QuantumAIEngine:
                 "take_profit_1": tp1,
                 "take_profit_2": tp2,
                 "take_profit_3": tp3,
-                "estimated_rr": round(2.8 / 1.4, 2),
+                "estimated_rr": round(2.0 / 1.0, 2),
                 "leverage": 20,
                 "risk_verdict": "APPROVED",
                 "source": "Quantum AI (WHALES_CIRCLE)",
@@ -616,19 +652,19 @@ class QuantumAIEngine:
 
         # Bearish Pullback
         if p < ema50 and ema20 < ema50 and 48.0 <= rsi <= 61.0 and uw_r >= 0.28:
-            if vol_r >= 2.5 or chg >= 15.0:
+            if vol_r >= 2.5 or chg >= 15.0 or trend_4h == "BULLISH":
                 return None
-            sl_dist = max(atr * 1.4, p * 0.02)
+            sl_dist = max(atr * 1.3, p * 0.018)
             sl = round_to_tick(p + sl_dist, tick)
-            tp1 = round_to_tick(p - (sl_dist * 1.5), tick)
-            tp2 = round_to_tick(p - (sl_dist * 2.8), tick)
-            tp3 = round_to_tick(p - (sl_dist * 4.5), tick)
-            conf = 88 if uw_r >= 0.40 else 84
+            tp1 = round_to_tick(p - (sl_dist * 0.95), tick)
+            tp2 = round_to_tick(p - (sl_dist * 2.0), tick)
+            tp3 = round_to_tick(p - (sl_dist * 3.5), tick)
+            conf = 80
             return {
                 "has_setup": True,
                 "symbol": sym,
                 "direction": "SHORT",
-                "archetype": "WHALES_CIRCLE_PULLBACK",
+                "archetype": "TREND_CONTINUATION",
                 "confidence": conf,
                 "rationale": f"Mô phỏng Whales Circle: Xu hướng Giảm khung 1h, nến bị từ chối đè giá (Râu trên {uw_r*100:.0f}%), RSI={rsi:.1f} suy kiệt tại cản EMA50.",
                 "entry_price": p,
@@ -636,7 +672,7 @@ class QuantumAIEngine:
                 "take_profit_1": tp1,
                 "take_profit_2": tp2,
                 "take_profit_3": tp3,
-                "estimated_rr": round(2.8 / 1.4, 2),
+                "estimated_rr": round(2.0 / 1.0, 2),
                 "leverage": 20,
                 "risk_verdict": "APPROVED",
                 "source": "Quantum AI (WHALES_CIRCLE)",
@@ -645,107 +681,56 @@ class QuantumAIEngine:
         # ARCHETYPE 2: COIN CHIEF (Volume Expansion Breakout)
         if vol_r >= 1.6:
             # Bullish Breakout
-            if p >= m.get("recent_high", p) * 0.995 and rsi >= 56.0 and ema20 >= ema50:
+            if p >= m.get("recent_high", p) * 0.995 and rsi >= 56.0 and ema20 >= ema50 and trend_4h != "BEARISH":
                 sl_dist = max(atr * 1.2, p * 0.018)
                 sl = round_to_tick(p - sl_dist, tick)
-                tp1 = round_to_tick(p + (sl_dist * 1.4), tick)
-                tp2 = round_to_tick(p + (sl_dist * 2.5), tick)
-                tp3 = round_to_tick(p + (sl_dist * 4.0), tick)
+                tp1 = round_to_tick(p + (sl_dist * 0.95), tick)
+                tp2 = round_to_tick(p + (sl_dist * 2.0), tick)
+                tp3 = round_to_tick(p + (sl_dist * 3.5), tick)
                 return {
                     "has_setup": True,
                     "symbol": sym,
                     "direction": "LONG",
-                    "archetype": "COIN_CHIEF_VOLUME_BREAKOUT",
-                    "confidence": 86,
+                    "archetype": "SMC_OB_RETEST",
+                    "confidence": 85,
                     "rationale": f"Mô phỏng Admin Coin Chief: Phá vỡ đỉnh 24h với Volume đột biến x{vol_r:.1f} lần trung bình, RSI={rsi:.1f} bùng nổ xung lực mua.",
                     "entry_price": p,
                     "stop_loss": sl,
                     "take_profit_1": tp1,
                     "take_profit_2": tp2,
                     "take_profit_3": tp3,
-                    "estimated_rr": round(2.5 / 1.2, 2),
+                    "estimated_rr": round(2.0 / 1.0, 2),
                     "leverage": 20,
                     "risk_verdict": "APPROVED",
                     "source": "Quantum AI (COIN_CHIEF)",
                 }
             # Bearish Breakdown
-            if p <= m.get("recent_low", p) * 1.005 and rsi <= 44.0 and ema20 <= ema50:
+            if p <= m.get("recent_low", p) * 1.005 and rsi <= 44.0 and ema20 <= ema50 and trend_4h != "BULLISH":
                 sl_dist = max(atr * 1.2, p * 0.018)
                 sl = round_to_tick(p + sl_dist, tick)
-                tp1 = round_to_tick(p - (sl_dist * 1.4), tick)
-                tp2 = round_to_tick(p - (sl_dist * 2.5), tick)
-                tp3 = round_to_tick(p - (sl_dist * 4.0), tick)
+                tp1 = round_to_tick(p - (sl_dist * 0.95), tick)
+                tp2 = round_to_tick(p - (sl_dist * 2.0), tick)
+                tp3 = round_to_tick(p - (sl_dist * 3.5), tick)
                 return {
                     "has_setup": True,
                     "symbol": sym,
                     "direction": "SHORT",
-                    "archetype": "COIN_CHIEF_VOLUME_BREAKOUT",
-                    "confidence": 86,
+                    "archetype": "SMC_OB_RETEST",
+                    "confidence": 85,
                     "rationale": f"Mô phỏng Admin Coin Chief & Crypto Leopard: Thủng đáy 24h với Volume bán xả lớn x{vol_r:.1f} lần trung bình, RSI={rsi:.1f} gãy hỗ trợ.",
                     "entry_price": p,
                     "stop_loss": sl,
                     "take_profit_1": tp1,
                     "take_profit_2": tp2,
                     "take_profit_3": tp3,
-                    "estimated_rr": round(2.5 / 1.2, 2),
+                    "estimated_rr": round(2.0 / 1.0, 2),
                     "leverage": 20,
                     "risk_verdict": "APPROVED",
                     "source": "Quantum AI (COIN_CHIEF)",
                 }
 
-        # ARCHETYPE 3: CRYPTO MERMAIDS & DEVIL (Extreme Mean Reversion)
-        if rsi <= 26.0:
-            if p < ema20 and ema20 < ema50 and lw_r < 0.35:
-                return None
-            sl_dist = max(atr * 1.6, p * 0.025)
-            sl = round_to_tick(p - sl_dist, tick)
-            tp1 = round_to_tick(p + (sl_dist * 1.5), tick)
-            tp2 = round_to_tick(p + (sl_dist * 2.5), tick)
-            tp3 = round_to_tick(p + (sl_dist * 3.8), tick)
-            return {
-                "has_setup": True,
-                "symbol": sym,
-                "direction": "LONG",
-                "archetype": "MERMAID_MEAN_REVERSION",
-                "confidence": 83,
-                "rationale": f"Mô phỏng Admin Crypto Mermaids: RSI={rsi:.1f} rơi vào vùng quá bán cực hạn (Oversold), giá cách xa EMA20 chuẩn bị có nhịp hồi kỹ thuật.",
-                "entry_price": p,
-                "stop_loss": sl,
-                "take_profit_1": tp1,
-                "take_profit_2": tp2,
-                "take_profit_3": tp3,
-                "estimated_rr": round(2.5 / 1.6, 2),
-                "leverage": 15,
-                "risk_verdict": "APPROVED",
-                "source": "Quantum AI (MERMAID_REVERSION)",
-            }
-
-        if rsi >= 74.0:
-            if vol_r >= 2.5 or chg >= 15.0:
-                return None
-            sl_dist = max(atr * 1.6, p * 0.025)
-            sl = round_to_tick(p + sl_dist, tick)
-            tp1 = round_to_tick(p - (sl_dist * 1.5), tick)
-            tp2 = round_to_tick(p - (sl_dist * 2.5), tick)
-            tp3 = round_to_tick(p - (sl_dist * 3.8), tick)
-            return {
-                "has_setup": True,
-                "symbol": sym,
-                "direction": "SHORT",
-                "archetype": "MERMAID_MEAN_REVERSION",
-                "confidence": 83,
-                "rationale": f"Mô phỏng Admin Crypto Mermaids: RSI={rsi:.1f} chạm vùng quá mua cực hạn (Overbought), giá căng cứng chuẩn bị đảo chiều sụt giảm.",
-                "entry_price": p,
-                "stop_loss": sl,
-                "take_profit_1": tp1,
-                "take_profit_2": tp2,
-                "take_profit_3": tp3,
-                "estimated_rr": round(2.5 / 1.6, 2),
-                "leverage": 15,
-                "risk_verdict": "APPROVED",
-                "source": "Quantum AI (MERMAID_REVERSION)",
-            }
-
+        # ARCHETYPE 3: MERMAID_MEAN_REVERSION DEPRECATED (Stress-test winrate 15.4% - Discarded to preserve capital)
+        # Bắt dao rơi RSI đơn thuần bị loại bỏ hoàn toàn để bảo vệ 100% kỷ luật bảo toàn vốn.
         return None
 
     async def scan_market_quantum(self, limit: int = 60) -> List[Dict[str, Any]]:

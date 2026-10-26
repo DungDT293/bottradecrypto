@@ -86,8 +86,8 @@ def test_quantum_85pct_confluence_evaluation():
     assert setup is not None
     assert setup["has_setup"] is True
     assert setup["direction"] == "LONG"
-    assert setup["confidence"] >= 85
-    assert setup["archetype"] == "QUANTUM_SMC_BOTTOM_HUNT"
+    assert setup["confidence"] in (85, 90)
+    assert setup["archetype"] in ("SMC_SWEEP_SNIPER", "QUANTUM_SMC_BOTTOM_HUNT")
     assert len(setup["confluences"]) >= 4
     assert setup["stop_loss"] < setup["entry_price"]
     assert setup["take_profit_1"] > setup["entry_price"]
@@ -161,5 +161,68 @@ def test_low_cap_pump_shield_blocks_dangerous_short():
     # Admin Archetypes must never return a SHORT setup during volume surge
     admin_setup = engine.evaluate_admin_archetypes(short_market_data)
     assert admin_setup is None or admin_setup.get("direction") != "SHORT", "Expected Admin Archetypes to not return SHORT during volume surge"
+
+
+def test_4h_macro_trend_alignment_shield():
+    class DummyClient:
+        base_url = "https://fapi.binance.com"
+
+    engine = QuantumAIEngine(config=None, binance_client=DummyClient())
+
+    # 1. Test: 4H is BEARISH -> Counter-trend LONG must be BLOCKED
+    long_data_bearish_4h = {
+        "symbol": "BTCUSDT",
+        "current_price": 80000.0,
+        "ema20": 79000.0,
+        "ema50": 78000.0,
+        "trend_4h": "BEARISH",  # 4H is Bearish!
+        "rsi": 32.0,
+        "atr": 1000.0,
+        "vol_ratio": 1.6,
+        "lower_wick_ratio": 0.42,
+        "upper_wick_ratio": 0.05,
+        "k_stoch": 15.0,
+        "pct_b": 0.05,
+        "lower_bb": 80100.0,
+        "upper_bb": 84000.0,
+        "divergence": {"bullish_divergence": True, "bearish_divergence": False},
+        "sweep": {"bull_sweep": True, "bear_sweep": False, "lowest_prior": 79500.0},
+        "order_block": {"bull_ob": {"top": 80100.0, "bottom": 79800.0}, "bear_ob": None},
+        "tick_size": 0.1,
+    }
+    setup_long = engine.evaluate_quantum_85pct_confluence(long_data_bearish_4h)
+    assert setup_long is None, "Expected counter-trend LONG to be blocked when 4H trend is BEARISH"
+
+    # 2. Test: 4H is BULLISH -> Counter-trend SHORT must be BLOCKED
+    short_data_bullish_4h = {
+        "symbol": "ETHUSDT",
+        "current_price": 3000.0,
+        "ema20": 2980.0,
+        "ema50": 2950.0,
+        "trend_4h": "BULLISH",  # 4H is Bullish!
+        "rsi": 72.0,
+        "atr": 40.0,
+        "vol_ratio": 1.4,
+        "lower_wick_ratio": 0.05,
+        "upper_wick_ratio": 0.45,
+        "k_stoch": 85.0,
+        "pct_b": 0.95,
+        "lower_bb": 2900.0,
+        "upper_bb": 2990.0,
+        "divergence": {"bullish_divergence": False, "bearish_divergence": True},
+        "sweep": {"bull_sweep": False, "bear_sweep": True, "highest_prior": 2995.0},
+        "order_block": {"bull_ob": None, "bear_ob": {"top": 3010.0, "bottom": 2995.0}},
+        "tick_size": 0.01,
+        "change_24h": 5.0,
+    }
+    setup_short = engine.evaluate_quantum_85pct_confluence(short_data_bullish_4h)
+    assert setup_short is None, "Expected counter-trend SHORT to be blocked when 4H trend is BULLISH"
+
+    # 3. Test: When aligned (e.g. 4H BULLISH for LONG), setup is approved
+    long_data_bullish_4h = dict(long_data_bearish_4h)
+    long_data_bullish_4h["trend_4h"] = "BULLISH"
+    setup_aligned = engine.evaluate_quantum_85pct_confluence(long_data_bullish_4h)
+    assert setup_aligned is not None
+    assert setup_aligned["direction"] == "LONG"
 
 

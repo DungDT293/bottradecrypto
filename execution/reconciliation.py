@@ -515,6 +515,14 @@ class ReconciliationEngine:
                                     except Exception:
                                         pass
 
+                                # Hủy các lệnh TP cũ trên sàn trước khi đặt mới để tránh xung đột vượt hạn mức Reduce-Only
+                                for old_tp in (all_open_orders or []):
+                                    if old_tp.get("symbol") == symbol and old_tp.get("type") in ("LIMIT", "TAKE_PROFIT", "TAKE_PROFIT_MARKET"):
+                                        try:
+                                            await self.client.cancel_standard_order(symbol, old_tp.get("clientOrderId"))
+                                        except Exception:
+                                            pass
+
                                 # Mark previous open SL and TP orders for this signal as CANCELED in DB
                                 for old_o in self.order_repo.get_orders_for_signal(sig_id):
                                     if old_o.is_reduce_only and old_o.status in ("NEW", "PARTIALLY_FILLED"):
@@ -599,9 +607,9 @@ class ReconciliationEngine:
                                 valid_tp1_direction = (tp1_price > entry_p * Decimal("1.002")) if is_long else (tp1_price < entry_p * Decimal("0.998"))
                                 price_reached_tp1 = valid_tp1_direction and ((mark_p >= tp1_price if is_long else mark_p <= tp1_price) if mark_p > Decimal("0") else False)
 
-                            # 4. Breakeven Trigger Condition (TP1 filled OR price reached TP1 OR price gain >= 1.5%)
-                            price_favorable_for_be = (mark_p >= entry_p * Decimal("1.004")) if is_long else (mark_p <= entry_p * Decimal("0.996"))
-                            dynamic_be_gain = price_gain_pct >= Decimal("1.5") and price_favorable_for_be
+                            # 4. Breakeven Trigger Condition (TP1 filled OR price reached TP1 OR price gain >= 0.8%)
+                            price_favorable_for_be = (mark_p >= entry_p * Decimal("1.003")) if is_long else (mark_p <= entry_p * Decimal("0.997"))
+                            dynamic_be_gain = price_gain_pct >= Decimal("0.8") and price_favorable_for_be
                             should_activate_be = (tp1_filled or (price_reached_tp1 and price_favorable_for_be) or dynamic_be_gain)
 
                             if not is_at_least_be and should_activate_be:
@@ -618,6 +626,9 @@ class ReconciliationEngine:
                                 )
                                 if be_res:
                                     is_at_least_be = True
+                                    current_algo_sl = be_res
+                                    current_sl_px = be_res.trigger_price
+                                    db_orders.append(be_res)
                                     report["breakeven_activated"] += 1
                                     trigger_reason = f"TP1 ({tp1_price}) đã khớp" if tp1_filled else (f"Chạm giá TP1 ({tp1_price})" if price_reached_tp1 else f"Lợi nhuận đạt +{price_gain_pct:.2f}%")
                                     report["discrepancies"].append(
@@ -660,11 +671,23 @@ class ReconciliationEngine:
                                 trail_label = "trail_p6"
                                 trail_desc = f"Lợi nhuận tăng trưởng +{price_gain_pct:.2f}%: Đã khóa chặt +3.2% lợi nhuận"
                             elif price_gain_pct >= Decimal("3.0"):
-                                # ROE +30% to +100%: Lock in at least +1.2% profit above entry
-                                target_gain = Decimal("1.2")
+                                # ROE +30% to +100%: Lock in at least +1.5% profit above entry
+                                target_gain = Decimal("1.5")
                                 target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
                                 trail_label = "trail_p3"
-                                trail_desc = f"Lợi nhuận tích cực +{price_gain_pct:.2f}%: Đã khóa an toàn +1.2% lợi nhuận"
+                                trail_desc = f"Lợi nhuận tích cực +{price_gain_pct:.2f}%: Đã khóa an toàn +1.5% lợi nhuận"
+                            elif price_gain_pct >= Decimal("2.0"):
+                                # ROE +40% to +80%: Lock in at least +1.0% profit above entry
+                                target_gain = Decimal("1.0")
+                                target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
+                                trail_label = "trail_p2"
+                                trail_desc = f"Lợi nhuận vững chắc +{price_gain_pct:.2f}%: Đã khóa an toàn +1.0% lợi nhuận"
+                            elif price_gain_pct >= Decimal("1.2"):
+                                # ROE +24% to +48%: Lock in at least +0.5% profit above entry
+                                target_gain = Decimal("0.5")
+                                target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
+                                trail_label = "trail_p1_2"
+                                trail_desc = f"Lợi nhuận chớm đỉnh +{price_gain_pct:.2f}%: Đã khóa an toàn +0.5% lợi nhuận"
 
                             # Tier B: TP2 Hit Trailing Lock (Locks TP1 price on remaining volume)
                             if len(tps_raw) >= 2:
@@ -830,6 +853,49 @@ class ReconciliationEngine:
                                     "CROSSED", 2.0, now_iso, now_iso
                                 )
                             )
+
+                            # Đồng bộ các lệnh SL hiện có trên sàn vào DB orders để không bị hiểu nhầm là thiếu SL
+                            for sl_ord in active_sl_orders:
+                                sl_cid = str(sl_ord.get("clientAlgoId") or f"sl_{recovered_sig_id[:12]}")
+                                sl_aid = str(sl_ord.get("algoId") or "")
+                                trig_px = float(sl_ord.get("triggerPrice") or sl_ord.get("stopPrice") or sl_val)
+                                sl_side = "SELL" if is_pos_long else "BUY"
+                                conn.execute(
+                                    """
+                                    INSERT OR REPLACE INTO orders (
+                                        client_order_id, signal_id, symbol, side, order_type,
+                                        price, quantity, trigger_price, is_reduce_only, is_algo,
+                                        exchange_order_id, status, filled_quantity, avg_fill_price, created_at, updated_at
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """,
+                                    (
+                                        sl_cid, recovered_sig_id, pos_sym, sl_side, "STOP_MARKET",
+                                        None, float(abs(amt)), trig_px, 1, 1,
+                                        sl_aid, "NEW", 0.0, None, now_iso, now_iso
+                                    )
+                                )
+
+                            # Đồng bộ các lệnh TP hiện có trên sàn vào DB orders
+                            for idx, tp_ord in enumerate(sym_open_orders):
+                                tp_cid = str(tp_ord.get("clientOrderId") or f"tp_{recovered_sig_id[:12]}_{idx+1}")
+                                tp_oid = str(tp_ord.get("orderId") or "")
+                                tp_px = float(tp_ord.get("price", 0))
+                                tp_qty = float(tp_ord.get("origQty", 0))
+                                tp_side = str(tp_ord.get("side", "SELL" if is_pos_long else "BUY"))
+                                conn.execute(
+                                    """
+                                    INSERT OR REPLACE INTO orders (
+                                        client_order_id, signal_id, symbol, side, order_type,
+                                        price, quantity, trigger_price, is_reduce_only, is_algo,
+                                        exchange_order_id, status, filled_quantity, avg_fill_price, created_at, updated_at
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """,
+                                    (
+                                        tp_cid, recovered_sig_id, pos_sym, tp_side, "LIMIT",
+                                        tp_px, tp_qty, None, 1, 0,
+                                        tp_oid, "NEW", 0.0, None, now_iso, now_iso
+                                    )
+                                )
                         report["discrepancies"].append(
                             f"ĐÃ TỰ ĐỘNG NHẬN NUÔI & BẢO VỆ: Phát hiện vị thế bot {pos_sym} ({amt}) trên Binance. Đã đồng bộ vào hệ thống giám sát để tự động dời SL & khóa lãi!"
                         )

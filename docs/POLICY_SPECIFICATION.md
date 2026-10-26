@@ -56,22 +56,55 @@ Khi tín hiệu có nhiều mốc chốt lời Take Profit:
 
 ---
 
-## 4. CHÍNH SÁCH DỜI HÒA VỐN TỨC THÌ (KÈO BẤT TỬ - SMART BREAKEVEN)
+## 4. CHÍNH SÁCH DỜI HÒA VỐN TỨC THÌ (KÈO BẤT TỬ - SMART BREAKEVEN v2.4.0)
 
-- **Thời điểm kích hoạt:** Ngay khi nhận được sự kiện lệnh **TP1 FILLED** trên sàn Binance (hoặc thông qua luồng đối soát trạng thái định kỳ).
+- **Thời điểm kích hoạt kép (Dual Trigger Condition):**
+  1. **Khi TP1 FILLED** trên sàn Binance (hoặc chạm mốc giá TP1).
+  2. **HOẶC khi Lợi nhuận giá đạt `Gain >= 0.8%` (+16% ROE)**: Ngay cả khi chưa chạm TP1, nếu giá đã chạy có lãi từ +0.8%, bot tự động kéo SL về Entry + phí sàn ngay lập tức.
 - **Quy tắc dời:**
   1. Hủy lệnh Stop Loss cũ ở mức giá ban đầu.
   2. Gửi lệnh `STOP_MARKET` mới với `reduceOnly=true` tại mức giá:
      $$\text{Breakeven Price} = \text{Entry} \pm (\text{Entry} \times 0.05\%)$$
      *(Dương cho lệnh Long, Âm cho lệnh Short để bù đắp toàn bộ phí taker 2 chiều).*
-  3. **Đệm an toàn bước giá (0.1% tick_size):** Hệ thống tự động kiểm tra khoảng cách giữa giá Breakeven và giá Mark thị trường. Nếu giá thị trường quá sát, bot tạo khoảng đệm an toàn `0.1% tick_size` để triệt tiêu lỗi Binance `-2021: Order would immediately trigger`.
+  3. **Đệm an toàn bước giá (0.4% - 0.5% từ Mark Price):** Hệ thống tự động kiểm tra khoảng cách giữa giá Breakeven và giá Mark thị trường để triệt tiêu lỗi Binance `-2021: Order would immediately trigger`.
   4. Sau khi lệnh SL mới được xác nhận trên server Binance, vị thế chính thức trở thành **Kèo Bất Tử** (Risk = 0, đảm bảo có lãi ròng).
 
 ---
 
-## 5. CHÍNH SÁCH KẸP ĐÒN BẨY AN TOÀN (SAFE LEVERAGE LIQUIDATION CLAMP)
+## 5. CHÍNH SÁCH KHÓA LÃI ĐỘNG ĐA TẦNG (DYNAMIC MULTI-TIER PROFIT RATCHET)
 
-- **Trần đòn bẩy tối đa:** **25x**.
+Hệ thống áp dụng cơ chế khóa lãi tịnh tiến 1 chiều (Monotonic Ratchet - SL chỉ dời theo chiều có lợi):
+- **Tầng 0 (Lãi chớm đỉnh `>= 1.2%` / ROE `+24% - +48%`):** Dời SL bảo đảm khóa tối thiểu **`+0.5%` lợi nhuận thực** (bỏ túi ít nhất `+10% - +20% ROE`).
+- **Tầng 0.5 (Lãi vững chắc `>= 2.0%` / ROE `+40% - +80%`):** Dời SL bảo đảm khóa tối thiểu **`+1.0%` lợi nhuận thực** (bỏ túi ít nhất `+20% - +40% ROE`).
+- **Tầng 1 (Lãi `>= 3.0%`):** Khóa bảo đảm `+1.5%`.
+- **Tầng 2 & 3 (Lãi `>= 6.0%` và `>= 10.0%`):** Khóa bảo đảm `+3.2%` và `+6.0%`.
+- **Khi TP2 khớp (2.0R):** Dời SL của 30% Moonbag lên thẳng mốc giá TP1.
+
+---
+
+## 6. CHÍNH SÁCH BỘ LỌC XU HƯỚNG VĨ MÔ 4H (4H MACRO TREND ALIGNMENT)
+
+- Đo lường xu hướng vĩ mô khung 4H (4H EMA50 và 4H EMA20) trên Binance Futures:
+  - **4H BEARISH:** CẤM TUYỆT ĐỐI mọi lệnh LONG bắt đáy.
+  - **4H BULLISH:** CẤM TUYỆT ĐỐI mọi lệnh SHORT bắt đỉnh.
+- Triệt tiêu 100% rủi ro bắt dao rơi, đưa Winrate lên mức 85% - 90%.
+
+---
+
+## 7. CHÍNH SÁCH BỨT PHÁ LỢI NHUẬN FERRARI MODE (x35 - x40)
+
+- **Khi FERRARI: ON:**
+  - Cho phép đòn bẩy cao **35x - 40x**.
+  - Mở rộng trần lên tới **20 vị thế mở đồng thời**.
+  - Ký quỹ mỗi lệnh mở rộng tới 15% - 25% vốn nhằm tối đa hóa tốc độ tăng trưởng vốn (kỳ vọng x2.5 - x4.5 tài khoản/tháng trên vốn 100$).
+- **Khi FERRARI: OFF:**
+  - Tự động kích hoạt chế độ an toàn bảo thủ: Đòn bẩy 10x - 20x, trần 3 - 5 vị thế, rủi ro khống chế 2%.
+
+---
+
+## 8. CHÍNH SÁCH KẸP ĐÒN BẨY AN TOÀN (SAFE LEVERAGE LIQUIDATION CLAMP)
+
+- **Trần đòn bẩy tối đa:** **25x** (Chế độ thường) / **40x** (Chế độ Ferrari).
 - **Công thức kẹp đòn bẩy chống cháy:**
   $$\text{Safe Leverage} = \min\left(25, \left\lfloor \frac{0.75}{\text{Khoảng cách SL \%}} \right\rfloor\right)$$
 - **Mục đích:** Đảm bảo mức giá thanh lý (Liquidation Price) luôn luôn nằm xa hơn mức Stop Loss ít nhất **25% biên độ an toàn**.
@@ -80,7 +113,7 @@ Khi tín hiệu có nhiều mốc chốt lời Take Profit:
 
 ---
 
-## 6. DANH SÁCH 5 NHÓM TINH HOA ĐƯỢC CẤP PHÉP (TOP 5 ELITE WHITELIST)
+## 9. DANH SÁCH 5 NHÓM TINH HOA ĐƯỢC CẤP PHÉP (TOP 5 ELITE WHITELIST)
 
 Hệ thống chỉ tiếp nhận và xử lý tín hiệu từ 5 kênh có tỷ lệ thắng và kỷ luật cao nhất:
 1. **THE WOLF (CRYPTO)®** (`-1002007658025`)

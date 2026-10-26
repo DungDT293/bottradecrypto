@@ -23,6 +23,7 @@ import type {
   AIConfigPayload,
   PnLSummary,
   TradeRecord,
+  PnLChartResponse,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -190,10 +191,16 @@ export const api = {
   getOrders: () => request<OrderRecord[]>("/trading/orders"),
   closePosition: (symbol: string) => request<{ success: boolean; symbol: string; message: string }>("/trading/close-position", {
     method: "POST",
+    headers: {
+      "X-Confirm-Live": "CONFIRM_CLOSE_POSITION",
+    },
     body: JSON.stringify({ symbol }),
   }),
   closeAllBotPositions: () => request<{ success: boolean; message: string }>("/trading/close-all-bot", {
     method: "POST",
+    headers: {
+      "X-Confirm-Live": "CONFIRM_CLOSE_POSITION",
+    },
   }),
   toggleEntry: (enabled: boolean) => request<{ success: boolean; entry_enabled: boolean }>("/trading/toggle-entry", {
     method: "POST",
@@ -210,6 +217,7 @@ export const api = {
 
   // 6. Statistics
   getPnL: (daysBack = 0) => request<PnLSummary>(`/stats/pnl?days_back=${encodeURIComponent(daysBack)}`),
+  getPnLChart: () => request<PnLChartResponse>("/stats/pnl-chart"),
   syncPnL: () => request<{ success: boolean; message: string; details?: any }>("/stats/sync", { method: "POST" }),
   getTelemetry: () => request<any>("/stats/telemetry"),
 
