@@ -159,6 +159,7 @@ async def test_listener_anti_revenge_cooloff():
 def test_validator_rejects_sl_distance_over_threshold():
     """Verify that SignalValidator rejects signals with excessive SL distance (> 8.0%)."""
     cfg = load_config("config.yaml")
+    cfg.execution.max_sl_distance_pct = Decimal("8.0")
     validator = SignalValidator(cfg)
     parser = SignalParser()
 

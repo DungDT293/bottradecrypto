@@ -42,11 +42,13 @@ class DedicatedTelegramBot:
         authorized_chat_ids: Optional[Set[int]] = None,
     ):
         self.config = config or load_config()
-        self.token = (
-            bot_token
-            or getattr(getattr(self.config, "notifications", None), "notification_bot_token", None)
-            or os.environ.get("TELEGRAM_BOT_TOKEN")
-        )
+        if bot_token is not None:
+            self.token = bot_token
+        else:
+            self.token = (
+                getattr(getattr(self.config, "notifications", None), "notification_bot_token", None)
+                or os.environ.get("TELEGRAM_BOT_TOKEN")
+            )
         self.authorized_chat_ids: Set[int] = set(authorized_chat_ids or [])
         cfg_chat = getattr(getattr(self.config, "notifications", None), "notification_chat_id", None)
         if cfg_chat:
@@ -139,8 +141,9 @@ class DedicatedTelegramBot:
                 pass
 
         raw_text = msg.get("text", "") or ""
-        # Làm sạch thẻ nếu người dùng vô tình copy dính <b>...</b>
-        clean_text = re.sub(r"<[^>]+>", "", raw_text).replace("`", "").strip()
+        # Chỉ loại bỏ thẻ HTML Telegram hợp lệ (<b>, </b>, <i>...), KHÔNG xóa <coin> hay <BTC> của user!
+        from telegram.telegram_notifier import VALID_TG_TAG_PATTERN
+        clean_text = re.sub(VALID_TG_TAG_PATTERN, "", raw_text, flags=re.IGNORECASE).replace("`", "").strip()
         if not clean_text:
             return
 
@@ -156,8 +159,8 @@ class DedicatedTelegramBot:
         if cmd in ("/start", "/help"):
             await self._cmd_help(chat_id, msg_id)
         elif cmd in ("/debate", "/council"):
-            symbol = parts[1].upper() if len(parts) > 1 else "SOLUSDT"
-            await self._cmd_debate(chat_id, symbol, msg_id)
+            arg = parts[1] if len(parts) > 1 else ""
+            await self._cmd_debate(chat_id, arg, msg_id)
         elif cmd in ("/positions", "/position", "/pos"):
             await self._cmd_positions(chat_id, msg_id)
         elif cmd in ("/pnl", "/profit", "/stats"):
@@ -179,7 +182,7 @@ class DedicatedTelegramBot:
             "Hệ thống Định Lượng Đa Tác Tử (5 AI Agents) giám sát thị trường Binance Futures 24/7 "
             "kết hợp kỷ luật <b>Zero-Liquidation &amp; Kèo Bất Tử</b>.\n\n"
             "⚡ <b>DANH SÁCH LỆNH ĐIỀU KHIỂN &amp; TRA CỨU:</b>\n"
-            "• <code>/debate &lt;coin&gt;</code> - Triệu tập 5 đặc vụ AI đối chất &amp; thẩm định kèo (VD: <code>/debate SOLUSDT</code>)\n"
+            "• <code>/debate &lt;coin&gt;</code> - Triệu tập 5 đặc vụ AI đối chất &amp; thẩm định kèo (VD: <code>/debate SOLUSDT</code> hoặc <code>/debate BTC</code>)\n"
             "• <code>/positions</code> - Xem trực tiếp các vị thế đang mở trên Binance Futures\n"
             "• <code>/pnl</code> - Xem báo cáo Lãi/Lỗ ròng (Net PnL) và Win Rate hôm nay &amp; 7 ngày\n"
             "• <code>/status</code> - Xem trạng thái hệ thống, Ferrari Mode &amp; BTC Panic Regime\n"
@@ -190,9 +193,11 @@ class DedicatedTelegramBot:
         )
         await self.send_message(chat_id, text, reply_to_message_id=reply_to_id)
 
-    async def _cmd_debate(self, chat_id: int, symbol: str, reply_to_id: Optional[int] = None) -> None:
-        sym = symbol.upper().replace("/", "").replace(":", "")
-        if not sym.endswith("USDT") and not sym.endswith("USDC"):
+    async def _cmd_debate(self, chat_id: int, raw_symbol: str, reply_to_id: Optional[int] = None) -> None:
+        sym = raw_symbol.upper().replace("<", "").replace(">", "").replace("/", "").replace(":", "").strip()
+        if not sym or sym in ("COIN", "SYMBOL", "CAP", "ARG"):
+            sym = "SOLUSDT"
+        elif not sym.endswith("USDT") and not sym.endswith("USDC"):
             sym = f"{sym}USDT"
 
         await self.send_message(
@@ -204,25 +209,25 @@ class DedicatedTelegramBot:
         try:
             from services.quantum_council_harness import QuantumCouncilArbiter
             from exchange.binance_client import BinanceFuturesClient
+            from services.quantum_ai_engine import QuantumAIEngine
 
             client = BinanceFuturesClient(self.config)
-            arbiter = QuantumCouncilArbiter(config=self.config, binance_client=client)
-
-            market_data: Dict[str, Any] = {}
-            try:
+            engine = QuantumAIEngine(config=self.config, binance_client=client)
+            market_data = await engine.get_market_kline_analysis(sym)
+            if not market_data:
+                market_data = {"symbol": sym}
                 px = await client.get_symbol_price(sym)
                 if px and float(px) > 0:
                     market_data["current_price"] = float(px)
-            except Exception:
-                pass
 
+            arbiter = QuantumCouncilArbiter(config=self.config, binance_client=client)
             deliberation = await arbiter.deliberate(sym, market_data)
             debate_html = getattr(deliberation, "debate_html", "") or arbiter.format_telegram_transcript(deliberation)
 
             await self.send_message(chat_id, debate_html)
             await client.close()
         except Exception as e:
-            logger.error(f"Error in debate command: {e}")
+            logger.error(f"Error in debate command: {e}", exc_info=True)
             await self.send_message(
                 chat_id,
                 f"❌ <i>Lỗi trong quá trình thẩm định {sym}: {e}</i>",
@@ -236,6 +241,7 @@ class DedicatedTelegramBot:
             client = BinanceFuturesClient(self.config)
             positions = await client.get_open_positions()
             algo_orders = await client.get_open_algo_orders()
+            open_orders = await client.get_open_orders()
             await client.close()
 
             if not positions:
@@ -256,32 +262,55 @@ class DedicatedTelegramBot:
 
             for p in positions:
                 sym = p.get("symbol", "")
-                side = p.get("side", "")
-                amt = p.get("contracts", p.get("amount", "0"))
-                entry_p = float(p.get("entry_price", 0))
-                mark_p = float(p.get("mark_price", 0))
-                unpnl = float(p.get("unrealized_pnl", 0))
-                lev = p.get("leverage", 20)
+                amt_str = p.get("positionAmt", p.get("contracts", p.get("amount", "0")))
+                amt = float(amt_str)
+                side = "SHORT" if amt < 0 else "LONG"
+                entry_p = float(p.get("entryPrice") or p.get("entry_price") or 0.0)
+                mark_p = float(p.get("markPrice") or p.get("mark_price") or 0.0)
+                unpnl = float(p.get("unRealizedProfit") or p.get("unrealized_pnl") or 0.0)
+                lev = int(p.get("leverage") or 20)
+                margin_type = str(p.get("marginType", "cross")).upper()
+                notional = abs(amt * mark_p)
+                margin = (notional / lev) if lev > 0 else 0.0
+                roe_pct = (unpnl / margin * 100) if margin > 0 else 0.0
                 total_upnl += Decimal(str(unpnl))
 
-                roe_pct = (unpnl / (entry_p * float(amt) / lev) * 100) if entry_p > 0 and float(amt) > 0 and lev > 0 else 0.0
                 pnl_emoji = "🟢" if unpnl >= 0 else "🔴"
                 pnl_sign = "+" if unpnl >= 0 else ""
 
-                # Check SL
-                has_sl = any(str(o.get("symbol", "")).upper() == sym.upper() and "STOP" in str(o.get("order_type", "")).upper() for o in algo_orders)
-                sl_badge = "🛡️ Đã cài SL" if has_sl else "⚠️ CHƯA CÓ SL"
+                # Check SL from algo orders or open orders
+                sl_price = None
+                for o in (algo_orders or []):
+                    if str(o.get("symbol", "")).upper() == sym.upper():
+                        ot = str(o.get("orderType", o.get("order_type", ""))).upper()
+                        if "STOP" in ot:
+                            sl_price = float(o.get("triggerPrice", o.get("trigger_price", 0)))
+                            break
+                if not sl_price:
+                    for o in (open_orders or []):
+                        if str(o.get("symbol", "")).upper() == sym.upper():
+                            ot = str(o.get("type", o.get("order_type", ""))).upper()
+                            if "STOP" in ot:
+                                sl_price = float(o.get("stopPrice", o.get("price", 0)))
+                                break
+
+                sl_badge = f"🛡️ Đã cài SL: {sl_price}" if sl_price else "⚠️ CHƯA CÓ SL"
 
                 lines.append(
-                    f"• <b>{sym}</b> | <code>{side} {lev}x</code>\n"
+                    f"• <b>{sym}</b> | <code>{side} {lev}x ({margin_type})</code>\n"
                     f"  Entry: <code>{entry_p}</code> ➔ Mark: <code>{mark_p}</code>\n"
                     f"  PnL: {pnl_emoji} <b>{pnl_sign}{unpnl:.2f} USDT ({pnl_sign}{roe_pct:.1f}% ROE)</b>\n"
-                    f"  Bảo vệ: {sl_badge}\n"
+                    f"  Ký quỹ: <code>{margin:.2f} USDT</code> ({abs(amt):g} coin)\n"
+                    f"  Bảo vệ: <b>{sl_badge}</b>\n"
                 )
 
             upnl_emoji = "🟢" if total_upnl >= Decimal("0") else "🔴"
             lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             lines.append(f"💰 <b>Tổng Unrealized PnL:</b> {upnl_emoji} <b>{total_upnl:+.2f} USDT</b>")
+
+            await self.send_message(chat_id, "\n".join(lines), reply_to_message_id=reply_to_id)
+        except Exception as e:
+            await self.send_message(chat_id, f"❌ <i>Lỗi kiểm tra vị thế: {e}</i>", reply_to_message_id=reply_to_id)
 
             await self.send_message(chat_id, "\n".join(lines), reply_to_message_id=reply_to_id)
         except Exception as e:

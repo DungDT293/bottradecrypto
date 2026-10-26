@@ -385,20 +385,20 @@ class QuantumAIEngine:
         5. Smart Money Order Block / EMA50 Key Level Retest
         6. Volume Climax / Absorption
         """
-        p = m["current_price"]
-        ema20 = m["ema20"]
-        ema50 = m["ema50"]
-        rsi = m.get("rsi", 50.0)
-        atr = m.get("atr", p * 0.02)
-        vol_r = m.get("vol_ratio", 1.0)
-        lw_r = m.get("lower_wick_ratio", 0.0)
-        uw_r = m.get("upper_wick_ratio", 0.0)
-        k_stoch = m.get("k_stoch", 50.0)
-        pct_b = m.get("pct_b", 0.5)
-        lower_bb = m.get("lower_bb", p * 0.98)
-        upper_bb = m.get("upper_bb", p * 1.02)
-        sym = m["symbol"]
-        tick = m.get("tick_size", 0.0001)
+        p = float(m.get("current_price", 0.0))
+        ema20 = float(m.get("ema20", p))
+        ema50 = float(m.get("ema50", p))
+        rsi = float(m.get("rsi", 50.0))
+        atr = float(m.get("atr", p * 0.02 if p > 0 else 1.0))
+        vol_r = float(m.get("vol_ratio", 1.0))
+        lw_r = float(m.get("lower_wick_ratio", 0.0))
+        uw_r = float(m.get("upper_wick_ratio", 0.0))
+        k_stoch = float(m.get("k_stoch", 50.0))
+        pct_b = float(m.get("pct_b", 0.5))
+        lower_bb = float(m.get("lower_bb", p * 0.98 if p > 0 else 0.0))
+        upper_bb = float(m.get("upper_bb", p * 1.02 if p > 0 else 0.0))
+        sym = str(m.get("symbol", "UNKNOWN"))
+        tick = float(m.get("tick_size", 0.0001))
         
         div = m.get("divergence", {"bullish_divergence": False, "bearish_divergence": False})
         sweep = m.get("sweep", {"bull_sweep": False, "bear_sweep": False})
@@ -604,17 +604,17 @@ class QuantumAIEngine:
             return confluence_setup
 
         # --- PRIORITY 2: Top Telegram Admin Archetypes ---
-        p = m["current_price"]
-        ema20 = m["ema20"]
-        ema50 = m["ema50"]
-        rsi = m.get("rsi", 50.0)
-        atr = m.get("atr", p * 0.02)
-        vol_r = m.get("vol_ratio", 1.0)
-        lw_r = m.get("lower_wick_ratio", 0.0)
-        uw_r = m.get("upper_wick_ratio", 0.0)
-        chg = m.get("change_24h", 0.0)
-        sym = m["symbol"]
-        tick = m.get("tick_size", 0.0001)
+        p = float(m.get("current_price", 0.0))
+        ema20 = float(m.get("ema20", p))
+        ema50 = float(m.get("ema50", p))
+        rsi = float(m.get("rsi", 50.0))
+        atr = float(m.get("atr", p * 0.02 if p > 0 else 1.0))
+        vol_r = float(m.get("vol_ratio", 1.0))
+        lw_r = float(m.get("lower_wick_ratio", 0.0))
+        uw_r = float(m.get("upper_wick_ratio", 0.0))
+        chg = float(m.get("change_24h", 0.0))
+        sym = str(m.get("symbol", "UNKNOWN"))
+        tick = float(m.get("tick_size", 0.0001))
 
         if p <= 0 or atr <= 0:
             return None
