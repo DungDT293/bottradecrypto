@@ -130,6 +130,13 @@ class DedicatedTelegramBot:
 
         # Tự động ghi nhớ chat_id của người dùng để nhận thông báo tự động
         self.authorized_chat_ids.add(chat_id)
+        if getattr(self.config, "notifications", None) and not getattr(self.config.notifications, "notification_chat_id", None):
+            try:
+                from config.config import save_config
+                self.config.notifications.notification_chat_id = chat_id
+                save_config(self.config)
+            except Exception:
+                pass
 
         raw_text = msg.get("text", "") or ""
         # Làm sạch thẻ nếu người dùng vô tình copy dính <b>...</b>
