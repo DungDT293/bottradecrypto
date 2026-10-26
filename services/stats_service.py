@@ -1,4 +1,6 @@
 import sqlite3
+import time
+import logging
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
@@ -7,6 +9,7 @@ import pytz
 from config.config import AppConfig
 from storage.database import DatabaseManager
 
+logger = logging.getLogger(__name__)
 
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
@@ -26,6 +29,7 @@ class StatsService:
     def __init__(self, db_manager: DatabaseManager, config: AppConfig):
         self.db = db_manager
         self.config = config
+        self._coin_pnl_cache: Dict[int, Tuple[float, List[Dict[str, Any]]]] = {}
 
     def get_local_day_boundaries(self, days_back: int = 0) -> Tuple[datetime, datetime]:
         """
@@ -283,7 +287,14 @@ class StatsService:
     async def get_coin_pnl_breakdown(self, client: Any, days_back: int = 0) -> List[Dict[str, Any]]:
         """
         Lấy chi tiết sao kê từng đồng coin (Realized, Commission, Funding, Net PnL, Trades).
+        Tích hợp bộ nhớ đệm 30s chống quá tải Binance API và fallback an toàn khi có lỗi mạng.
         """
+        now_ts = time.time()
+        if hasattr(self, "_coin_pnl_cache") and days_back in self._coin_pnl_cache:
+            cache_time, cached_res = self._coin_pnl_cache[days_back]
+            if now_ts - cache_time < 30.0 and cached_res:
+                return cached_res
+
         try:
             start_utc, end_utc = self.get_local_day_boundaries(days_back)
             start_ms = int(start_utc.timestamp() * 1000)
@@ -349,8 +360,15 @@ class StatsService:
                 })
 
             result.sort(key=lambda x: x["net_pnl"], reverse=True)
+            if not hasattr(self, "_coin_pnl_cache"):
+                self._coin_pnl_cache = {}
+            if result:
+                self._coin_pnl_cache[days_back] = (now_ts, result)
             return result
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error fetching coin pnl breakdown from Binance: {e}")
+            if hasattr(self, "_coin_pnl_cache") and days_back in self._coin_pnl_cache:
+                return self._coin_pnl_cache[days_back][1]
             return []
 
     def get_pnl_chart_data(self) -> Dict[str, Any]:

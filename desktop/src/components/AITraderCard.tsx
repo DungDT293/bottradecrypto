@@ -35,6 +35,14 @@ export const AITraderCard: React.FC = () => {
   const [minConfidence, setMinConfidence] = useState<number>(80);
   const [selectedModel, setSelectedModel] = useState<string>("gemini-2.0-flash");
 
+  const openSymbols = React.useMemo(() => {
+    return new Set(
+      (snapshot?.positions || [])
+        .filter((p: any) => Math.abs(Number(p.amount || p.positionAmt || p.size || p.contracts || 0)) > 0)
+        .map((p: any) => String(p.symbol || "").toUpperCase())
+    );
+  }, [snapshot?.positions]);
+
   const fetchStatus = useCallback(async () => {
     try {
       const data = await api.getAIStatus();
@@ -583,7 +591,7 @@ export const AITraderCard: React.FC = () => {
         <div>
           <div style={{ fontSize: "13px", fontWeight: 600, color: "#fff", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
             <Zap size={14} style={{ color: "#eab308" }} />
-            <span>Cơ Hội Giao Dịch Được Phát Hiện ({setups.length})</span>
+            <span>Cơ Hội Giao Dịch &amp; Tín Hiệu AI ({setups.length})</span>
           </div>
 
           {setups.length === 0 ? (
@@ -625,7 +633,7 @@ export const AITraderCard: React.FC = () => {
                     <div>
                       {/* Top Setup Row */}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                           <span style={{ fontSize: "15px", fontWeight: 700, color: "#fff" }}>{setup.symbol}</span>
                           <span
                             style={{
@@ -643,6 +651,26 @@ export const AITraderCard: React.FC = () => {
                             {isLong ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                             {setup.direction}
                           </span>
+                          {openSymbols.has(setup.symbol.toUpperCase()) && (
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: "rgba(16, 185, 129, 0.25)",
+                                color: "#10b981",
+                                border: "1px solid #10b981",
+                                fontSize: "10px",
+                                fontWeight: 700,
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                              }}
+                            >
+                              <ShieldCheck size={11} />
+                              <span>ĐÃ VÀO LỆNH (ĐANG CHẠY)</span>
+                            </span>
+                          )}
                         </div>
 
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -769,25 +797,47 @@ export const AITraderCard: React.FC = () => {
                         Nguồn: {setup.source}
                       </span>
 
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleExecuteSetup(setup)}
-                        disabled={isExecuting || !isLive}
-                        title={!isLive ? "Cần bật chế độ Tiền Thật (LIVE) để đặt lệnh" : undefined}
-                        style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", padding: "3px 10px" }}
-                      >
-                        {isExecuting ? (
-                          <>
-                            <RefreshCw size={12} className="spin" />
-                            <span>Đang vào...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play size={12} />
-                            <span>Vào lệnh ngay</span>
-                          </>
-                        )}
-                      </button>
+                      {openSymbols.has(setup.symbol.toUpperCase()) ? (
+                        <span
+                          className="badge"
+                          style={{
+                            backgroundColor: "rgba(16, 185, 129, 0.15)",
+                            color: "#10b981",
+                            border: "1px solid rgba(16, 185, 129, 0.3)",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            padding: "4px 8px",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            borderRadius: "4px",
+                          }}
+                          title="Hệ thống đang giữ vị thế cặp tiền này trên sàn Binance. Cơ chế Zero-Overleveraging tự động ngăn ngừa nhồi lệnh trùng lặp."
+                        >
+                          <ShieldCheck size={12} />
+                          <span>Đã vào lệnh (Đang chạy vị thế)</span>
+                        </span>
+                      ) : (
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleExecuteSetup(setup)}
+                          disabled={isExecuting || !isLive}
+                          title={!isLive ? "Cần bật chế độ Tiền Thật (LIVE) để đặt lệnh" : undefined}
+                          style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", padding: "3px 10px" }}
+                        >
+                          {isExecuting ? (
+                            <>
+                              <RefreshCw size={12} className="spin" />
+                              <span>Đang vào...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play size={12} />
+                              <span>Vào lệnh ngay</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

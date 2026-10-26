@@ -204,8 +204,15 @@ class AlertService:
                 import re
                 match = re.search(r"([A-Z0-9]+USDT)", f"{title} {message}")
                 sym = match.group(1) if match else "VỊ THẾ"
-                if "TP1" in t_upper or "KÈO BẤT TỬ" in t_upper or "TP1" in m_upper:
-                    await bot.notify_tp1_hit(symbol=sym, tp_price="Mục tiêu 1", entry_price="Entry")
+
+                # Chống nhầm lẫn: Bỏ qua thông báo vào lệnh mới (có chuỗi TP1 trong tham số khởi tạo)
+                is_entry_alert = any(k in t_upper for k in ("VÀO LỆNH", "KHỚP LỆNH", "OPEN_PROTECTED", "MỞ VỊ THẾ", "NEW SIGNAL", "AI QUANT"))
+                
+                if is_entry_alert:
+                    # Đây là sự kiện mở vị thế mới, không kích hoạt thông báo chốt lời TP1
+                    pass
+                elif any(k in t_upper for k in ("CHỐT LỜI TP1", "CHẠM TP1", "CẮN TP1", "TP1 HIT", "MỤC TIÊU 1 ĐÃ")) or ("TP1" in t_upper and "CHỐT" in t_upper):
+                    await bot.notify_tp1_hit(symbol=sym, tp_price="TP1", entry_price="Entry")
                 elif "TP3" in t_upper or "FULL TP" in t_upper or "GRAND SLAM" in t_upper:
                     await bot.notify_full_tp(symbol=sym)
                 elif "CẮT LỖ" in t_upper or "STOP LOSS" in t_upper or "CHẠM SL" in t_upper or "STOPPED" in t_upper:

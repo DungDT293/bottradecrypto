@@ -863,9 +863,9 @@ class DedicatedTelegramBot:
             db = DatabaseManager()
             stats_svc = StatsService(db, self.config)
 
-            # Đồng bộ trực tiếp sao kê mới nhất từ Binance
-            now_utc = datetime.datetime.now(datetime.timezone.utc)
-            start_today_ms = int(datetime.datetime(now_utc.year, now_utc.month, now_utc.day, 0, 0, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+            # Đồng bộ trực tiếp sao kê mới nhất từ Binance (Chuẩn múi giờ VN 00:00)
+            start_utc, end_utc = stats_svc.get_local_day_boundaries(0)
+            start_today_ms = int(start_utc.timestamp() * 1000)
             
             try:
                 await stats_svc.sync_binance_income(client, days_back=7)
