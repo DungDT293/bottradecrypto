@@ -72,7 +72,27 @@ if sys.platform == "win32":
 from backend.runtime.server import run_server
 
 
+def kill_stale_sibling_processes():
+    try:
+        import psutil
+        current_pid = os.getpid()
+        parent_pid = os.getppid() if hasattr(os, "getppid") else None
+        for p in psutil.process_iter(['pid', 'name']):
+            try:
+                pid = p.info['pid']
+                if pid in (current_pid, parent_pid):
+                    continue
+                name = (p.info.get('name') or '').lower()
+                if 'backend-x86_64-pc-windows-msvc' in name:
+                    p.terminate()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def main():
+    kill_stale_sibling_processes()
     parser = argparse.ArgumentParser(description="Telegram Binance Signal Executor - Backend Server")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface to bind")
     parser.add_argument("--port", type=int, default=None, help="Port to bind (auto-assign if omitted)")

@@ -6,8 +6,10 @@ use std::io::Write;
 
 #[cfg(target_os = "windows")]
 fn kill_stale_backends() {
-    // Stale-process cleanup is owned by tracked child PID in app_lib.
-    // Never kill unrelated processes by executable image name.
+    use std::process::Command;
+    let _ = Command::new("taskkill")
+        .args(&["/F", "/IM", "backend-x86_64-pc-windows-msvc.exe"])
+        .output();
 }
 
 #[cfg(target_os = "windows")]

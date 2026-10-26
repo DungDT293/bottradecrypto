@@ -289,12 +289,38 @@ class StatsService:
             start_ms = int(start_utc.timestamp() * 1000)
             end_ms = int(end_utc.timestamp() * 1000)
 
-            incomes = await client._request(
+            # 1. Luôn lấy 1000 bản ghi mới nhất về trước để đảm bảo ngày hôm nay LUÔN ĐƯỢC CẬP NHẬT
+            latest_incomes = await client._request(
                 "GET",
                 "/fapi/v1/income",
-                params={"startTime": start_ms, "endTime": end_ms, "limit": 1000},
+                params={"limit": 1000},
                 signed=True
             ) or []
+
+            # 2. Tra cứu thêm theo cửa sổ thời gian
+            window_incomes = []
+            try:
+                window_incomes = await client._request(
+                    "GET",
+                    "/fapi/v1/income",
+                    params={"startTime": start_ms, "endTime": end_ms, "limit": 1000},
+                    signed=True
+                ) or []
+            except Exception:
+                window_incomes = []
+
+            # Khử trùng lặp và lọc theo khung thời gian
+            seen_tran_ids = set()
+            incomes = []
+            for inc in (latest_incomes + window_incomes):
+                tid = inc.get("tranId")
+                if tid:
+                    if tid in seen_tran_ids:
+                        continue
+                    seen_tran_ids.add(tid)
+                ts = inc.get("time") or 0
+                if start_ms <= ts <= end_ms:
+                    incomes.append(inc)
 
             from collections import defaultdict
             by_coin = defaultdict(lambda: {"realized": 0.0, "comm": 0.0, "fund": 0.0, "trades": 0})

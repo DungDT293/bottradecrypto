@@ -1699,12 +1699,21 @@ class DedicatedTelegramBot:
                     elif resp.status in (401, 404):
                         logger.error("Invalid Telegram Bot Token! Terminating bot loop.")
                         break
+                    elif resp.status == 409:
+                        logger.warning("Telegram Bot 409 Conflict: Another instance is polling. Retrying in 5s...")
+                        await asyncio.sleep(5)
                     else:
                         await asyncio.sleep(2)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.debug(f"Dedicated bot poll error: {e}")
+                logger.warning(f"Dedicated bot poll error: {e}")
+                if self._session and not self._session.closed:
+                    try:
+                        await self._session.close()
+                    except Exception:
+                        pass
+                self._session = None
                 await asyncio.sleep(3)
 
     def stop(self) -> None:

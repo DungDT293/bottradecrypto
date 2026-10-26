@@ -207,12 +207,20 @@ def create_api_router(
 
     # Dedicated Telegram Bot Runner (Interactive AI Council & Telemetry)
     async def run_dedicated_bot_loop():
-        token = getattr(getattr(config, "notifications", None), "notification_bot_token", None) or os.environ.get("TELEGRAM_BOT_TOKEN")
-        if token:
-            from telegram.dedicated_bot import DedicatedTelegramBot
-            bot = DedicatedTelegramBot(bot_token=token, config=config)
-            if bot.is_configured:
-                await bot.run()
+        while True:
+            try:
+                token = getattr(getattr(config, "notifications", None), "notification_bot_token", None) or os.environ.get("TELEGRAM_BOT_TOKEN")
+                if token:
+                    from telegram.dedicated_bot import DedicatedTelegramBot
+                    bot = DedicatedTelegramBot(bot_token=token, config=config)
+                    if bot.is_configured:
+                        await bot.run()
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Dedicated bot runner crashed: {e}, restarting in 5s...")
+                await asyncio.sleep(5)
 
     router.dedicated_bot_task_starter = run_dedicated_bot_loop
 
