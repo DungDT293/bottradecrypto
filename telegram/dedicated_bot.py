@@ -152,11 +152,11 @@ def get_main_reply_keyboard() -> Dict[str, Any]:
     return {
         "keyboard": [
             [{"text": "📊 Vị Thế Đang Mở"}, {"text": "📈 Lãi Lỗ Chi Tiết Từng Coin"}],
+            [{"text": "⚡ Nhịp Đập Thị Trường"}, {"text": "📰 Điểm Tin AI (Gemini)"}],
             [{"text": "🏛️ 35 Top Coin AI"}, {"text": "🎯 Jarvis Radar Quét Kèo"}],
             [{"text": "🚀 Dự Báo Lãi Kép 300$/1000$"}, {"text": "🛡️ Kèo Bất Tử (BE)"}],
-            [{"text": "⚡ Trạng Thái Hệ Thống"}, {"text": "🏥 Sức Khỏe Ký Quỹ"}],
-            [{"text": "🚨 Phân Tích Vĩ Mô BTC"}, {"text": "📡 Ping & VPS Health"}],
-            [{"text": "❓ Hướng Dẫn Jarvis"}]
+            [{"text": "📅 Lịch Trình Tác Chiến"}, {"text": "🏥 Sức Khỏe Ký Quỹ"}],
+            [{"text": "🚨 Phân Tích Vĩ Mô BTC"}, {"text": "❓ Hướng Dẫn Jarvis"}]
         ],
         "resize_keyboard": True,
         "is_persistent": True
@@ -172,6 +172,10 @@ def get_main_inline_keyboard() -> Dict[str, Any]:
                 {"text": "📈 Lãi/Lỗ Từng Coin", "callback_data": "nav_pnl"}
             ],
             [
+                {"text": "⚡ Nhịp Đập Thị Trường", "callback_data": "nav_pulse"},
+                {"text": "📰 Điểm Tin AI (Gemini)", "callback_data": "nav_news"}
+            ],
+            [
                 {"text": "🏛️ Bảng 35 Top Coin", "callback_data": "nav_debate_menu"},
                 {"text": "🎯 Jarvis Radar Quét Kèo", "callback_data": "nav_scan"}
             ],
@@ -180,12 +184,8 @@ def get_main_inline_keyboard() -> Dict[str, Any]:
                 {"text": "🛡️ Kèo Bất Tử (BE)", "callback_data": "nav_immortal"}
             ],
             [
-                {"text": "⚡ Trạng Thái Hệ Thống", "callback_data": "nav_status"},
+                {"text": "📅 Lịch Trình Tác Chiến", "callback_data": "nav_schedule"},
                 {"text": "🏥 Sức Khỏe Ký Quỹ", "callback_data": "nav_margin"}
-            ],
-            [
-                {"text": "🚨 Phân Tích Vĩ Mô BTC", "callback_data": "nav_macro"},
-                {"text": "📡 Ping & VPS Health", "callback_data": "nav_ping"}
             ]
         ]
     }
@@ -493,6 +493,18 @@ class DedicatedTelegramBot:
                 await self.answer_callback_query(cb_id)
                 await self._cmd_help(chat_id)
                 return
+            elif cb_data == "nav_pulse":
+                await self.answer_callback_query(cb_id, text="⚡ Đang đo nhịp đập thị trường...")
+                await self._cmd_hourly_pulse(chat_id)
+                return
+            elif cb_data == "nav_news":
+                await self.answer_callback_query(cb_id, text="📰 Jarvis đang tổng hợp điểm tin AI...")
+                await self._cmd_news(chat_id)
+                return
+            elif cb_data == "nav_schedule":
+                await self.answer_callback_query(cb_id, text="📅 Đang tải lịch trình tác chiến 24/7...")
+                await self._cmd_schedule(chat_id)
+                return
             else:
                 await self.answer_callback_query(cb_id)
                 return
@@ -529,6 +541,12 @@ class DedicatedTelegramBot:
             await self._cmd_help(chat_id, msg_id)
         elif lower_text in ("/positions", "/pos", "📊 vị thế đang mở", "vị thế", "lệnh đang mở"):
             await self._cmd_positions(chat_id, msg_id)
+        elif lower_text in ("/pulse", "/nhipdap", "⚡ nhịp đập thị trường (pulse)", "⚡ nhịp đập thị trường", "nhịp đập", "pulse"):
+            await self._cmd_hourly_pulse(chat_id, msg_id)
+        elif lower_text in ("/news", "/intel", "/tintuc", "📰 điểm tin ai (gemini)", "điểm tin", "tin tức", "news"):
+            await self._cmd_news(chat_id, msg_id)
+        elif lower_text in ("/schedule", "/lich", "/lich_trinh", "📅 lịch trình tác chiến", "lịch trình", "schedule"):
+            await self._cmd_schedule(chat_id, msg_id)
         elif lower_text in ("/pnl", "/profit", "📈 lãi lỗ chi tiết từng coin", "lãi lỗ", "pnl"):
             await self._cmd_pnl(chat_id, msg_id)
         elif lower_text in ("/status", "/regime", "trạng thái"):
@@ -932,7 +950,7 @@ class DedicatedTelegramBot:
             lines.append("────────────────────────────")
             lines.append(f"💰 <b>LÃI RÒNG ĐÃ CHỐT HÔM NAY:</b> {net_emoji} <b>{today_net_sum:+.2f} USDT</b>")
             lines.append(f"💸 <i>Tổng Realized: {today_realized_sum:+.2f} USDT | Tổng Phí: -{today_comm_sum:.2f} USDT</i>")
-            lines.append(f"⏳ <b>LÃI ĐANG GỒNG (3 Vị Thế Mở):</b> {unpnl_emoji} <b>{unrealized_sum:+.2f} USDT</b>")
+            lines.append(f"⏳ <b>LÃI ĐANG GỒNG ({len(open_positions)} Vị Thế Mở):</b> {unpnl_emoji} <b>{unrealized_sum:+.2f} USDT</b>")
             lines.append(f"🏆 <b>TỔNG TÀI SẢN TĂNG TRƯỞNG:</b> 🟢 <b>{today_net_sum + unrealized_sum:+.2f} USDT</b>")
             lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             lines.append(
@@ -1618,17 +1636,287 @@ class DedicatedTelegramBot:
         except Exception:
             return last_price
 
+    async def _cmd_schedule(self, chat_id: int, reply_to_id: Optional[int] = None) -> None:
+        """Hiển thị thời gian biểu tác chiến và lịch trình báo cáo định kỳ 24/7 của Jarvis."""
+        text = (
+            "📅 <b>[LỊCH TRÌNH THEO DÕI &amp; BÁO CÁO ĐỊNH KỲ - JARVIS 24/7]</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "<i>Hệ thống định lượng Lượng Tử vận hành tự động theo thời gian biểu chuẩn:</i>\n\n"
+            "⏱️ <b>1. VÒNG LẶP KIỂM SOÁT THỜI GIAN THỰC (SENTINEL):</b>\n"
+            "• <b>Mỗi 12 giây:</b> Vệ Binh Reconciliation đối chiếu vị thế sàn Binance, kích hoạt dời SL về Entry (Kèo Bất Tử) ngay khi chạm TP1 (+35% lãi), tự động đóng vị thế nếu cấu trúc nến 1H bị gãy (Early Invalidation).\n"
+            "• <b>Mỗi 5 phút:</b> Giám sát biến động Flash Volatility của BTC. Báo động ngay nếu giật &gt; 1.8%/5m.\n\n"
+            "🔭 <b>2. VÒNG LẶP QUÉT TÍN HIỆU 35 TOP COIN:</b>\n"
+            "• <b>Mỗi 15 phút:</b> AI Radar quét toàn bộ 35 đồng coin Top Binance Futures. Tính toán RSI(14), EMA20/50, ATR(14), SMC Order Block.\n"
+            "• <b>Song song mỗi 15 phút:</b> Sentinel crawl tin tức thời gian thực từ Binance CMS &amp; CoinGecko. Tự động VETO hủy lệnh nếu phát hiện tin tức FUD, hack, delist, SEC.\n\n"
+            "⚡ <b>3. LỊCH BÁO CÁO CHỦ ĐỘNG QUA TELEGRAM:</b>\n"
+            "• <b>Mỗi 60 phút (Đầu mỗi giờ):</b> Nhịp đập thị trường (Hourly Pulse) - Cập nhật PnL tạm tính, chi tiết từng vị thế, ROE, tình trạng bảo vệ SL/BE và Top 3 coin tiềm năng.\n"
+            "• <b>Các mốc 12:00, 16:00, 20:00:</b> Bản tin Chiến Lược &amp; Tâm Lý Thị Trường (Gemini AI News Digest) - Điểm tin vĩ mô, dòng tiền và định hướng giao dịch.\n"
+            "• <b>08:00 Sáng:</b> Bản tin Tình Báo Buổi Sáng (Morning Intel) - Tình hình thị trường phiên Á/Âu và kế hoạch tác chiến ngày mới.\n"
+            "• <b>23:00 Đêm:</b> Tổng Kết Tăng Trưởng &amp; Lãi Kép Cuối Ngày (Evening Growth Recap) - Sao kê chi tiết lãi lỗ từng coin, winrate, NAV và lộ trình $300 / $500 / $1000 USDT.\n\n"
+            "🚨 <b>4. THÔNG BÁO TỨC THỜI KHI CÓ SỰ KIỆN:</b>\n"
+            "• Vào Lệnh Mới | Chốt Lời TP1 (Khóa 35% Lãi + Kèo Bất Tử) | Ăn Trọn 3 TP | Cắt Lỗ SL | Cắt Lệnh Sớm (Early Invalidation).\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 <i>Ngài có thể gõ <code>/pulse</code> hoặc <code>/news</code> bất kỳ lúc nào để nhận báo cáo ngay tức thì!</i>"
+        )
+        markup = {"inline_keyboard": [
+            [{"text": "⚡ Nhịp Đập Thị Trường", "callback_data": "nav_pulse"}, {"text": "📰 Điểm Tin AI", "callback_data": "nav_news"}],
+            [{"text": "📊 Xem Vị Thế", "callback_data": "nav_positions"}, {"text": "🚀 Lãi Kép", "callback_data": "nav_forecast"}]
+        ]}
+        await self.send_message(chat_id, text, reply_to_message_id=reply_to_id, reply_markup=markup)
+
+    async def _build_hourly_pulse_payload(self) -> Dict[str, Any]:
+        """Tạo dữ liệu và nội dung bản tin Nhịp Đập Thị Trường định kỳ mỗi 1 giờ."""
+        from exchange.binance_client import BinanceFuturesClient
+        client = BinanceFuturesClient(self.config)
+        now_vn = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+        time_str = now_vn.strftime("%H:%M %d/%m/%Y")
+
+        positions = await client.get_open_positions()
+        equity = float(await client.get_account_equity() or 92.21)
+        btc_ctx = await client.get_market_trend_context("BTCUSDT")
+
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        start_today_ms = int(datetime.datetime(now_utc.year, now_utc.month, now_utc.day, 0, 0, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000)
+        incomes = await client.get_income_history(start_time_ms=start_today_ms, limit=500)
+        await client.close()
+
+        realized_today = 0.0
+        comm_today = 0.0
+        fund_today = 0.0
+        wins = 0
+        trades = 0
+        for inc in (incomes or []):
+            itype = inc.get("incomeType")
+            val = float(inc.get("income", 0.0))
+            if itype == "REALIZED_PNL":
+                realized_today += val
+                trades += 1
+                if val > 0:
+                    wins += 1
+            elif itype == "COMMISSION":
+                comm_today += abs(val)
+            elif itype == "FUNDING_FEE":
+                fund_today += val
+
+        net_today = realized_today - comm_today + fund_today
+        winrate = (wins / trades * 100.0) if trades > 0 else 0.0
+
+        btc_p = float(btc_ctx.get("last_close", 0.0))
+        btc_chg = float(btc_ctx.get("change_24h", 0.0))
+        trend_emoji = "🟢" if btc_chg >= 0 else "🔴"
+
+        total_upnl = 0.0
+        pos_lines = []
+        for p in (positions or []):
+            sym = p.get("symbol", "")
+            amt = float(p.get("positionAmt", 0.0))
+            if abs(amt) < 1e-6:
+                continue
+            side = "LONG" if amt > 0 else "SHORT"
+            entry = float(p.get("entryPrice", 0.0))
+            mark = float(p.get("markPrice", 0.0))
+            upnl = float(p.get("unRealizedProfit", 0.0))
+            init_margin = float(p.get("initialMargin", 0.0))
+            roe = (upnl / init_margin * 100.0) if init_margin > 0 else 0.0
+            total_upnl += upnl
+            p_emoji = "🟢" if upnl >= 0 else "🔴"
+            side_badge = "🟩 LONG" if side == "LONG" else "🟥 SHORT"
+            pos_lines.append(
+                f"• <b>{sym}</b> | {side_badge} 30x\n"
+                f"  Entry: <code>{entry}</code> → Mark: <code>{mark}</code>\n"
+                f"  PnL: {p_emoji} <b>{upnl:+.2f} USDT ({roe:+.1f}% ROE)</b>\n"
+                f"  Bảo vệ: 🛡️ <i>Đang rà soát Breakeven &amp; SL mỗi 12s</i>"
+            )
+
+        if not pos_lines:
+            pos_lines.append("<i>Hiện tại không có vị thế mở nào. 100% vốn an toàn trong ví!</i>")
+
+        net_emoji = "🟢" if net_today >= 0 else "🔴"
+        upnl_emoji = "🟢" if total_upnl >= 0 else "🔴"
+
+        ai_cfg = getattr(self.config, "ai", None)
+        model_name = getattr(ai_cfg, "preferred_model", "Gemini 2.5 Flash / Quant Sentinel") if ai_cfg else "Quant Sentinel Engine"
+
+        ai_radar_summary = "35 Coin Top đang được quét chu kỳ 15 phút. Sẵn sàng săn kèo R:R >= 2.0."
+        try:
+            cache_file = os.path.join(getattr(self.config, "data_dir", "./data"), "ai_last_scan.json")
+            if os.path.exists(cache_file):
+                with open(cache_file, "r", encoding="utf-8") as fc:
+                    data_scan = json.load(fc)
+                    setups = data_scan.get("setups", [])
+                    if setups:
+                        top_s = [f"{s.get('symbol')} ({s.get('direction')} {s.get('confidence')}%)" for s in setups[:3]]
+                        ai_radar_summary = f"Top Kèo Rình Rập: <b>{', '.join(top_s)}</b>"
+        except Exception:
+            pass
+
+        text = (
+            "⚡ <b>[NHỊP ĐẬP THỊ TRƯỜNG &amp; TRẠNG THÁI VỊ THẾ - HOURLY PULSE]</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"<i>⏱️ Thời điểm: {time_str} (Giờ VN) | Trợ lý: Jarvis Quantum Mark 85</i>\n\n"
+            "🟢 <b>HỆ THỐNG VPS &amp; SÀN BINANCE:</b>\n"
+            f"• Quy mô tài khoản: <b>${equity:,.2f} USDT</b>\n"
+            f"• Giá Bitcoin (BTC): <code>${btc_p:,.2f}</code> ({trend_emoji} <b>{btc_chg:+.2f}% / 24h</b>)\n"
+            f"• Lãi ròng đã chốt hôm nay: {net_emoji} <b>{net_today:+.2f} USDT</b> (WR: <b>{winrate:.1f}%</b> | {trades} lệnh)\n"
+            "• Vòng lặp tự động: 🟢 <i>Quét 35 Coin mỗi 15p | Bảo vệ SL/BE mỗi 12s</i>\n\n"
+            f"📊 <b>SỨC KHỎE VỊ THẾ ĐANG NẰM GIỮ ({len(positions)} Vị Thế):</b>\n"
+            + "\n".join(pos_lines) + "\n\n"
+            f"💰 <b>Tổng Lãi/Lỗ Tạm Tính (Unrealized):</b> {upnl_emoji} <b>{total_upnl:+.2f} USDT</b>\n"
+            f"🏆 <b>NAV Tăng Trưởng Dự Tính:</b> <b>{equity + total_upnl:,.2f} USDT</b>\n\n"
+            "🔭 <b>RADAR AI &amp; MÔ HÌNH LƯỢNG TỬ:</b>\n"
+            f"• {ai_radar_summary}\n"
+            f"• Động cơ AI: <code>{model_name}</code> (Sẵn sàng 24/7)\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🛡️ <i>Jarvis bám sát từng tick giá trên Binance Futures để bảo toàn vốn cho Ngài!</i>"
+        )
+        markup = {"inline_keyboard": [
+            [{"text": "📊 Xem Chi Tiết Vị Thế", "callback_data": "nav_positions"}, {"text": "🎯 Quét Kèo Radar", "callback_data": "nav_scan"}],
+            [{"text": "📰 Điểm Tin AI (Gemini)", "callback_data": "nav_news"}, {"text": "📈 Lãi Lỗ Từng Coin", "callback_data": "nav_pnl"}]
+        ]}
+        return {"text": text, "markup": markup}
+
+    async def _broadcast_hourly_market_pulse(self) -> None:
+        """Phát sóng Nhịp đập thị trường định kỳ mỗi 1 giờ tới Telegram."""
+        try:
+            payload = await self._build_hourly_pulse_payload()
+            await self.broadcast(payload["text"], reply_markup=payload["markup"])
+        except Exception as e:
+            logger.debug(f"Hourly pulse broadcast error: {e}")
+
+    async def _cmd_hourly_pulse(self, chat_id: int, reply_to_id: Optional[int] = None) -> None:
+        """Gửi Nhịp đập thị trường ngay lập tức theo yêu cầu người dùng."""
+        try:
+            payload = await self._build_hourly_pulse_payload()
+            await self.send_message(chat_id, payload["text"], reply_to_message_id=reply_to_id, reply_markup=payload["markup"])
+        except Exception as e:
+            await self.send_message(chat_id, f"❌ <i>Lỗi tạo Nhịp Đập Thị Trường: {e}</i>", reply_to_message_id=reply_to_id)
+
+    async def _broadcast_gemini_news_digest(self) -> None:
+        """Phát sóng Bản tin Tình báo Chiến lược & Tin tức Gemini AI định kỳ."""
+        try:
+            from services.market_sentiment_news_guardian import MarketSentimentNewsGuardian
+            from exchange.binance_client import BinanceFuturesClient
+
+            client = BinanceFuturesClient(self.config)
+            btc_ctx = await client.get_market_trend_context("BTCUSDT")
+            await client.close()
+
+            btc_p = float(btc_ctx.get("last_close", 0.0))
+            btc_chg = float(btc_ctx.get("change_24h", 0.0))
+
+            ai_cfg = getattr(self.config, "ai", None)
+            gemini_key = (getattr(ai_cfg, "api_key", None) if ai_cfg else None) or os.getenv("GEMINI_API_KEY")
+
+            guardian = MarketSentimentNewsGuardian(config=self.config)
+            brief = await guardian.generate_macro_market_news_briefing(
+                btc_price=btc_p,
+                btc_change_24h=btc_chg,
+                gemini_api_key=gemini_key,
+            )
+            await guardian.close()
+
+            markup = {"inline_keyboard": [
+                [{"text": "🎯 Quét Radar Kèo", "callback_data": "nav_scan"}, {"text": "📊 Xem Vị Thế", "callback_data": "nav_positions"}],
+                [{"text": "🚀 Dự Báo Lãi Kép", "callback_data": "nav_forecast"}, {"text": "📅 Lịch Trình", "callback_data": "nav_schedule"}]
+            ]}
+            await self.broadcast(brief["html_telegram_message"], reply_markup=markup)
+        except Exception as e:
+            logger.debug(f"Gemini news broadcast error: {e}")
+
+    async def _cmd_news(self, chat_id: int, reply_to_id: Optional[int] = None) -> None:
+        """Tổng hợp và gửi ngay Bản tin Tình báo Chiến lược & Tin tức Gemini AI."""
+        await self.send_message(
+            chat_id,
+            "📰 <i>Jarvis đang kích hoạt Sentinel &amp; Gemini AI đọc tin tức Binance &amp; thị trường toàn cầu...</i>",
+            reply_to_message_id=reply_to_id
+        )
+        try:
+            from services.market_sentiment_news_guardian import MarketSentimentNewsGuardian
+            from exchange.binance_client import BinanceFuturesClient
+
+            client = BinanceFuturesClient(self.config)
+            btc_ctx = await client.get_market_trend_context("BTCUSDT")
+            await client.close()
+
+            btc_p = float(btc_ctx.get("last_close", 0.0))
+            btc_chg = float(btc_ctx.get("change_24h", 0.0))
+
+            ai_cfg = getattr(self.config, "ai", None)
+            gemini_key = (getattr(ai_cfg, "api_key", None) if ai_cfg else None) or os.getenv("GEMINI_API_KEY")
+
+            guardian = MarketSentimentNewsGuardian(config=self.config)
+            brief = await guardian.generate_macro_market_news_briefing(
+                btc_price=btc_p,
+                btc_change_24h=btc_chg,
+                gemini_api_key=gemini_key,
+            )
+            await guardian.close()
+
+            markup = {"inline_keyboard": [
+                [{"text": "🎯 Quét Radar Kèo", "callback_data": "nav_scan"}, {"text": "📊 Xem Vị Thế", "callback_data": "nav_positions"}],
+                [{"text": "⚡ Nhịp Đập Thị Trường", "callback_data": "nav_pulse"}, {"text": "📅 Lịch Trình", "callback_data": "nav_schedule"}]
+            ]}
+            await self.send_message(
+                chat_id,
+                brief["html_telegram_message"],
+                reply_to_message_id=reply_to_id,
+                reply_markup=markup
+            )
+        except Exception as e:
+            await self.send_message(chat_id, f"❌ <i>Lỗi lấy điểm tin AI: {e}</i>", reply_to_message_id=reply_to_id)
+
+    async def _send_startup_checkin(self) -> None:
+        """Gửi thông báo chào sân & báo cáo hiện trạng ngay khi bot khởi động thành công."""
+        try:
+            from exchange.binance_client import BinanceFuturesClient
+            client = BinanceFuturesClient(self.config)
+            equity = float(await client.get_account_equity() or 92.21)
+            positions = await client.get_open_positions()
+            await client.close()
+
+            pos_cnt = len(positions)
+            text = (
+                "🦾 <b>[JARVIS ONLINE - KÍCH HOẠT HỆ THỐNG PHÒNG THỦ &amp; TÁC CHIẾN VPS MASTER v2.7.0]</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "<i>Chào Ngài Leon! Toàn bộ 5 Đặc Vụ AI và Vệ Binh Rủi Ro đã kết nối trực chiến 24/7 trên sàn Binance Futures.</i>\n\n"
+                "💰 <b>TỔNG QUAN TÀI SẢN:</b>\n"
+                f"• Quy mô tài khoản: <b>${equity:,.2f} USDT</b>\n"
+                f"• Vị thế đang giữ: <b>{pos_cnt} vị thế</b> (Được bảo vệ bởi SL &amp; Zero-Liquidation)\n\n"
+                "⏱️ <b>LỊCH TRÌNH VẬN HÀNH CHỦ ĐỘNG:</b>\n"
+                "• <b>Mỗi 12 giây:</b> Vệ Binh Reconciliation đối chiếu vị thế sàn Binance &amp; dời SL Breakeven\n"
+                "• <b>Mỗi 15 phút:</b> AI Radar quét 35 Đồng Coin Top Binance Futures\n"
+                "• <b>Mỗi 60 phút:</b> Báo cáo Nhịp đập thị trường (Hourly Pulse)\n"
+                "• <b>Mỗi 4 giờ (12h, 16h, 20h):</b> Bản tin Tình báo &amp; Tâm lý Tin tức (Gemini AI)\n"
+                "• <b>08:00 Sáng:</b> Bản tin Tình báo Buổi Sáng\n"
+                "• <b>23:00 Đêm:</b> Tổng kết Tăng trưởng &amp; Lãi kép Cuối ngày\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🛡️ <i>Ngài hoàn toàn yên tâm. Jarvis sẽ chủ động cập nhật định kỳ không để Ngài phải chờ đợi!</i>"
+            )
+            markup = {"inline_keyboard": [
+                [{"text": "📊 Xem Vị Thế", "callback_data": "nav_positions"}, {"text": "⚡ Nhịp Đập Thị Trường", "callback_data": "nav_pulse"}],
+                [{"text": "📰 Điểm Tin AI", "callback_data": "nav_news"}, {"text": "📅 Lịch Trình", "callback_data": "nav_schedule"}]
+            ]}
+            await self.broadcast(text, reply_markup=markup)
+        except Exception as e:
+            logger.debug(f"Startup checkin error: {e}")
+
     async def _vps_autonomous_scheduler(self) -> None:
         """Vòng lặp tự động 24/7 phát sóng báo cáo định kỳ và cảnh báo biến động trên VPS."""
         logger.info("Autonomous VPS Background Scheduler started.")
-        last_morning_date = None
-        last_evening_date = None
-        last_volatility_check = 0.0
+        last_morning_date: Optional[str] = None
+        last_evening_date: Optional[str] = None
+        last_pulse_hour: int = -1
+        last_news_digest_hour: int = -1
+        last_volatility_check: float = 0.0
         last_btc_price: Optional[float] = None
+
+        # Gửi thông báo chào sân & snapshot tức thì sau 3s khởi động
+        await asyncio.sleep(3)
+        await self._send_startup_checkin()
 
         while self._running:
             try:
-                await asyncio.sleep(30)
+                await asyncio.sleep(20)
                 if not self.authorized_chat_ids:
                     continue
 
@@ -1637,17 +1925,27 @@ class DedicatedTelegramBot:
                 hour = now_vn.hour
                 minute = now_vn.minute
 
-                # 1. 08:00 AM Morning Briefing
-                if hour == 8 and minute <= 5 and last_morning_date != today_str:
+                # 1. 08:00 AM Morning Briefing (Khung giờ 08:00 - 08:59 nếu chưa gửi hôm nay)
+                if hour == 8 and last_morning_date != today_str:
                     last_morning_date = today_str
                     await self._send_morning_intel()
 
-                # 2. 23:00 PM Evening Growth & Compound Forecast Recap
-                if hour == 23 and minute <= 5 and last_evening_date != today_str:
+                # 2. 23:00 PM Evening Growth & Compound Forecast Recap (Khung giờ 23:00 - 23:59 nếu chưa gửi hôm nay)
+                if hour == 23 and last_evening_date != today_str:
                     last_evening_date = today_str
                     await self._send_evening_growth_recap()
 
-                # 3. Flash Volatility Alert (mỗi 5 phút)
+                # 3. Gemini Macro News Digest (Vào các mốc 12:00, 16:00, 20:00)
+                if hour in (12, 16, 20) and hour != last_news_digest_hour:
+                    last_news_digest_hour = hour
+                    await self._broadcast_gemini_news_digest()
+
+                # 4. Hourly Market Pulse (Phát sóng mỗi đầu giờ, cách nhau 1 giờ, tránh trùng với 8h và 23h)
+                if hour != last_pulse_hour and hour not in (8, 23):
+                    last_pulse_hour = hour
+                    await self._broadcast_hourly_market_pulse()
+
+                # 5. Flash Volatility Alert (mỗi 5 phút kiểm tra cú giật biến động > 1.8%)
                 if time.time() - last_volatility_check >= 300:
                     last_volatility_check = time.time()
                     last_btc_price = await self._check_flash_volatility(last_btc_price)

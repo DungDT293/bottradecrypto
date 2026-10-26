@@ -38,9 +38,12 @@ Bản phát hành này được thiết kế đặc thù để sẵn sàng **đ�
 * Khi trọng số đạt ngưỡng cảnh báo $\ge 1,800/2,400$, hệ thống tự động giãn nhịp request thêm 1.5 giây.
 * Miễn nhiễm hoàn toàn với lỗi HTTP 429/418 IP ban khi vận hành liên tục nhiều ngày.
 
-### 6. Trợ Lý Telegram Jarvis Mark 85 Thường Trực 24/7
+### 6. Trợ Lý Telegram Jarvis Mark 85 Thường Trực 24/7 & Báo Cáo Chủ Động
 * Kết nối Dedicated Bot qua cơ chế polling bền bỉ, tự động phục hồi khi mất kết nối mạng hoặc lỗi `409 Conflict`.
-* Hỗ trợ đầy đủ phím tắt: `/positions` (Xem vị thế), `/status` (Xem hệ thống), `/stats` (Báo cáo sao kê PnL), `/radar` (Quét kèo AI khẩn cấp), `/be` (Kích hoạt Kèo Bất Tử thủ công).
+* **Nhịp Đập Thị Trường (Hourly Market Pulse):** Tự động phát sóng mỗi 60 phút báo cáo tình trạng VPS, giá BTC, Realized PnL trong ngày, chi tiết từng vị thế mở (ROE, SL/BE), Top 3 coin rình rập và tình trạng Gemini Quota.
+* **Bản Tin Tình Báo & Tâm Lý Thị Trường (Gemini AI News Digest):** Định kỳ mỗi 4 giờ (12h, 16h, 20h) đọc tin tức nóng từ Binance CMS & CoinTelegraph RSS, dùng Gemini 2.5 Flash / Quant Sentinel tổng hợp báo cáo vĩ mô và định hướng tác chiến cho 35 Coin Top.
+* **Tổng Kết Lãi Kép Cuối Ngày (23:00 PM VN):** Tự động sao kê chi tiết lãi lỗ từng coin, winrate, NAV và lộ trình $300 / $500 / $1000 USDT. Khắc phục triệt để lỗi bỏ lỡ cửa sổ 5 phút khi bot khởi động muộn.
+* **Hỗ trợ đầy đủ phím tắt 1-chạm:** `/pulse` (Nhịp đập tức thì), `/news` (Bản tin tin tức AI), `/schedule` (Lịch trình 24/7), `/positions` (Xem vị thế), `/pnl` (Lãi lỗ từng coin), `/scan` (Quét radar).
 
 ---
 
@@ -87,3 +90,4 @@ Bản phát hành này được thiết kế đặc thù để sẵn sàng **đ�
    pm2 startup
    ```
    *Tiêu tốn chưa đầy 150MB RAM và 1% CPU, vận hành ổn định 24/7/365!*
+
