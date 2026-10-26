@@ -539,9 +539,9 @@ export const AITraderCard: React.FC = () => {
                     handleSaveParams(scanInterval, val);
                   }}
                 >
-                  <option value={80}>Tier 80% (Trend Continuation - Chuẩn Winrate 89.4%)</option>
-                  <option value={85}>Tier 85% (SMC Order Block - Chuẩn Winrate 81.3%)</option>
-                  <option value={90}>Tier 90% (SMC Liquidity Sweep - Chuẩn Winrate 79.5%)</option>
+                  <option value={80}>Tier 80% (SMC Liquidity Sweep - Chuẩn Winrate 79.5%)</option>
+                  <option value={85}>Tier 85% (SMC Order Block Retest - Chuẩn Winrate 81.3%)</option>
+                  <option value={90}>Tier 90% (Trend Continuation Vua Sóng - Chuẩn Winrate 89.4%)</option>
                 </select>
               </div>
             </div>
@@ -674,7 +674,7 @@ export const AITraderCard: React.FC = () => {
                                   : "1px solid rgba(16, 185, 129, 0.4)",
                             }}
                           >
-                            Tier {setup.confidence}% ({setup.confidence >= 90 ? "Sweep Reversal" : setup.confidence >= 85 ? "Order Block" : "Trend Sóng"})
+                            Tier {setup.confidence}% ({setup.confidence >= 90 ? "Trend Sóng (89.4%)" : setup.confidence >= 85 ? "Order Block (81.3%)" : "Sweep Reversal (79.5%)"})
                           </span>
                         </div>
                       </div>

@@ -519,7 +519,7 @@ Follow this strict Dialectical Committee Workflow:
 1. BULL RESEARCHER: Identifies all positive bullish price action signals, support levels, and upward continuation factors.
 2. BEAR RESEARCHER: Identifies all bearish headwinds, resistance walls, RSI exhaustion, or false breakout risks.
 3. RISK GUARDIAN: Evaluates whether a valid trade exists with R:R >= 2.0 and structural Stop Loss between 1.5% and 5.0%. If conflicting or high risk, issue VETO.
-4. HEAD TRADER: Synthesizes the debate. STRICT RULE: Must align with 4H Macro Trend (e.g. if 4H is BEARISH, NEVER approve LONG; if 4H is BULLISH, NEVER approve SHORT). Approves LONG/SHORT only if confidence >= 80% (strictly calibrated to tiers: 80% Trend Continuation, 85% Order Block Retest, 90% Liquidity Sweep) and Risk Guardian approves. Otherwise, reject trade.
+4. HEAD TRADER: Synthesizes the debate. STRICT RULE: Must align with 4H Macro Trend (e.g. if 4H is BEARISH, NEVER approve LONG; if 4H is BULLISH, NEVER approve SHORT). Approves LONG/SHORT only if confidence >= 80% (strictly calibrated to empirical winrate tiers: 90% Trend Continuation, 85% Order Block Retest, 80% Liquidity Sweep) and Risk Guardian approves. Otherwise, reject trade.
 
 Respond with ONLY valid JSON strictly matching this schema:
 {{
@@ -639,7 +639,7 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                 "symbol": sym,
                 "direction": "LONG",
                 "archetype": "TREND_CONTINUATION",
-                "confidence": 80,
+                "confidence": 90,
                 "bull_arguments": f"Giá duy trì vững chắc trên đường xu hướng EMA 50 ({ema50}), phe mua kiểm soát cấu trúc tăng.",
                 "bear_arguments": "Cần thận trọng nếu RSI suy giảm xuyên thủng mốc 35 hoặc thủng đáy gần nhất.",
                 "risk_verdict": "APPROVED",
@@ -666,7 +666,7 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                 "symbol": sym,
                 "direction": "SHORT",
                 "archetype": "TREND_CONTINUATION",
-                "confidence": 80,
+                "confidence": 90,
                 "bull_arguments": "Phe mua có nhịp hồi phục kỹ thuật nhẹ nhưng khối lượng không đột biến.",
                 "bear_arguments": f"Cản động EMA 50 ({ema50}) đè nặng lên giá, RSI ({rsi}) suy kiệt xung lực hồi phục.",
                 "risk_verdict": "APPROVED",

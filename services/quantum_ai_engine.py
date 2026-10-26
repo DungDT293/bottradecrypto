@@ -631,7 +631,7 @@ class QuantumAIEngine:
             tp1 = round_to_tick(p + (sl_dist * 0.95), tick)
             tp2 = round_to_tick(p + (sl_dist * 2.0), tick)
             tp3 = round_to_tick(p + (sl_dist * 3.5), tick)
-            conf = 80
+            conf = 90 if trend_4h == "BULLISH" else 88
             return {
                 "has_setup": True,
                 "symbol": sym,
@@ -659,7 +659,7 @@ class QuantumAIEngine:
             tp1 = round_to_tick(p - (sl_dist * 0.95), tick)
             tp2 = round_to_tick(p - (sl_dist * 2.0), tick)
             tp3 = round_to_tick(p - (sl_dist * 3.5), tick)
-            conf = 80
+            conf = 90 if trend_4h == "BEARISH" else 88
             return {
                 "has_setup": True,
                 "symbol": sym,
