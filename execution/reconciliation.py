@@ -1,13 +1,14 @@
 import asyncio
 import json
 import time
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from config.config import AppConfig, exchange_writes_enabled
 from config.policy_defaults import calculate_tp_weights
-from core.enums import MarginMode, PositionSide, SignalState
+from core.enums import MarginMode, OrderSide, OrderType, PositionSide, SignalState
 from core.exceptions import AccountStateBlockedError, ReconciliationError
 from core.models import SourceMetadata, ValidatedSignal
 from execution.order_manager import OrderManager
@@ -821,6 +822,34 @@ class ReconciliationEngine:
                                             "DYNAMIC_PROFIT_LOCK_ACTIVATED",
                                             f"Khóa Lãi Tự Động: {trail_desc} (SL mới: {target_trail_px})",
                                         )
+
+                            # 7. Active Position Structure & Adverse News Invalidation Guard (Cắt Lỗ Sớm Chủ Động)
+                            # Nếu vị thế đang lỗ (chưa chạm TP1) và cự ly lỗ từ -0.8% trở lên:
+                            # Không để vị thế bleed đến tận điểm SL nguy hiểm nếu cấu trúc 1H đã bị bẻ gãy!
+                            if not tp1_filled and not is_at_least_be and price_gain_pct <= Decimal("-0.8"):
+                                is_invalidated, invalid_reason = await self._check_structural_invalidation(
+                                    symbol=symbol,
+                                    is_long=is_long,
+                                    mark_p=mark_p,
+                                    entry_p=entry_p,
+                                )
+                                if is_invalidated:
+                                    logger.warning(f"🚨 Phát hiện bẻ gãy cấu trúc cho {symbol}: {invalid_reason}. Kích hoạt Cắt Lỗ Sớm Chủ Động!")
+                                    early_cut_success = await self._execute_early_invalidation_close(
+                                        symbol=symbol,
+                                        quantity=abs(amt),
+                                        is_long=is_long,
+                                        signal_id=sig_id,
+                                        entry_p=entry_p,
+                                        mark_p=mark_p,
+                                        loss_pct=float(price_gain_pct),
+                                        reason=invalid_reason,
+                                    )
+                                    if early_cut_success:
+                                        report["discrepancies"].append(
+                                            f"CẮT LỖ SỚM CHỦ ĐỘNG: {symbol} đã bẻ gãy cấu trúc ({invalid_reason}). Đã đóng vị thế bảo toàn vốn!"
+                                        )
+                                        continue
                         except Exception as ex_be:
                             report["discrepancies"].append(f"Lỗi kiểm tra Breakeven / Khóa lãi cho {symbol}: {ex_be}")
 
@@ -1012,3 +1041,168 @@ class ReconciliationEngine:
             report["discrepancies"].append(f"Lỗi kiểm tra lệnh Zombie: {ex_zombie}")
 
         return report
+
+    async def _check_structural_invalidation(
+        self,
+        symbol: str,
+        is_long: bool,
+        mark_p: Decimal,
+        entry_p: Decimal,
+    ) -> Tuple[bool, str]:
+        """
+        Kiểm tra xem vị thế đang lỗ có bị bẻ gãy cấu trúc SMC hoặc dính bão tin tức không.
+        1. Nến 1H: Đóng qua cản EMA50 + RSI đảo chiều cực hạn.
+        2. Tin tức: Black-Swan / Extreme Negative Catalyst.
+        """
+        try:
+            # 1. Kiểm tra biến động kỹ thuật 1H
+            klines = await self.client._request(
+                "GET", "/fapi/v1/klines",
+                params={"symbol": symbol, "interval": "1h", "limit": 55},
+                signed=False,
+            )
+            if klines and len(klines) >= 50:
+                closes = [float(k[4]) for k in klines]
+                
+                # Tính EMA50
+                k50 = 2.0 / (50 + 1)
+                ema50 = sum(closes[:50]) / 50.0
+                for c in closes[50:]:
+                    ema50 = c * k50 + ema50 * (1.0 - k50)
+
+                # Tính RSI14
+                if len(closes) >= 15:
+                    gains = [max(closes[i] - closes[i-1], 0) for i in range(1, 15)]
+                    losses = [max(closes[i-1] - closes[i], 0) for i in range(1, 15)]
+                    avg_g = sum(gains) / 14.0
+                    avg_l = sum(losses) / 14.0
+                    for i in range(14, len(closes)):
+                        d = closes[i] - closes[i-1]
+                        avg_g = (avg_g * 13.0 + max(d, 0)) / 14.0
+                        avg_l = (avg_l * 13.0 + max(-d, 0)) / 14.0
+                    rs = avg_g / avg_l if avg_l > 1e-9 else 100.0
+                    rsi = 100.0 - (100.0 / (1.0 + rs))
+                else:
+                    rsi = 50.0
+
+                cur_p = float(mark_p)
+                # For SHORT: Giá vượt lên trên cản EMA50 (> +0.3% trên EMA50) và RSI > 58.0
+                if not is_long and cur_p > ema50 * 1.003 and rsi > 58.0:
+                    return True, f"Nến 1H đóng vượt cản EMA50 ({ema50:.4f}) với RSI={rsi:.1f} (Động lượng Tăng áp đảo)"
+                
+                # For LONG: Giá thủng xuống dưới hỗ trợ EMA50 (< -0.3% dưới EMA50) và RSI < 42.0
+                if is_long and cur_p < ema50 * 0.997 and rsi < 42.0:
+                    return True, f"Nến 1H đóng thủng hỗ trợ EMA50 ({ema50:.4f}) với RSI={rsi:.1f} (Động lượng Giảm áp đảo)"
+
+            # 2. Kiểm tra tin tức thiên nga đen (Black-Swan News)
+            try:
+                from services.market_sentiment_news_guardian import MarketSentimentNewsGuardian, SentimentVerdict
+                guardian = MarketSentimentNewsGuardian(session=await self.client._get_session())
+                sentiment = await guardian.analyze_symbol_sentiment(symbol, "LONG" if is_long else "SHORT")
+                if sentiment.verdict == SentimentVerdict.REJECTED_BLACK_SWAN:
+                    return True, f"Phát hiện tin tức thảm họa / Black-Swan: {', '.join(sentiment.reasons)}"
+            except Exception:
+                pass
+
+        except Exception as e_chk:
+            logger.debug(f"Structural invalidation check error for {symbol}: {e_chk}")
+
+        return False, ""
+
+    async def _execute_early_invalidation_close(
+        self,
+        symbol: str,
+        quantity: Decimal,
+        is_long: bool,
+        signal_id: str,
+        entry_p: Decimal,
+        mark_p: Decimal,
+        loss_pct: float,
+        reason: str,
+    ) -> bool:
+        """
+        Đóng khẩn cấp vị thế khi bị bẻ gãy cấu trúc (Early Invalidation Cut):
+        1. Hủy mọi lệnh mở (SL/TP) của symbol này trên Binance.
+        2. Bắn lệnh MARKET reduce_only để đóng toàn bộ vị thế ngay lập tức.
+        3. Cập nhật DB: trạng thái CLOSED (EARLY_INVALIDATION_CUT).
+        4. Bắn thông báo Telegram notify_early_cut.
+        """
+        close_side = OrderSide.SELL if is_long else OrderSide.BUY
+        try:
+            # 1. Hủy các lệnh SL algo đang treo
+            all_algos = await self.client.get_open_algo_orders(symbol)
+            for a in (all_algos or []):
+                aid = str(a.get("algoId") or a.get("clientAlgoId") or "")
+                caid = str(a.get("clientAlgoId") or "")
+                if aid:
+                    try:
+                        await self.client.cancel_algo_order(symbol, algo_id=aid, client_algo_id=caid if caid else None)
+                    except Exception:
+                        pass
+
+            # 2. Hủy các lệnh TP limit đang treo
+            all_orders = await self.client.get_open_orders(symbol)
+            for o in (all_orders or []):
+                oid = str(o.get("clientOrderId") or o.get("orderId") or "")
+                if oid:
+                    try:
+                        await self.client.cancel_standard_order(symbol, oid)
+                    except Exception:
+                        pass
+
+            # 3. Đặt lệnh Market Reduce-Only để đóng vị thế
+            emg_cid = f"early_{signal_id[:8]}_{uuid.uuid4().hex[:4]}"
+            await self.client.create_standard_order(
+                symbol=symbol,
+                side=close_side,
+                order_type=OrderType.MARKET,
+                quantity=quantity,
+                client_order_id=emg_cid,
+                reduce_only=True,
+            )
+
+            # 4. Cập nhật SQLite
+            self.signal_repo.update_signal_state(
+                signal_id,
+                SignalState.CLOSED,
+                reason=f"EARLY_INVALIDATION_CUT: {reason}",
+            )
+            self.signal_repo.record_timeline_event(
+                signal_id,
+                "EARLY_INVALIDATION_CUT",
+                f"Cắt Lỗ Sớm Chủ Động: {reason}. Giá thoát: {mark_p} (Âm: {loss_pct:.2f}%). Tiết kiệm ~70% vốn dự phòng!",
+            )
+
+            # 5. Bắn thông báo Telegram
+            try:
+                from telegram.dedicated_bot import get_dedicated_bot
+                bot = get_dedicated_bot()
+                if bot and bot.is_configured:
+                    loss_usdt = float(abs(mark_p - entry_p) * quantity)
+                    asyncio.create_task(
+                        bot.notify_early_cut(
+                            symbol=symbol,
+                            exit_price=float(mark_p),
+                            loss_pct=loss_pct,
+                            loss_usdt=loss_usdt,
+                            root_cause=reason,
+                        )
+                    )
+            except Exception as e_tele:
+                logger.debug(f"Early cut telegram alert failed: {e_tele}")
+
+            try:
+                from services.alert_service import AlertLevel, AlertService
+                AlertService.get_instance().add_alert(
+                    AlertLevel.WARNING,
+                    f"⚠️ CẮT LỖ SỚM CHỦ ĐỘNG: {symbol}",
+                    f"{reason}. Thoát vị thế @ {mark_p} ({loss_pct:.2f}%) thay vì đợi chạm full SL.",
+                    "RECONCILIATION",
+                )
+            except Exception:
+                pass
+
+            return True
+        except Exception as e_close:
+            logger.error(f"Failed to execute early invalidation close for {symbol}: {e_close}")
+            return False

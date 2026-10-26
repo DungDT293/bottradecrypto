@@ -283,3 +283,23 @@ async def test_dedicated_bot_natural_language_chat():
         }
         await bot.handle_update(update_macro)
         assert mock_macro.called
+
+
+@pytest.mark.asyncio
+async def test_notify_early_cut():
+    bot = DedicatedTelegramBot(bot_token="123456789:ABCdefGHIjkLMNopqrstuvwxyz")
+    bot.broadcast = AsyncMock(return_value=1)
+
+    res = await bot.notify_early_cut(
+        symbol="SOLUSDT",
+        exit_price=101.5,
+        loss_pct=-0.85,
+        loss_usdt=0.35,
+        root_cause="Nến 1H đóng vượt cản EMA50 với RSI=62.4",
+    )
+    assert res == 1
+    assert bot.broadcast.called
+    msg_sent = bot.broadcast.call_args[0][0]
+    assert "CẮT LỖ SỚM CHỦ ĐỘNG" in msg_sent
+    assert "SOLUSDT" in msg_sent
+    assert "EMA50" in msg_sent

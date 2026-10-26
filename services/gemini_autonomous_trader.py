@@ -110,7 +110,7 @@ class GeminiAutonomousTrader:
         self.enabled: bool = getattr(ai_cfg, "enabled", False) if ai_cfg else getattr(config, "ai_trading_enabled", False)
         self.gemini_api_key: Optional[str] = (getattr(ai_cfg, "api_key", None) if ai_cfg else None) or os.getenv("GEMINI_API_KEY")
         self.scan_interval_minutes: int = getattr(ai_cfg, "scan_interval_minutes", 15) if ai_cfg else 15
-        self.preferred_model: str = getattr(ai_cfg, "preferred_model", "gemini-3.6-flash") if ai_cfg else "gemini-3.6-flash"
+        self.preferred_model: str = getattr(ai_cfg, "preferred_model", "gemini-2.0-flash") if ai_cfg else "gemini-2.0-flash"
         self.min_confidence: int = getattr(ai_cfg, "min_confidence", 80) if ai_cfg else 80
         self.watchlist: List[str] = list(getattr(ai_cfg, "watchlist", DEFAULT_WATCHLIST)) if ai_cfg else list(DEFAULT_WATCHLIST)
         self._top_watchlist_cache: List[str] = []
@@ -508,6 +508,8 @@ Follow this strict Dialectical Committee Workflow:
 3. RISK GUARDIAN: Evaluates whether a valid trade exists with R:R >= 2.0 and structural Stop Loss between 1.5% and 5.0%. If conflicting or high risk, issue VETO.
 4. HEAD TRADER: Synthesizes the debate. STRICT RULE: Must align with 4H Macro Trend (e.g. if 4H is BEARISH, NEVER approve LONG; if 4H is BULLISH, NEVER approve SHORT). Approves LONG/SHORT only if confidence >= 80% (strictly calibrated to empirical winrate tiers: 90% Trend Continuation, 85% Order Block Retest, 80% Liquidity Sweep) and Risk Guardian approves. Otherwise, reject trade.
 
+5. NEWS & BLACK SWAN SENTINEL: Checks whether there are sudden adverse news, SEC actions, cliff token unlocks, or breaking negative headlines for {snapshot['symbol']}. If high risk or opposing news shock, reject setup or set risk_verdict to VETOED.
+
 Respond with ONLY valid JSON strictly matching this schema:
 {{
     "has_setup": true or false,
@@ -515,6 +517,8 @@ Respond with ONLY valid JSON strictly matching this schema:
     "confidence": integer strictly one of [80, 85, 90],
     "bull_arguments": "Vietnamese 1-sentence summary of the strongest Bull argument",
     "bear_arguments": "Vietnamese 1-sentence summary of the key Bear risk/counter-argument",
+    "news_sentiment": "POSITIVE" or "NEUTRAL" or "NEGATIVE_RISK",
+    "news_assessment": "Vietnamese short assessment of news/catalyst landscape",
     "risk_verdict": "APPROVED" or "VETOED",
     "rationale": "Vietnamese concise synthesis explaining the entry thesis and level invalidation",
     "entry_price": float (optimal entry price near current price),
@@ -525,17 +529,17 @@ Respond with ONLY valid JSON strictly matching this schema:
 }}
 If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and explain reason in "rationale"."""
 
-        # Strict directive: only models 3.6 and above
-        available_36_plus_models = [
-            "gemini-3.6-flash",
-            "gemini-3.8-flash",
-            "gemini-4-argon",
+        # Official Google AI Studio lightweight free models (sub-second latency, generous free tier)
+        available_models = [
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash-lite",
         ]
-        pref = getattr(self, "preferred_model", "gemini-3.6-flash")
-        if pref in available_36_plus_models:
-            models_to_try = [pref] + [m for m in available_36_plus_models if m != pref]
+        pref = getattr(self, "preferred_model", "gemini-2.0-flash")
+        if pref in available_models:
+            models_to_try = [pref] + [m for m in available_models if m != pref]
         else:
-            models_to_try = available_36_plus_models
+            models_to_try = available_models
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -581,9 +585,9 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                                 # DO NOT query other models - all models share the project quota
                                 break
 
-                            # If model not found (404), try next 3.6+ candidate
+                            # If model not found (404), try next candidate
                             if resp.status == 404:
-                                logger.info(f"Model {model_name} not available in region (404), trying next 3.6+ model...")
+                                logger.info(f"Model {model_name} not available in region (404), trying next model...")
                                 continue
                 except Exception as e_mod:
                     logger.warning(f"Error querying {model_name}: {e_mod}")

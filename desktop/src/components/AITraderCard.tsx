@@ -33,7 +33,7 @@ export const AITraderCard: React.FC = () => {
   const [executingSymbol, setExecutingSymbol] = useState<string | null>(null);
   const [scanInterval, setScanInterval] = useState<number>(15);
   const [minConfidence, setMinConfidence] = useState<number>(80);
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-3.6-flash");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.0-flash");
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -238,11 +238,11 @@ export const AITraderCard: React.FC = () => {
                 }}
               >
                 {aiStatus?.has_gemini_key
-                  ? (selectedModel === "gemini-4-argon"
-                      ? "✦ Gemini 4 Argon"
-                      : selectedModel === "gemini-3.8-flash"
-                      ? "✦ Gemini 3.8 Flash"
-                      : "✦ Gemini 3.6 Flash")
+                  ? (selectedModel === "gemini-1.5-flash"
+                      ? "✦ Gemini 1.5 Flash"
+                      : selectedModel === "gemini-2.0-flash-lite"
+                      ? "✦ Gemini 2.0 Flash Lite"
+                      : "✦ Gemini 2.0 Flash")
                   : "⚡ Quant Engine Fallback"}
               </span>
               {aiStatus?.quota_status === "RATE_LIMITED_COOLDOWN" && (
@@ -476,9 +476,9 @@ export const AITraderCard: React.FC = () => {
                 value={selectedModel}
                 onChange={(e) => handleSaveModel(e.target.value)}
               >
-                <option value="gemini-3.6-flash">Gemini 3.6 Flash (1,000 RPM | 10k RPD)</option>
-                <option value="gemini-3.8-flash">Gemini 3.8 Flash (1,000 RPM | 10k RPD)</option>
-                <option value="gemini-4-argon">Gemini 4 Argon (1,000 RPM | Unlimited RPD)</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Free 15 RPM | Siêu Tốc 400ms | News Sentinel)</option>
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Free 15 RPM | Cực Nhẹ 300ms)</option>
+                <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Free | Tiết Kiệm Quota)</option>
               </select>
               <div style={{ fontSize: "10px", color: "#94a3b8", marginTop: "4px" }}>
                 🛡️ Lọc Quant trước khi gọi API (tiết kiệm 90% quota) + Delay 2.5s chống Limit.

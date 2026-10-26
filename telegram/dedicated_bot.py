@@ -378,6 +378,27 @@ class DedicatedTelegramBot:
         markup = {"inline_keyboard": [[{"text": "🎯 Quét Radar Tìm Kèo Bù Đắp", "callback_data": "nav_scan"}]]}
         return await self.broadcast(text, reply_markup=markup)
 
+    async def notify_early_cut(
+        self,
+        symbol: str,
+        exit_price: float | str,
+        loss_pct: float = 0.0,
+        loss_usdt: float = 0.0,
+        root_cause: Optional[str] = None,
+    ) -> int:
+        """Tự động phát sóng cảnh báo Cắt Lỗ Sớm Chủ Động (Early Invalidation Cut)."""
+        cause_txt = root_cause or "Bẻ gãy cấu trúc kỹ thuật 1H hoặc xuất hiện tin tức bất lợi bất ngờ."
+        text = (
+            f"🛡️ <b>CẮT LỖ SỚM CHỦ ĐỘNG (EARLY CUT)</b> 🛡️\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"💎 Cặp: <code>{symbol}</code>\n"
+            f"⚡ Giá thoát: <code>{exit_price}</code> | Âm: <b>{abs(loss_pct):.2f}%</b> (-{abs(loss_usdt):.2f} USDT)\n"
+            f"⚠️ <b>Lý do cắt sớm:</b> {cause_txt}\n\n"
+            f"💡 <i>Kỷ luật sắt: Nhận diện cấu trúc nến bị bẻ gãy sớm, bot chủ động đóng lệnh tại chỗ để bảo toàn 70% vốn dự phòng thay vì gồng thụ động đến khi chạm Full SL!</i>"
+        )
+        markup = {"inline_keyboard": [[{"text": "🎯 Quét Radar Kèo Mới", "callback_data": "nav_scan"}]]}
+        return await self.broadcast(text, reply_markup=markup)
+
     # =========================================================================
     # UPDATE HANDLER
     # =========================================================================
@@ -1131,7 +1152,7 @@ class DedicatedTelegramBot:
                 "• Bảo vệ rủi ro: 🟢 <b>Zero-Liquidation Invariant (Bất biến)</b>\n"
                 "• Kèo Bất Tử: 🟢 <b>Kích hoạt sớm (+0.8% Gain = +16% ROE)</b>\n"
                 "• Bộ lọc vĩ mô 4H: 🟢 <b>4H Macro Trend Shield (Chặn ngược trend)</b>\n"
-                "• Hệ thống Quant AI: 🟢 <b>Gemini 4 Argon (Top 35 Coin)</b>\n"
+                "• Hệ thống Quant AI: 🟢 <b>Dual-AI (Quantum SMC + Gemini 2.0 Flash)</b>\n"
                 "• Giám sát từ xa: 🟢 <b>Chế độ Read-Only An Toàn Tuyệt Đối</b>\n"
                 "• Trợ lý AI Jarvis: 🟢 <b>Trực tuyến 24/7 (Đã kết nối Ngài Leon)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

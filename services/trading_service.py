@@ -109,7 +109,7 @@ class TradingService:
                     chat_id = item.get("chat_id")
                     sig_id = str(item.get("signal_id", ""))
                     if chat_id == -999001 or sig_id.startswith("sig_ai_"):
-                        item["channel_name"] = "🤖 AI Quant (Argon 4)"
+                        item["channel_name"] = "🤖 Dual-AI (Quantum + Gemini)"
                         item["source_type"] = "AI"
                     else:
                         item["channel_name"] = KNOWN_CHANNELS.get(chat_id, "Khác")
@@ -217,7 +217,7 @@ class TradingService:
                             c_id = sig_row["chat_id"]
                             if c_id == -999001 or s_id.startswith("sig_ai_") or "sig_ai_" in cid:
                                 source_type = "AI"
-                                source_label = "🤖 AI Quant (Argon 4)"
+                                source_label = "🤖 Dual-AI (Quantum + Gemini)"
                             elif c_id in KNOWN_CHANNELS:
                                 source_type = "TELEGRAM"
                                 source_label = f"📢 {KNOWN_CHANNELS[c_id]}"
@@ -250,7 +250,7 @@ class TradingService:
                                 # Check clientOrderId signature directly
                                 if "sig_ai_" in cid:
                                     source_type = "AI"
-                                    source_label = "🤖 AI Quant (Argon 4)"
+                                    source_label = "🤖 Dual-AI (Quantum + Gemini)"
                                 elif "sig_-100" in cid and source_type == "MANUAL":
                                     source_type = "TELEGRAM"
                                     source_label = "📢 Telegram"

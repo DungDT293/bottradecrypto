@@ -174,7 +174,7 @@ export const OverviewPage: React.FC = () => {
           <div className="card-title">
             <span>Hệ Thống AI Quant</span>
             <span className="badge" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", fontSize: "10px" }}>
-              Gemini 4 Argon
+              Gemini 2.0 Flash
             </span>
           </div>
           <div className="card-value" style={{ color: "#60a5fa" }}>
