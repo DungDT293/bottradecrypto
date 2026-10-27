@@ -1821,17 +1821,13 @@ def create_api_router(
                 "message": "Quá trình quét thị trường đang diễn ra...",
                 "setups": ai_trader.last_scan_results,
             }
-        try:
-            ai_trader._is_scanning = True
-            setups = await ai_trader.scan_market()
-            return {
-                "success": True,
-                "count": len(setups),
-                "setups": setups,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        finally:
-            ai_trader._is_scanning = False
+        setups = await ai_trader.scan_market()
+        return {
+            "success": True,
+            "count": len(setups),
+            "setups": setups,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     @router.post("/ai/execute-setup", dependencies=[Depends(verify_token)])
     async def execute_ai_setup(body: AIExecuteModel):
