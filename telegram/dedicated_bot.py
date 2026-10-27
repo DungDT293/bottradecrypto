@@ -1165,6 +1165,19 @@ class DedicatedTelegramBot:
             is_ferrari = bool(getattr(self.config, "ferrari_mode_enabled", False))
             ferrari_txt = "🟢 BẬT (x35 - x40, Tối đa 20 vị thế)" if is_ferrari else "⚪ TẮT (Chế độ an toàn 20x)"
 
+            from services.gemini_key_rotator import GeminiKeyRotator
+            rotator = GeminiKeyRotator.get_instance()
+            pool_stat = rotator.get_pool_status()
+            tot_k = pool_stat.get("total_keys", 0)
+            act_k = pool_stat.get("active_keys", 0)
+            cool_k = pool_stat.get("cooling_keys", 0)
+            if tot_k > 0:
+                key_txt = f"🟢 <b>{act_k}/{tot_k} Keys Hoạt Động (Xoay Vòng Thông Minh)</b>"
+                if cool_k > 0:
+                    key_txt += f" <i>({cool_k} đang hồi)</i>"
+            else:
+                key_txt = "⚪ <b>Quant-Sentinel Rule Engine (0ms Fallback)</b>"
+
             text = (
                 "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR v2.7.0 (JARVIS QUANTUM VPS MASTER)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1173,7 +1186,7 @@ class DedicatedTelegramBot:
                 "• Bảo vệ rủi ro: 🟢 <b>Zero-Liquidation Invariant (Bất biến)</b>\n"
                 "• Kèo Bất Tử: 🟢 <b>Kích hoạt sớm (+0.8% Gain = +16% ROE)</b>\n"
                 "• Bộ lọc vĩ mô 4H: 🟢 <b>4H Macro Trend Shield (Chặn ngược trend)</b>\n"
-                "• Hệ thống Quant AI: 🟢 <b>Dual-AI (Quantum SMC + Gemini 2.5 Flash / Quant Sentinel)</b>\n"
+                f"• Trạm điều phối Gemini Pool: {key_txt}\n"
                 "• Báo cáo chủ động 24/7: 🟢 <b>Hourly Pulse & Gemini News Digest BẬT</b>\n"
                 "• Giám sát từ xa: 🟢 <b>Chế độ Read-Only An Toàn Tuyệt Đối</b>\n"
                 "• Trợ lý AI Jarvis: 🟢 <b>Trực tuyến 24/7 (Đã kết nối Ngài Leon)</b>\n"

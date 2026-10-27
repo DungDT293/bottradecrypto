@@ -1729,13 +1729,17 @@ def create_api_router(
 
     @router.get("/ai/status", dependencies=[Depends(verify_token)])
     async def get_ai_status():
+        from services.gemini_key_rotator import GeminiKeyRotator
+        rotator = GeminiKeyRotator.get_instance()
+        key_pool_status = rotator.get_pool_status()
+
         key = ai_trader.gemini_api_key
         key_masked = None
         if key and len(key) >= 8:
             key_masked = f"{key[:4]}...{key[-4:]}"
         return {
             "enabled": ai_trader.enabled,
-            "has_gemini_key": bool(key),
+            "has_gemini_key": bool(key) or key_pool_status.get("has_healthy", False),
             "gemini_key_masked": key_masked,
             "preferred_model": getattr(ai_trader, "preferred_model", "gemini-2.0-flash"),
             "scan_interval_minutes": ai_trader.scan_interval_minutes,
@@ -1749,6 +1753,7 @@ def create_api_router(
             "quota_status": getattr(ai_trader, "_quota_status", "NORMAL"),
             "cooldown_remaining_seconds": ai_trader.get_cooldown_remaining(),
             "daily_api_calls": getattr(ai_trader, "_daily_api_calls", 0),
+            "key_pool": key_pool_status,
         }
 
     @router.post("/ai/config", dependencies=[Depends(verify_token)])
@@ -1762,6 +1767,14 @@ def create_api_router(
             ai_trader._gemini_key_invalid = False
             config.ai.api_key = clean_key if clean_key else None
             os.environ["GEMINI_API_KEY"] = clean_key
+
+            from services.gemini_key_rotator import GeminiKeyRotator
+            rotator = GeminiKeyRotator.get_instance()
+            raw_keys = [k.strip() for k in re.split(r"[,;\n\r\t]+", clean_key) if k.strip()]
+            if raw_keys:
+                rotator.set_keys(raw_keys)
+            elif not clean_key:
+                rotator.set_keys([])
         if body.preferred_model is not None:
             clean_m = body.preferred_model.strip()
             ai_trader.preferred_model = clean_m

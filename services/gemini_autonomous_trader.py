@@ -25,6 +25,7 @@ from services.quantum_ai_engine import (
 )
 
 logger = logging.getLogger("gemini_trader")
+from services.gemini_key_rotator import GeminiKeyRotator
 
 DEFAULT_WATCHLIST = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT",
@@ -123,6 +124,7 @@ class GeminiAutonomousTrader:
         self.last_scan_symbol_validation_error: Optional[str] = None
         self._is_scanning: bool = False
         self._gemini_key_invalid: bool = False
+        self.key_rotator = GeminiKeyRotator.get_instance()
 
         # Load persisted scan results cache if available to survive backend restarts
         try:
@@ -533,11 +535,15 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
 
         # Official Google AI Studio lightweight free models (sub-second latency, generous free tier)
         available_models = [
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-4-argon",
+            "gemini-3.1-flash-lite",
+            "gemini-flash-latest",
             "gemini-2.0-flash",
             "gemini-1.5-flash",
-            "gemini-2.0-flash-lite",
         ]
-        pref = getattr(self, "preferred_model", "gemini-2.0-flash")
+        pref = getattr(self, "preferred_model", "gemini-3.8-flash")
         if pref in available_models:
             models_to_try = [pref] + [m for m in available_models if m != pref]
         else:
@@ -548,60 +554,63 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
             "generationConfig": {"response_mime_type": "application/json"},
         }
 
+        max_key_attempts = min(5, max(1, len(self.key_rotator.slots)))
         try:
             session = await self.client._get_session()
-            for model_name in models_to_try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-                try:
-                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            candidates = data.get("candidates", [])
-                            if candidates:
-                                text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                                clean_text = text.strip()
-                                if clean_text.startswith("```json"):
-                                    clean_text = clean_text[7:]
-                                elif clean_text.startswith("```"):
-                                    clean_text = clean_text[3:]
-                                if clean_text.endswith("```"):
-                                    clean_text = clean_text[:-3]
-                                clean_text = clean_text.strip()
-                                parsed = json.loads(clean_text)
-                                self._quota_status = "NORMAL"
-                                self._daily_api_calls += 1
-                                if parsed.get("has_setup") and parsed.get("risk_verdict") != "VETOED":
-                                    parsed["symbol"] = snapshot["symbol"]
-                                    parsed["source"] = f"Gemini ({model_name})"
-                                    return parsed
-                        elif resp.status in (429, 404, 400):
-                            err_txt = await resp.text()
-                            if "API key not valid" in err_txt:
-                                self._gemini_key_invalid = True
-                                logger.warning("Gemini API key is invalid. Switching to Quantitative Engine fallback.")
-                                break
-                            
-                            # Quota Exceeded (429) or Prepay Credits Depleted Guard
-                            if resp.status == 429 or "prepay" in err_txt.lower() or "resource_exhausted" in err_txt.lower():
-                                is_prepay = "prepay" in err_txt.lower()
-                                self._quota_status = "PREPAY_DEPLETED" if is_prepay else "RATE_LIMITED_COOLDOWN"
-                                # Set 15-minute protective circuit breaker
-                                self._api_cooldown_until = time.time() + 900
-                                logger.warning(
-                                    f"Gemini API Quota/Prepay boundary reached on {model_name} (status {resp.status}). "
-                                    f"Activating 15-minute Circuit Breaker to prevent project-wide API lockout. "
-                                    f"Switching seamlessly to Quant Engine Fallback."
-                                )
-                                # DO NOT query other models - all models share the project quota
-                                break
+            for _ in range(max_key_attempts):
+                active_key = self.key_rotator.get_next_key() or api_key
+                if not active_key:
+                    break
 
-                            # If model not found (404), try next candidate
-                            if resp.status == 404:
-                                logger.info(f"Model {model_name} not available in region (404), trying next model...")
-                                continue
-                except Exception as e_mod:
-                    logger.warning(f"Error querying {model_name}: {e_mod}")
-                    continue
+                key_failed = False
+                for model_name in models_to_try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={active_key}"
+                    try:
+                        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                candidates = data.get("candidates", [])
+                                if candidates:
+                                    text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                                    clean_text = text.strip()
+                                    if clean_text.startswith("```json"):
+                                        clean_text = clean_text[7:]
+                                    elif clean_text.startswith("```"):
+                                        clean_text = clean_text[3:]
+                                    if clean_text.endswith("```"):
+                                        clean_text = clean_text[:-3]
+                                    clean_text = clean_text.strip()
+                                    parsed = json.loads(clean_text)
+                                    self._quota_status = "NORMAL"
+                                    self._daily_api_calls += 1
+                                    self.key_rotator.mark_success(active_key)
+                                    if parsed.get("has_setup") and parsed.get("risk_verdict") != "VETOED":
+                                        parsed["symbol"] = snapshot["symbol"]
+                                        parsed["source"] = f"Gemini ({model_name})"
+                                        return parsed
+                                    return parsed
+                            elif resp.status in (429, 404, 402, 400):
+                                err_txt = await resp.text()
+                                if "API key not valid" in err_txt or resp.status == 400:
+                                    self.key_rotator.mark_invalid(active_key, err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 402 or "prepay" in err_txt.lower() or "resource_exhausted" in err_txt.lower():
+                                    self.key_rotator.mark_depleted(active_key, err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 429:
+                                    self.key_rotator.mark_rate_limited(active_key, cooldown_seconds=60.0, error_msg=err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 404:
+                                    continue
+                    except Exception as e_mod:
+                        logger.warning(f"Error querying {model_name} with key {active_key[:6]}...: {e_mod}")
+                        continue
+
+                if not key_failed:
+                    break
         except Exception as e:
             logger.warning(f"Gemini analysis error for {snapshot['symbol']}: {e}")
 
@@ -787,9 +796,8 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
         promising_candidates.sort(key=lambda x: x[0], reverse=True)
 
         can_query_gemini = (
-            bool(self.gemini_api_key)
-            and not self._gemini_key_invalid
-            and time.time() > self._api_cooldown_until
+            self.key_rotator.has_healthy_keys()
+            or (bool(self.gemini_api_key) and not self._gemini_key_invalid and time.time() > self._api_cooldown_until)
         )
 
         gemini_analyzed_symbols = set()

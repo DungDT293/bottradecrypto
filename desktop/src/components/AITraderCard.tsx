@@ -378,6 +378,20 @@ export const AITraderCard: React.FC = () => {
                   <span className="mono" style={{ fontSize: "13px", color: "#fff" }}>
                     {aiStatus.gemini_key_masked || "Đã lưu API Key"}
                   </span>
+                  {(aiStatus as any)?.key_pool?.total_keys > 1 && (
+                    <span
+                      className="badge"
+                      style={{
+                        backgroundColor: "rgba(16, 185, 129, 0.15)",
+                        color: "#10b981",
+                        fontSize: "10px",
+                        padding: "2px 6px",
+                      }}
+                      title={`${(aiStatus as any).key_pool.active_keys}/${(aiStatus as any).key_pool.total_keys} keys sẵn sàng xoay vòng Round-Robin`}
+                    >
+                      {(aiStatus as any).key_pool.active_keys}/{(aiStatus as any).key_pool.total_keys} Keys Pool
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: "6px" }}>
                   <button
@@ -402,7 +416,7 @@ export const AITraderCard: React.FC = () => {
                   <input
                     type={showKeySecret ? "text" : "password"}
                     className="input"
-                    placeholder="Dán API Key (AIzaSy...)"
+                    placeholder="Dán 1 key hoặc nhiều key cách nhau dấu phẩy (key1, key2, ...)"
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
                     style={{ fontSize: "12px", width: "100%", paddingRight: "32px" }}
@@ -484,9 +498,11 @@ export const AITraderCard: React.FC = () => {
                 value={selectedModel}
                 onChange={(e) => handleSaveModel(e.target.value)}
               >
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Free 15 RPM | Siêu Tốc 400ms | News Sentinel)</option>
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Free 15 RPM | Cực Nhẹ 300ms)</option>
-                <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Free | Tiết Kiệm Quota)</option>
+                <option value="gemini-3.8-flash">Gemini 3.8 Flash (Thế hệ mới nhất | Siêu Tốc 250ms | Khuyên dùng)</option>
+                <option value="gemini-3.5-flash">Gemini 3.5 Flash (Ổn định cao | Tiết kiệm Quota)</option>
+                <option value="gemini-4-argon">Gemini 4 Argon (Lượng tử Chuyên sâu | SMC Institutional)</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Free 15 RPM | News Sentinel)</option>
+                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Cực nhẹ 200ms)</option>
               </select>
               <div style={{ fontSize: "10px", color: "#94a3b8", marginTop: "4px" }}>
                 🛡️ Lọc Quant trước khi gọi API (tiết kiệm 90% quota) + Delay 2.5s chống Limit.

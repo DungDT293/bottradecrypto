@@ -400,11 +400,11 @@ class MarketSentimentNewsGuardian:
         headlines: List[str],
         btc_price: float,
         btc_change_24h: float,
-        api_key: str,
+        api_key: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Queries Google Gemini models for deep macro crypto market intelligence."""
-        if not api_key:
-            return None
+        """Queries Google Gemini models for deep macro crypto market intelligence using Key Pool rotation."""
+        from services.gemini_key_rotator import GeminiKeyRotator
+        rotator = GeminiKeyRotator.get_instance()
 
         prompt = f"""You are the Chief Quantitative Macro Strategist for an institutional Binance USD-M Futures desk.
 Analyze these real-time crypto headlines and market context:
@@ -436,29 +436,57 @@ Respond ONLY with a valid JSON object matching this schema:
         }
 
         session = await self._get_session()
-        for m in models_to_try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
-            try:
-                async with asyncio.timeout(6.0):
-                    async with session.post(url, json=payload) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            cands = data.get("candidates", [])
-                            if cands:
-                                txt = cands[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                                clean = txt.strip()
-                                if clean.startswith("```json"):
-                                    clean = clean[7:]
-                                elif clean.startswith("```"):
-                                    clean = clean[3:]
-                                if clean.endswith("```"):
-                                    clean = clean[:-3]
-                                parsed = json.loads(clean.strip())
-                                parsed["model_used"] = f"Gemini ({m})"
-                                return parsed
-            except Exception as e_gemini:
-                logger.debug(f"Gemini macro query error on {m}: {e_gemini}")
-                continue
+        max_key_attempts = min(3, max(1, len(rotator.slots)))
+
+        for _ in range(max_key_attempts):
+            curr_key = rotator.get_next_key() or api_key
+            if not curr_key:
+                break
+
+            key_failed = False
+            for m in models_to_try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={curr_key}"
+                try:
+                    async with asyncio.timeout(6.0):
+                        async with session.post(url, json=payload) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                cands = data.get("candidates", [])
+                                if cands:
+                                    txt = cands[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                                    clean = txt.strip()
+                                    if clean.startswith("```json"):
+                                        clean = clean[7:]
+                                    elif clean.startswith("```"):
+                                        clean = clean[3:]
+                                    if clean.endswith("```"):
+                                        clean = clean[:-3]
+                                    parsed = json.loads(clean.strip())
+                                    parsed["model_used"] = f"Gemini ({m})"
+                                    rotator.mark_success(curr_key)
+                                    return parsed
+                            elif resp.status in (429, 404, 402, 400):
+                                err_txt = await resp.text()
+                                if "API key not valid" in err_txt or resp.status == 400:
+                                    rotator.mark_invalid(curr_key, err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 402 or "prepay" in err_txt.lower() or "resource_exhausted" in err_txt.lower():
+                                    rotator.mark_depleted(curr_key, err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 429:
+                                    rotator.mark_rate_limited(curr_key, cooldown_seconds=60.0, error_msg=err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 404:
+                                    continue
+                except Exception as e_gemini:
+                    logger.debug(f"Gemini macro query error on {m}: {e_gemini}")
+                    continue
+
+            if not key_failed:
+                break
         return None
 
     def _synthesize_quant_macro(
