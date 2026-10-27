@@ -257,6 +257,117 @@ export const TradingPage: React.FC = () => {
         </div>
       )}
 
+      {/* Portfolio Basket Trailing & Daily Target Guard HUD */}
+      {(() => {
+        const bg = snapshot?.basket_guard;
+        const totalUnpnl = positions.reduce((acc, p) => acc + (parseFloat(p.unrealized_pnl || "0") || 0), 0);
+        const todayRealized = bg?.today_realized_pnl ?? (parseFloat(snapshot?.pnl_today?.net_pnl || "0") || 0);
+        const todayTotal = todayRealized + totalUnpnl;
+        const targetUsdt = bg?.daily_profit_target_usdt ?? 8.0;
+        const targetEnabled = bg?.daily_profit_target_enabled ?? true;
+        const trailingEnabled = bg?.basket_trailing_enabled ?? true;
+        const trailingTrigger = bg?.basket_trailing_trigger_usdt ?? 8.0;
+        const trailingPullback = bg?.basket_trailing_pullback_pct ?? 25.0;
+        const peakUnpnl = bg?.basket_peak_unrealized ?? Math.max(0, totalUnpnl);
+        const isTrailingActive = bg?.trailing_active || peakUnpnl >= trailingTrigger;
+        const pullbackThreshold = isTrailingActive ? peakUnpnl * (1 - trailingPullback / 100) : 0;
+        const targetProgressPct = targetUsdt > 0 ? Math.min(100, Math.max(0, (todayTotal / targetUsdt) * 100)) : 0;
+        const isTargetMet = todayTotal >= targetUsdt;
+
+        return (
+          <div
+            style={{
+              background: "linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%)",
+              border: "1px solid rgba(16, 185, 129, 0.25)",
+              borderRadius: "10px",
+              padding: "14px 18px",
+              marginBottom: "20px",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "16px" }}>🛡️</span>
+                <span style={{ fontSize: "14px", fontWeight: 700, color: "#fff" }}>
+                  Giáp Khóa Lãi Danh Mục & Chỉ Tiêu Lãi Ngày
+                </span>
+                <span
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    background: targetEnabled || trailingEnabled ? "rgba(16, 185, 129, 0.2)" : "rgba(100, 116, 139, 0.2)",
+                    color: targetEnabled || trailingEnabled ? "#10b981" : "#94a3b8",
+                    border: `1px solid ${targetEnabled || trailingEnabled ? "rgba(16, 185, 129, 0.4)" : "rgba(100, 116, 139, 0.3)"}`,
+                  }}
+                >
+                  {targetEnabled || trailingEnabled ? "🟢 ĐANG BẢO VỆ VỐN" : "⚪ ĐANG TẮT"}
+                </span>
+              </div>
+              <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                Tự động chốt lời danh mục tránh lãi hóa lỗ
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              {/* Target Col */}
+              <div style={{ background: "rgba(0,0,0,0.25)", borderRadius: "8px", padding: "10px 14px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>🎯 Chỉ Tiêu Lãi Hôm Nay</div>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: isTargetMet ? "#10b981" : "#38bdf8" }}>
+                    {todayTotal >= 0 ? `+${todayTotal.toFixed(2)}` : todayTotal.toFixed(2)} / {targetUsdt.toFixed(2)} USDT ({targetProgressPct.toFixed(0)}%)
+                  </div>
+                </div>
+                {/* Progress bar */}
+                <div style={{ marginTop: "8px", height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${targetProgressPct}%`,
+                      height: "100%",
+                      background: isTargetMet ? "linear-gradient(90deg, #10b981, #059669)" : "linear-gradient(90deg, #38bdf8, #10b981)",
+                      transition: "width 0.3s ease",
+                    }}
+                  />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)", marginTop: "6px" }}>
+                  <span>Đã chốt: <strong style={{ color: todayRealized >= 0 ? "#10b981" : "#ef4444" }}>{todayRealized >= 0 ? `+${todayRealized.toFixed(2)}` : todayRealized.toFixed(2)}$</strong></span>
+                  <span>Rổ thả nổi: <strong style={{ color: totalUnpnl >= 0 ? "#10b981" : "#ef4444" }}>{totalUnpnl >= 0 ? `+${totalUnpnl.toFixed(2)}` : totalUnpnl.toFixed(2)}$</strong></span>
+                </div>
+              </div>
+
+              {/* Trailing Stop Col */}
+              <div style={{ background: "rgba(0,0,0,0.25)", borderRadius: "8px", padding: "10px 14px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", fontWeight: 600 }}>🛡️ Trailing Khóa Lãi Rổ</div>
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      padding: "1px 6px",
+                      borderRadius: "8px",
+                      background: isTrailingActive ? "rgba(16, 185, 129, 0.25)" : "rgba(245, 158, 11, 0.15)",
+                      color: isTrailingActive ? "#10b981" : "#f59e0b",
+                      border: `1px solid ${isTrailingActive ? "rgba(16, 185, 129, 0.4)" : "rgba(245, 158, 11, 0.3)"}`,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {isTrailingActive ? "🟢 ĐANG BÁM ĐUÔI ĐỈNH" : `⚪ KÍCH HOẠT KHI RỔ ≥ +${trailingTrigger.toFixed(1)}$`}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-secondary)", marginTop: "8px" }}>
+                  <span>Đỉnh lãi rổ: <strong style={{ color: "#38bdf8" }}>+{peakUnpnl.toFixed(2)} USDT</strong></span>
+                  <span>Ngưỡng tự chốt (-{trailingPullback}%): <strong style={{ color: isTrailingActive ? "#10b981" : "var(--text-muted)" }}>{isTrailingActive ? `+${pullbackThreshold.toFixed(2)} USDT` : "Chưa kích hoạt"}</strong></span>
+                </div>
+                <div style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "4px", fontStyle: "italic" }}>
+                  {isTrailingActive
+                    ? `⚠️ Nếu rổ giật lùi về +${pullbackThreshold.toFixed(2)}$ Bot lập tức chốt sạch bảo toàn lãi!`
+                    : `Bot sẽ tự bám đuôi đỉnh ngay khi tổng các vị thế đạt +${trailingTrigger.toFixed(1)}$`}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Positions Table */}
       <div className="table-container">
         <div className="table-header">

@@ -289,6 +289,27 @@ export interface AppSettings {
   sl_buffer_pct?: number;
   max_active_signals?: number;
   max_total_open_risk_pct?: number;
+  daily_profit_target_enabled?: boolean;
+  daily_profit_target_usdt?: number;
+  basket_trailing_enabled?: boolean;
+  basket_trailing_trigger_usdt?: number;
+  basket_trailing_pullback_pct?: number;
+}
+
+export interface BasketGuardState {
+  basket_unrealized_pnl: number;
+  basket_peak_unrealized: number;
+  daily_profit_target_usdt: number;
+  daily_profit_target_enabled: boolean;
+  basket_trailing_enabled: boolean;
+  basket_trailing_trigger_usdt: number;
+  basket_trailing_pullback_pct: number;
+  today_realized_pnl: number;
+  today_total_pnl: number;
+  trailing_active: boolean;
+  pullback_threshold: number;
+  daily_target_locked: boolean;
+  positions_count: number;
 }
 
 export interface AppSnapshot {
@@ -306,6 +327,7 @@ export interface AppSnapshot {
   orders: OrderRecord[];
   alerts: AlertRecord[];
   unread_alerts_count?: number;
+  basket_guard?: BasketGuardState;
 }
 
 export interface ChannelLeaderboardItem {

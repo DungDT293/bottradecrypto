@@ -24,6 +24,7 @@ import type {
   PnLSummary,
   TradeRecord,
   PnLChartResponse,
+  BasketGuardState,
 } from "../types/api";
 
 export class ApiError extends Error {
@@ -214,6 +215,7 @@ export const api = {
     const params = new URLSearchParams({ limit: String(limit), days_back: String(daysBack) });
     return request<TradeRecord[]>(`/trading/trades?${params.toString()}`);
   },
+  getBasketGuardStatus: () => request<{ success: boolean; data: BasketGuardState }>("/trading/basket-guard-status"),
 
   // 6. Statistics
   getPnL: (daysBack = 0) => request<PnLSummary>(`/stats/pnl?days_back=${encodeURIComponent(daysBack)}`),

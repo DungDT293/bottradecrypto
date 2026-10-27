@@ -68,6 +68,11 @@ class RiskPolicy(BaseModel):
     fee_buffer_pct: Decimal = Decimal("0.1")
     slippage_buffer_pct: Decimal = Decimal("0.1")
     sl_buffer_pct: Decimal = Decimal("0.3")
+    daily_profit_target_enabled: bool = True
+    daily_profit_target_usdt: Decimal = Decimal("8.0")
+    basket_trailing_enabled: bool = True
+    basket_trailing_trigger_usdt: Decimal = Decimal("8.0")
+    basket_trailing_pullback_pct: Decimal = Decimal("25.0")
 
     @field_validator("margin_mode", mode="before")
     @classmethod

@@ -1,10 +1,13 @@
 import asyncio
 import json
+import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from config.config import AppConfig, exchange_writes_enabled
 from config.policy_defaults import calculate_tp_weights
@@ -90,6 +93,24 @@ class ReconciliationEngine:
         self.config = config or getattr(order_manager, "config", None)
         self.trailing_mgr = TrailingTakeProfitManager()
         self.on_slot_freed_callback = on_slot_freed_callback
+        self._basket_peak_unrealized: Decimal = Decimal("0.0")
+        self._daily_target_locked_date: Optional[str] = None
+        self._daily_target_locked_today: bool = False
+        self.basket_guard_state: Dict[str, Any] = {
+            "basket_unrealized_pnl": 0.0,
+            "basket_peak_unrealized": 0.0,
+            "daily_profit_target_usdt": float(getattr(self.config.risk, "daily_profit_target_usdt", 8.0)) if self.config else 8.0,
+            "daily_profit_target_enabled": bool(getattr(self.config.risk, "daily_profit_target_enabled", True)) if self.config else True,
+            "basket_trailing_enabled": bool(getattr(self.config.risk, "basket_trailing_enabled", True)) if self.config else True,
+            "basket_trailing_trigger_usdt": float(getattr(self.config.risk, "basket_trailing_trigger_usdt", 8.0)) if self.config else 8.0,
+            "basket_trailing_pullback_pct": float(getattr(self.config.risk, "basket_trailing_pullback_pct", 25.0)) if self.config else 25.0,
+            "today_realized_pnl": 0.0,
+            "today_total_pnl": 0.0,
+            "trailing_active": False,
+            "pullback_threshold": 0.0,
+            "daily_target_locked": False,
+            "positions_count": 0,
+        }
 
     async def _notify_slot_freed(self) -> None:
         """Invoked when a position is closed or moves to breakeven, freeing up risk slots."""
@@ -1040,6 +1061,12 @@ class ReconciliationEngine:
         except Exception as ex_zombie:
             report["discrepancies"].append(f"Lỗi kiểm tra lệnh Zombie: {ex_zombie}")
 
+        # 4. Check Portfolio Profit Guards (Basket Trailing & Daily Target)
+        try:
+            await self._check_portfolio_profit_guards(positions_map, report)
+        except Exception as ex_guard:
+            report["discrepancies"].append(f"Lỗi kiểm tra Giáp Khóa Lãi Danh Mục: {ex_guard}")
+
         return report
 
     async def _check_structural_invalidation(
@@ -1235,3 +1262,242 @@ class ReconciliationEngine:
         except Exception as e_close:
             logger.error(f"Failed to execute early invalidation close for {symbol}: {e_close}")
             return False
+
+    async def _close_bot_position_for_basket_guard(
+        self,
+        symbol: str,
+        pos: Dict[str, Any],
+        reason: str,
+    ) -> bool:
+        """Closes a single position via market order and cleans up all associated orders."""
+        try:
+            amt = abs(Decimal(str(pos.get("positionAmt", "0"))))
+            if amt == Decimal("0"):
+                return False
+            side = OrderSide.SELL if float(pos.get("positionAmt", 0)) > 0 else OrderSide.BUY
+
+            # 1. Market close
+            await self.client.create_standard_order(
+                symbol=symbol,
+                side=side,
+                order_type=OrderType.MARKET,
+                quantity=amt,
+                reduce_only=True,
+            )
+
+            # 2. Cancel open standard limit orders
+            try:
+                await self.client.cancel_all_orders(symbol)
+            except Exception:
+                pass
+
+            # 3. Cancel open conditional algo orders
+            try:
+                all_algos = await self.client.get_open_algo_orders(symbol)
+                for a in (all_algos or []):
+                    aid = str(a.get("algoId") or a.get("clientAlgoId") or "")
+                    caid = str(a.get("clientAlgoId") or "")
+                    if aid:
+                        try:
+                            await self.client.cancel_algo_order(symbol, algo_id=aid, client_algo_id=caid if caid else None)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # 4. Clean local order repo and update signal state
+            self.order_repo.cancel_open_orders_for_symbol(symbol)
+            active_sig = self.signal_repo.get_active_signal_for_symbol(symbol)
+            if active_sig:
+                sig_id = active_sig["signal_id"]
+                self.signal_repo.update_signal_state(sig_id, SignalState.CLOSED, reason=reason)
+                self.signal_repo.record_timeline_event(
+                    sig_id,
+                    "PORTFOLIO_GUARD_CLOSE",
+                    f"Giáp Khóa Lãi / Chỉ Tiêu Ngày: Đã chốt lệnh thị trường cho {symbol} ({reason})",
+                )
+                if event_bus:
+                    try:
+                        asyncio.create_task(event_bus.publish("signal_updated", {
+                            "signal_id": sig_id,
+                            "symbol": symbol,
+                            "state": SignalState.CLOSED.value,
+                        }))
+                    except Exception:
+                        pass
+
+            return True
+        except Exception as e_close:
+            logger.error(f"[PORTFOLIO_GUARD] Lỗi đóng vị thế {symbol}: {e_close}")
+            return False
+
+    async def _check_portfolio_profit_guards(
+        self,
+        positions_map: Dict[str, Any],
+        report: Dict[str, Any],
+    ) -> None:
+        """
+        Portfolio Basket Trailing Profit & Daily Target Lock:
+        1. Basket Trailing Lock: Aggregate floating profit >= basket_trailing_trigger_usdt tracks peak.
+           If it pulls back by basket_trailing_pullback_pct (e.g. 25%), market-closes all positions.
+        2. Daily Target Hit: When today's Realized + Current Basket Unrealized >= daily_profit_target_usdt,
+           market-closes all positions to lock in daily quota.
+        """
+        daily_target_enabled = getattr(self.config.risk, "daily_profit_target_enabled", True) if self.config else True
+        daily_target_usdt = Decimal(str(getattr(self.config.risk, "daily_profit_target_usdt", "8.0"))) if self.config else Decimal("8.0")
+        basket_trailing_enabled = getattr(self.config.risk, "basket_trailing_enabled", True) if self.config else True
+        basket_trigger_usdt = Decimal(str(getattr(self.config.risk, "basket_trailing_trigger_usdt", "8.0"))) if self.config else Decimal("8.0")
+        basket_pullback_pct = Decimal(str(getattr(self.config.risk, "basket_trailing_pullback_pct", "25.0"))) if self.config else Decimal("25.0")
+
+        VN_TZ = timezone(timedelta(hours=7))
+        today_str = datetime.now(VN_TZ).strftime("%Y-%m-%d")
+
+        if self._daily_target_locked_date != today_str:
+            self._daily_target_locked_date = today_str
+            self._daily_target_locked_today = False
+
+        today_realized_pnl = Decimal("0.0")
+        try:
+            with self.db.get_connection() as conn:
+                row = conn.execute(
+                    "SELECT net_pnl, realized_pnl FROM daily_pnl WHERE date_str = ?",
+                    (today_str,),
+                ).fetchone()
+                if row and row["net_pnl"] is not None:
+                    today_realized_pnl = Decimal(str(row["net_pnl"]))
+        except Exception:
+            pass
+
+        with self.signal_repo.db.get_connection() as conn:
+            owned_rows = conn.execute(
+                "SELECT DISTINCT symbol FROM signals WHERE state IN ('ENTRY_PENDING','PARTIALLY_FILLED','OPEN_PROTECTED','EXITING')"
+            ).fetchall()
+        bot_symbols = {r["symbol"] for r in owned_rows}
+
+        open_bot_positions = []
+        basket_unrealized_pnl = Decimal("0.0")
+        for sym, pos in (positions_map or {}).items():
+            amt = abs(Decimal(str(pos.get("positionAmt", "0"))))
+            if amt > Decimal("0") and (sym in bot_symbols or not bot_symbols):
+                open_bot_positions.append(pos)
+                basket_unrealized_pnl += Decimal(str(pos.get("unRealizedProfit", "0")))
+
+        if not open_bot_positions:
+            self._basket_peak_unrealized = Decimal("0.0")
+            self.basket_guard_state = {
+                "basket_unrealized_pnl": 0.0,
+                "basket_peak_unrealized": 0.0,
+                "daily_profit_target_usdt": float(daily_target_usdt),
+                "daily_profit_target_enabled": bool(daily_target_enabled),
+                "basket_trailing_enabled": bool(basket_trailing_enabled),
+                "basket_trailing_trigger_usdt": float(basket_trigger_usdt),
+                "basket_trailing_pullback_pct": float(basket_pullback_pct),
+                "today_realized_pnl": float(today_realized_pnl),
+                "today_total_pnl": float(today_realized_pnl),
+                "trailing_active": False,
+                "pullback_threshold": 0.0,
+                "daily_target_locked": getattr(self, "_daily_target_locked_today", False),
+                "positions_count": 0,
+            }
+            return
+
+        today_total_pnl = today_realized_pnl + basket_unrealized_pnl
+
+        if basket_unrealized_pnl > Decimal("0.0"):
+            if basket_unrealized_pnl > self._basket_peak_unrealized:
+                self._basket_peak_unrealized = basket_unrealized_pnl
+        else:
+            if self._basket_peak_unrealized < basket_trigger_usdt:
+                self._basket_peak_unrealized = Decimal("0.0")
+
+        is_trailing_active = bool(self._basket_peak_unrealized >= basket_trigger_usdt)
+        pullback_threshold = (
+            self._basket_peak_unrealized * (Decimal("1.0") - (basket_pullback_pct / Decimal("100.0")))
+            if is_trailing_active
+            else Decimal("0.0")
+        )
+
+        self.basket_guard_state = {
+            "basket_unrealized_pnl": float(basket_unrealized_pnl),
+            "basket_peak_unrealized": float(self._basket_peak_unrealized),
+            "daily_profit_target_usdt": float(daily_target_usdt),
+            "daily_profit_target_enabled": bool(daily_target_enabled),
+            "basket_trailing_enabled": bool(basket_trailing_enabled),
+            "basket_trailing_trigger_usdt": float(basket_trigger_usdt),
+            "basket_trailing_pullback_pct": float(basket_pullback_pct),
+            "today_realized_pnl": float(today_realized_pnl),
+            "today_total_pnl": float(today_total_pnl),
+            "trailing_active": is_trailing_active,
+            "pullback_threshold": float(pullback_threshold),
+            "daily_target_locked": getattr(self, "_daily_target_locked_today", False),
+            "positions_count": len(open_bot_positions),
+        }
+
+        if not exchange_writes_enabled(self.config):
+            return
+
+        trigger_reason: Optional[str] = None
+        trigger_type: Optional[str] = None
+
+        # 1. Condition: Basket Trailing Profit Lock
+        if basket_trailing_enabled and is_trailing_active:
+            if basket_unrealized_pnl <= pullback_threshold and basket_unrealized_pnl > Decimal("0.0"):
+                trigger_type = "BASKET_TRAILING_LOCK"
+                trigger_reason = (
+                    f"Giáp Khóa Lãi Rổ: Đỉnh +{self._basket_peak_unrealized:.2f}$ "
+                    f"hồi lui về +{basket_unrealized_pnl:.2f}$ (vượt ngưỡng {basket_pullback_pct}%). "
+                    f"Tự động chốt toàn bộ để bảo toàn két sắt!"
+                )
+
+        # 2. Condition: Daily Profit Target Hit
+        if not trigger_reason and daily_target_enabled and not getattr(self, "_daily_target_locked_today", False):
+            if today_total_pnl >= daily_target_usdt and basket_unrealized_pnl > Decimal("0.0"):
+                trigger_type = "DAILY_TARGET_LOCK"
+                trigger_reason = (
+                    f"Chỉ Tiêu Lãi Ngày Hoàn Thành: Tổng lãi hôm nay đạt +{today_total_pnl:.2f}$ "
+                    f"(Mục tiêu: +{daily_target_usdt:.2f}$). Tự động chốt toàn bộ danh mục!"
+                )
+
+        if not trigger_reason:
+            return
+
+        closed_symbols = []
+        for pos in open_bot_positions:
+            sym = pos.get("symbol")
+            if not sym:
+                continue
+            success = await self._close_bot_position_for_basket_guard(sym, pos, trigger_reason)
+            if success:
+                closed_symbols.append(sym)
+
+        if closed_symbols:
+            self._basket_peak_unrealized = Decimal("0.0")
+            if trigger_type == "DAILY_TARGET_LOCK":
+                self._daily_target_locked_today = True
+
+            self.basket_guard_state["daily_target_locked"] = getattr(self, "_daily_target_locked_today", False)
+            self.basket_guard_state["positions_count"] = max(0, len(open_bot_positions) - len(closed_symbols))
+            self.basket_guard_state["trailing_active"] = False
+
+            report["discrepancies"].append(
+                f"[PORTFOLIO_GUARD] {trigger_reason} - Đã chốt {len(closed_symbols)} vị thế: {', '.join(closed_symbols)}"
+            )
+
+            try:
+                from services.alert_service import AlertLevel, AlertService
+                alert_svc = AlertService.get_instance(self.db)
+                alert_title = (
+                    "🛡️ GIÁP KHÓA LÃI BÁM ĐUÔI KÍCH HOẠT"
+                    if trigger_type == "BASKET_TRAILING_LOCK"
+                    else "🎯 CHỈ TIÊU LÃI NGÀY HOÀN THÀNH"
+                )
+                alert_svc.add_alert(
+                    AlertLevel.CRITICAL if trigger_type == "BASKET_TRAILING_LOCK" else AlertLevel.INFO,
+                    alert_title,
+                    f"{trigger_reason}\nDanh sách các cặp đã chốt thị trường: {', '.join(closed_symbols)}.",
+                    "PORTFOLIO_GUARD",
+                )
+            except Exception as ex_alert:
+                logger.error(f"[PORTFOLIO_GUARD] Lỗi phát alert: {ex_alert}")
+
+            await self._notify_slot_freed()

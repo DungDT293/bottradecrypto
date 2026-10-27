@@ -315,6 +315,7 @@ def create_api_router(
             "orders": orders,
             "alerts": recent_alerts,
             "unread_alerts_count": alert_svc.get_unread_count(),
+            "basket_guard": getattr(reconciler, "basket_guard_state", None),
         }
 
     # -------------------------------------------------------------
@@ -1329,6 +1330,25 @@ def create_api_router(
         except Exception as e:
             raise HTTPException(status_code=500, detail=make_error_response("CLOSE_ALL_FAILED", str(e)))
 
+    @router.get("/trading/basket-guard-status", dependencies=[Depends(verify_token)])
+    async def get_basket_guard_status():
+        guard_state = getattr(reconciler, "basket_guard_state", {
+            "basket_unrealized_pnl": 0.0,
+            "basket_peak_unrealized": 0.0,
+            "daily_profit_target_usdt": float(getattr(config.risk, "daily_profit_target_usdt", 8.0)),
+            "daily_profit_target_enabled": bool(getattr(config.risk, "daily_profit_target_enabled", True)),
+            "basket_trailing_enabled": bool(getattr(config.risk, "basket_trailing_enabled", True)),
+            "basket_trailing_trigger_usdt": float(getattr(config.risk, "basket_trailing_trigger_usdt", 8.0)),
+            "basket_trailing_pullback_pct": float(getattr(config.risk, "basket_trailing_pullback_pct", 25.0)),
+            "today_realized_pnl": 0.0,
+            "today_total_pnl": 0.0,
+            "trailing_active": False,
+            "pullback_threshold": 0.0,
+            "daily_target_locked": False,
+            "positions_count": 0,
+        })
+        return {"success": True, "data": guard_state}
+
     @router.post("/trading/start-bot", dependencies=[Depends(verify_token)])
     async def start_bot_engine():
         if trading_svc.get_engine_status() == EngineStatus.RUNNING_LISTEN:
@@ -1467,6 +1487,11 @@ def create_api_router(
             "sl_buffer_pct": float(getattr(config.risk, "sl_buffer_pct", Decimal("1.0"))),
             "max_active_signals": int(getattr(config.risk, "max_active_signals", 5)),
             "max_total_open_risk_pct": float(getattr(config.risk, "max_total_open_risk_pct", Decimal("150.0"))),
+            "daily_profit_target_enabled": bool(getattr(config.risk, "daily_profit_target_enabled", True)),
+            "daily_profit_target_usdt": float(getattr(config.risk, "daily_profit_target_usdt", Decimal("8.0"))),
+            "basket_trailing_enabled": bool(getattr(config.risk, "basket_trailing_enabled", True)),
+            "basket_trailing_trigger_usdt": float(getattr(config.risk, "basket_trailing_trigger_usdt", Decimal("8.0"))),
+            "basket_trailing_pullback_pct": float(getattr(config.risk, "basket_trailing_pullback_pct", Decimal("25.0"))),
         }
 
     class UpdateSettingsModel(BaseModel):
@@ -1484,6 +1509,11 @@ def create_api_router(
         max_active_signals: Optional[int] = 5
         ferrari_mode_enabled: Optional[bool] = False
         max_total_open_risk_pct: Optional[float] = None
+        daily_profit_target_enabled: Optional[bool] = None
+        daily_profit_target_usdt: Optional[float] = None
+        basket_trailing_enabled: Optional[bool] = None
+        basket_trailing_trigger_usdt: Optional[float] = None
+        basket_trailing_pullback_pct: Optional[float] = None
 
     @router.post("/settings", dependencies=[Depends(verify_token)])
     async def update_settings(
@@ -1600,6 +1630,23 @@ def create_api_router(
         if body.max_total_open_risk_pct is not None:
             config.risk.max_total_open_risk_pct = Decimal(str(body.max_total_open_risk_pct))
 
+        if body.daily_profit_target_enabled is not None:
+            config.risk.daily_profit_target_enabled = bool(body.daily_profit_target_enabled)
+        if body.daily_profit_target_usdt is not None:
+            if body.daily_profit_target_usdt <= 0 or not math.isfinite(body.daily_profit_target_usdt):
+                raise HTTPException(status_code=400, detail=make_error_response("INVALID_SETTINGS", "Chỉ tiêu lãi ngày phải lớn hơn 0."))
+            config.risk.daily_profit_target_usdt = Decimal(str(body.daily_profit_target_usdt))
+        if body.basket_trailing_enabled is not None:
+            config.risk.basket_trailing_enabled = bool(body.basket_trailing_enabled)
+        if body.basket_trailing_trigger_usdt is not None:
+            if body.basket_trailing_trigger_usdt <= 0 or not math.isfinite(body.basket_trailing_trigger_usdt):
+                raise HTTPException(status_code=400, detail=make_error_response("INVALID_SETTINGS", "Ngưỡng trailing rổ phải lớn hơn 0."))
+            config.risk.basket_trailing_trigger_usdt = Decimal(str(body.basket_trailing_trigger_usdt))
+        if body.basket_trailing_pullback_pct is not None:
+            if body.basket_trailing_pullback_pct <= 0 or body.basket_trailing_pullback_pct >= 100 or not math.isfinite(body.basket_trailing_pullback_pct):
+                raise HTTPException(status_code=400, detail=make_error_response("INVALID_SETTINGS", "% hồi lui phải nằm trong khoảng (0, 100)."))
+            config.risk.basket_trailing_pullback_pct = Decimal(str(body.basket_trailing_pullback_pct))
+
         save_config(config)
 
         await event_bus.publish("backend_status_changed", {"mode": config.mode.value, "live": config.live_trading_enabled, "ferrari": getattr(config, "ferrari_mode_enabled", False)})
@@ -1620,6 +1667,11 @@ def create_api_router(
                 "sl_buffer_pct": float(config.risk.sl_buffer_pct),
                 "max_active_signals": int(config.risk.max_active_signals),
                 "max_total_open_risk_pct": float(getattr(config.risk, "max_total_open_risk_pct", Decimal("150.0"))),
+                "daily_profit_target_enabled": bool(getattr(config.risk, "daily_profit_target_enabled", True)),
+                "daily_profit_target_usdt": float(getattr(config.risk, "daily_profit_target_usdt", Decimal("8.0"))),
+                "basket_trailing_enabled": bool(getattr(config.risk, "basket_trailing_enabled", True)),
+                "basket_trailing_trigger_usdt": float(getattr(config.risk, "basket_trailing_trigger_usdt", Decimal("8.0"))),
+                "basket_trailing_pullback_pct": float(getattr(config.risk, "basket_trailing_pullback_pct", Decimal("25.0"))),
             },
         }
 

@@ -21,6 +21,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   breakeven_after_tp1: true,
   sl_buffer_pct: 0.3,
   max_active_signals: 20,
+  daily_profit_target_enabled: true,
+  daily_profit_target_usdt: 8.0,
+  basket_trailing_enabled: true,
+  basket_trailing_trigger_usdt: 8.0,
+  basket_trailing_pullback_pct: 25.0,
 };
 
 const finiteOr = (value: number | undefined, fallback: number | undefined): number =>
@@ -37,6 +42,11 @@ const normalizeSettings = (data: Partial<AppSettings>): AppSettings => ({
   tp1_target_weight_pct: finiteOr(data.tp1_target_weight_pct, DEFAULT_SETTINGS.tp1_target_weight_pct),
   sl_buffer_pct: finiteOr(data.sl_buffer_pct, DEFAULT_SETTINGS.sl_buffer_pct),
   max_active_signals: finiteOr(data.max_active_signals, DEFAULT_SETTINGS.max_active_signals),
+  daily_profit_target_enabled: data.daily_profit_target_enabled !== undefined ? Boolean(data.daily_profit_target_enabled) : DEFAULT_SETTINGS.daily_profit_target_enabled,
+  daily_profit_target_usdt: finiteOr(data.daily_profit_target_usdt, DEFAULT_SETTINGS.daily_profit_target_usdt),
+  basket_trailing_enabled: data.basket_trailing_enabled !== undefined ? Boolean(data.basket_trailing_enabled) : DEFAULT_SETTINGS.basket_trailing_enabled,
+  basket_trailing_trigger_usdt: finiteOr(data.basket_trailing_trigger_usdt, DEFAULT_SETTINGS.basket_trailing_trigger_usdt),
+  basket_trailing_pullback_pct: finiteOr(data.basket_trailing_pullback_pct, DEFAULT_SETTINGS.basket_trailing_pullback_pct),
 });
 
 export const SettingsPage: React.FC = () => {
@@ -582,6 +592,125 @@ export const SettingsPage: React.FC = () => {
                 onChange={(e) => setSettings({ ...settings, breakeven_after_tp1: e.target.checked })}
                 style={{ width: "22px", height: "22px", cursor: "pointer", accentColor: "#10b981" }}
               />
+            </div>
+          </div>
+
+          {/* Portfolio Basket Trailing & Daily Target Guard */}
+          <div style={{ marginTop: "20px", padding: "20px", background: "linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(59, 130, 246, 0.05) 100%)", borderRadius: "10px", border: "1px solid rgba(16, 185, 129, 0.25)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "rgba(16, 185, 129, 0.15)", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid rgba(16, 185, 129, 0.3)" }}>
+                  <ShieldCheck size={20} style={{ color: "#10b981" }} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "#fff", display: "flex", alignItems: "center", gap: "8px" }}>
+                    Giáp Khóa Lãi Danh Mục & Chỉ Tiêu Lãi Ngày
+                    <span style={{ fontSize: "10px", padding: "2px 8px", background: "rgba(16, 185, 129, 0.2)", color: "#10b981", borderRadius: "12px", border: "1px solid rgba(16, 185, 129, 0.4)", fontWeight: 600 }}>
+                      TỰ ĐỘNG BẢO TOÀN LỢI NHUẬN
+                    </span>
+                  </h4>
+                  <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "2px" }}>
+                    Tự động chốt lời bảo vệ toàn bộ danh mục khi đạt chỉ tiêu ngày hoặc khi lãi rổ chạm đỉnh rồi hồi lui. Tuyệt đối không để vị thế từ lãi hóa lỗ!
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              {/* Daily Target Section */}
+              <div style={{ padding: "16px", background: "rgba(0,0,0,0.25)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#fff", fontSize: "13px" }}>🎯 Khóa Lãi Theo Chỉ Tiêu Ngày</div>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Đạt tổng lãi trong ngày là tự động chốt két</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.daily_profit_target_enabled ?? true}
+                    onChange={(e) => setSettings({ ...settings, daily_profit_target_enabled: e.target.checked })}
+                    style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "#10b981" }}
+                  />
+                </div>
+
+                <div style={{ opacity: (settings.daily_profit_target_enabled ?? true) ? 1 : 0.4, transition: "opacity 0.2s" }}>
+                  <label style={{ fontSize: "12px", color: "var(--text-secondary)", display: "block", marginBottom: "6px" }}>
+                    Chỉ tiêu lãi ròng mục tiêu mỗi ngày (USDT):
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="1"
+                      max="1000"
+                      className="form-input"
+                      style={{ width: "120px", fontWeight: 700, color: "#10b981" }}
+                      value={settings.daily_profit_target_usdt ?? 8.0}
+                      disabled={!(settings.daily_profit_target_enabled ?? true)}
+                      onChange={(e) => setSettings({ ...settings, daily_profit_target_usdt: parseFloat(e.target.value) || 8.0 })}
+                    />
+                    <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>USDT / ngày (Khuyên dùng: 8 - 15 USDT với vốn $300)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Basket Trailing Profit Section */}
+              <div style={{ padding: "16px", background: "rgba(0,0,0,0.25)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#fff", fontSize: "13px" }}>🛡️ Trailing Stop Khóa Lãi Rổ Vị Thế</div>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Bám đuôi đỉnh lãi danh mục thả nổi</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.basket_trailing_enabled ?? true}
+                    onChange={(e) => setSettings({ ...settings, basket_trailing_enabled: e.target.checked })}
+                    style={{ width: "20px", height: "20px", cursor: "pointer", accentColor: "#10b981" }}
+                  />
+                </div>
+
+                <div style={{ opacity: (settings.basket_trailing_enabled ?? true) ? 1 : 0.4, transition: "opacity 0.2s", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  <div>
+                    <label style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block", marginBottom: "4px" }}>
+                      Ngưỡng kích hoạt (USDT):
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="1"
+                      className="form-input"
+                      style={{ width: "100%", fontWeight: 700, color: "#3b82f6" }}
+                      value={settings.basket_trailing_trigger_usdt ?? 8.0}
+                      disabled={!(settings.basket_trailing_enabled ?? true)}
+                      onChange={(e) => setSettings({ ...settings, basket_trailing_trigger_usdt: parseFloat(e.target.value) || 8.0 })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "11px", color: "var(--text-secondary)", display: "block", marginBottom: "4px" }}>
+                      % Hồi lui từ đỉnh chốt:
+                    </label>
+                    <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <input
+                        type="number"
+                        step="1"
+                        min="5"
+                        max="90"
+                        className="form-input"
+                        style={{ width: "100%", fontWeight: 700, color: "#f59e0b" }}
+                        value={settings.basket_trailing_pullback_pct ?? 25.0}
+                        disabled={!(settings.basket_trailing_enabled ?? true)}
+                        onChange={(e) => setSettings({ ...settings, basket_trailing_pullback_pct: parseFloat(e.target.value) || 25.0 })}
+                      />
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "12px", fontStyle: "italic", background: "rgba(0,0,0,0.15)", padding: "8px 12px", borderRadius: "6px" }}>
+              💡 <strong>Cơ chế hoạt động thực tế:</strong> Khi các vị thế đang chạy có tổng lãi đạt <strong>+{(settings.basket_trailing_trigger_usdt ?? 8.0)} USDT</strong>, Bot lập tức đưa radar vào chế độ bám đuôi đỉnh (Trailing). 
+              Nếu thị trường bùng nổ lên cao hơn, đỉnh bám đuôi sẽ tự động dâng lên. Nếu thị trường đảo chiều giật lùi {(settings.basket_trailing_pullback_pct ?? 25.0)}% từ đỉnh, 
+              Bot sẽ gửi lệnh thị trường đóng sạch các vị thế để khóa trọn két sắt, loại bỏ hoàn toàn kịch bản lãi cả chục đô rồi bị tụt về âm vốn!
             </div>
           </div>
         </div>
