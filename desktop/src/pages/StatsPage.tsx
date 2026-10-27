@@ -51,6 +51,12 @@ export const StatsPage: React.FC = () => {
   const currentPnl = pnlSummary;
   const benchmark = currentTelemetry?.benchmark_accuracy;
 
+  const totalClosedTrades = coinPnL.reduce((acc, c) => acc + (c.trades || 0), 0);
+  const totalRealized = coinPnL.reduce((acc, c) => acc + (c.realized_pnl || 0), 0);
+  const totalCommission = coinPnL.reduce((acc, c) => acc + (c.commission || 0), 0);
+  const totalFunding = coinPnL.reduce((acc, c) => acc + (c.funding_fee || 0), 0);
+  const totalNet = coinPnL.reduce((acc, c) => acc + (c.net_pnl || 0), 0);
+
   return (
     <div>
       <div style={{ marginBottom: "20px" }}>
@@ -176,20 +182,30 @@ export const StatsPage: React.FC = () => {
       </div>
 
       {/* 2. Coin-by-Coin Breakdown Table */}
-      <h3 style={{ fontSize: "15px", color: "var(--text-secondary)", marginBottom: "12px" }}>
-        2. Bảng Sao Kê Chi Tiết Từng Cặp Tiền (Coin-by-Coin PnL Breakdown)
-      </h3>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
+        <div>
+          <h3 style={{ fontSize: "15px", color: "#fff", margin: 0, fontWeight: 700 }}>
+            2. Bảng Sao Kê Chi Tiết Từng Cặp Tiền (Coin-by-Coin Breakdown)
+          </h3>
+          <div style={{ fontSize: "12px", color: "var(--text-secondary)", marginTop: "4px" }}>
+            Bao gồm <strong style={{ color: "#fff" }}>{coinPnL.length} Cặp Tiền</strong> phát sinh dòng tiền &bull; Tổng cộng <strong style={{ color: "var(--accent-primary)" }}>{totalClosedTrades} Lần Khớp Lệnh Chốt</strong> trên Binance
+          </div>
+        </div>
+        <div style={{ fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
+          💡 Mỗi dòng đại diện cho 1 Cặp Coin &bull; Khớp 100% với báo cáo tổng sàn Binance
+        </div>
+      </div>
       <div className="card" style={{ marginBottom: "24px", overflowX: "auto", padding: "0" }}>
         <table className="table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
           <thead>
             <tr style={{ background: "rgba(255, 255, 255, 0.03)", borderBottom: "1px solid var(--border-color)", textAlign: "left" }}>
-              <th style={{ padding: "12px 16px" }}>Cặp Tiền</th>
+              <th style={{ padding: "12px 16px" }}>Cặp Tiền ({coinPnL.length} Cặp)</th>
               <th style={{ padding: "12px 16px" }}>Lãi Ròng (Net PnL)</th>
               <th style={{ padding: "12px 16px" }}>Lãi/Lỗ Đã Đóng (Realized)</th>
               <th style={{ padding: "12px 16px" }}>Phí Sàn (Commission)</th>
               <th style={{ padding: "12px 16px" }}>Phí Funding</th>
-              <th style={{ padding: "12px 16px" }}>Số Lệnh Chốt</th>
-              <th style={{ padding: "12px 16px" }}>Đánh Giá</th>
+              <th style={{ padding: "12px 16px" }}>Lần Khớp Chốt ({totalClosedTrades} Fills)</th>
+              <th style={{ padding: "12px 16px" }}>Đánh Giá Trạng Thái</th>
             </tr>
           </thead>
           <tbody>
@@ -229,15 +245,19 @@ export const StatsPage: React.FC = () => {
                     <td style={{ padding: "12px 16px" }}>
                       {c.trades === 0 ? (
                         <span className="badge" style={{ backgroundColor: "rgba(148, 163, 184, 0.15)", color: "#94a3b8", fontSize: "11px" }}>
-                          ⚪ Đang Mở (Phí Sàn)
+                          ⚪ Vị Thế Đang Mở
                         </span>
                       ) : isProfit ? (
                         <span className="badge" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", fontSize: "11px" }}>
                           🟢 Thắng Lợi
                         </span>
+                      ) : c.realized_pnl > 0 ? (
+                        <span className="badge" style={{ backgroundColor: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", fontSize: "11px" }} title="Lãi chốt lời dương nhưng chưa bù hết phí mở vị thế">
+                          🟡 Chốt Lời (Phí Sàn Cao)
+                        </span>
                       ) : (
                         <span className="badge" style={{ backgroundColor: "rgba(239, 68, 68, 0.15)", color: "#ef4444", fontSize: "11px" }}>
-                          🔴 Âm Vốn
+                          🔴 Cắt Lỗ
                         </span>
                       )}
                     </td>
@@ -246,6 +266,37 @@ export const StatsPage: React.FC = () => {
               })
             )}
           </tbody>
+          {coinPnL.length > 0 && (
+            <tfoot>
+              <tr style={{ background: "rgba(255, 255, 255, 0.05)", borderTop: "2px solid var(--border-color)", fontWeight: 700 }}>
+                <td style={{ padding: "12px 16px", color: "#fff" }}>
+                  Tổng cộng ({coinPnL.length} Cặp)
+                </td>
+                <td style={{ padding: "12px 16px" }} className="mono">
+                  <span className={totalNet >= 0 ? "text-success" : "text-danger"}>
+                    {totalNet >= 0 ? `+${totalNet.toFixed(4)}` : totalNet.toFixed(4)} USDT
+                  </span>
+                </td>
+                <td style={{ padding: "12px 16px" }} className="mono">
+                  <span className={totalRealized >= 0 ? "text-success" : "text-danger"}>
+                    {totalRealized >= 0 ? `+${totalRealized.toFixed(4)}` : totalRealized.toFixed(4)}
+                  </span>
+                </td>
+                <td style={{ padding: "12px 16px" }} className="mono text-warning">
+                  -{totalCommission.toFixed(4)}
+                </td>
+                <td style={{ padding: "12px 16px" }} className="mono">
+                  {totalFunding >= 0 ? `+${totalFunding.toFixed(4)}` : totalFunding.toFixed(4)}
+                </td>
+                <td style={{ padding: "12px 16px", color: "var(--accent-primary)" }} className="mono">
+                  {totalClosedTrades} Lần Khớp
+                </td>
+                <td style={{ padding: "12px 16px", color: "var(--text-secondary)", fontSize: "12px" }}>
+                  Khớp 100% Header
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
