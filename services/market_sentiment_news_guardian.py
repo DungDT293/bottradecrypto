@@ -422,11 +422,12 @@ Respond ONLY with a valid JSON object matching this schema:
 }}"""
 
         models_to_try = [
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-4-argon",
+            "gemini-3.1-flash-lite",
             "gemini-flash-latest",
-            "gemini-1.5-flash",
-            "gemini-2.0-flash",
+            "gemini-2.5-flash",
         ]
 
         payload = {
@@ -519,6 +520,23 @@ Respond ONLY with a valid JSON object matching this schema:
                 "Thị trường giằng co trong biên độ hẹp. Chỉ giao dịch khi đạt tỷ lệ R:R >= 2.0 và "
                 "điểm tin cậy >= 80%. Tuân thủ nghiêm ngặt giới hạn ký quỹ và Zero-Liquidation."
             )
+
+        # Collect and format real breaking headlines from Binance Announcements & Global Crypto RSS
+        real_headlines_formatted: List[str] = []
+        for h in headlines:
+            clean_h = h.strip()
+            if clean_h and clean_h not in real_headlines_formatted:
+                real_headlines_formatted.append(clean_h)
+            if len(real_headlines_formatted) >= 4:
+                break
+
+        if not drivers and real_headlines_formatted:
+            drivers = [f"Tin nóng thực tế: {h}" for h in real_headlines_formatted]
+        elif real_headlines_formatted and len(drivers) < 3:
+            for rh in real_headlines_formatted:
+                cand = f"Tin quốc tế: {rh}"
+                if cand not in drivers and len(drivers) < 4:
+                    drivers.append(cand)
 
         if not drivers:
             drivers = [

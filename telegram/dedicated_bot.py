@@ -1479,9 +1479,11 @@ class DedicatedTelegramBot:
     # =========================================================================
 
     async def _send_morning_intel(self) -> None:
-        """08:00 AM VN: Bản tin tình báo sáng sớm cho Ngài Leon."""
+        """08:00 AM VN: Bản tin tình báo sáng sớm phân tích tin tức thị trường thực tế cho Ngài Leon."""
         try:
             from exchange.binance_client import BinanceFuturesClient
+            from services.market_sentiment_news_guardian import MarketSentimentNewsGuardian
+
             client = BinanceFuturesClient(self.config)
             btc_ctx = await client.get_market_trend_context("BTCUSDT")
             positions = await client.get_open_positions()
@@ -1490,21 +1492,51 @@ class DedicatedTelegramBot:
             btc_p = btc_ctx.get("last_close", 0.0)
             btc_chg = btc_ctx.get("change_24h", 0.0)
             pos_cnt = len(positions)
-
             trend_emoji = "🟢" if btc_chg >= 0 else "🔴"
+
+            # Cào và phân tích tin tức thị trường thực tế từ Binance Announcements và CoinTelegraph RSS
+            ai_cfg = getattr(self.config, "ai_trader", None)
+            gemini_key = (getattr(ai_cfg, "api_key", None) if ai_cfg else None) or os.getenv("GEMINI_API_KEY")
+
+            guardian = MarketSentimentNewsGuardian(config=self.config)
+            brief = await guardian.generate_macro_market_news_briefing(
+                btc_price=btc_p,
+                btc_change_24h=btc_chg,
+                gemini_api_key=gemini_key,
+            )
+            await guardian.close()
+
+            drivers = brief.get("market_drivers", [])
+            headlines_preview = []
+            for d in drivers[:3]:
+                clean_d = d.replace("<", "&lt;").replace(">", "&gt;")
+                headlines_preview.append(f"• <i>{clean_d}</i>")
+            news_block = "\n".join(headlines_preview) if headlines_preview else "• <i>Thị trường thanh khoản ổn định, dòng tiền tập trung ở Top Coin.</i>"
+
+            strategy = brief.get("top35_strategy", "Tuân thủ kỷ luật dừng lỗ và chốt lời từng phần.").replace("<", "&lt;").replace(">", "&gt;")
+            regime = brief.get("macro_regime", "TÍCH LŨY BIÊN ĐỘ HẸP")
+            score = brief.get("sentiment_score", 0)
+            model_used = brief.get("model_used", "Quant Sentinel NLP")
+
             text = (
                 "🌅 <b>[JARVIS PROTOCOL: BẢN TIN TÌNH BÁO BUỔI SÁNG 08:00 AM]</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "<i>Chào buổi sáng Ngài Leon! Chúc Ngài một ngày mới giao dịch đại thắng.\n"
-                "Hệ thống định lượng báo cáo tình hình đầu ngày:</i>\n\n"
+                "Hệ thống định lượng báo cáo bối cảnh thị trường thực tế đầu ngày:</i>\n\n"
                 f"• Giá Bitcoin (BTC): <code>${btc_p:,.2f}</code> ({trend_emoji} <b>{btc_chg:+.2f}%</b>)\n"
-                f"• Vị thế đang giữ: <b>{pos_cnt} vị thế</b> (Được bảo vệ bởi SL &amp; Zero-Liq)\n"
-                f"• Radar Lượng Tử: 🟢 <b>Sẵn sàng săn kèo đẹp trong phiên</b>\n"
+                f"• Vĩ mô &amp; Xu hướng: <b>{regime}</b> (Tâm lý: <b>{score:+d}/100</b>)\n"
+                f"• Vị thế đang giữ: <b>{pos_cnt} vị thế</b> (Bảo vệ bởi SL &amp; Zero-Liq)\n"
+                f"• Nguồn phân tích: <code>{model_used}</code>\n\n"
+                "🔥 <b>ĐIỂM TIN NÓNG THỊ TRƯỜNG &amp; BINANCE:</b>\n"
+                f"{news_block}\n\n"
+                "🎯 <b>KẾ HOẠCH TÁC CHIẾN HÔM NAY:</b>\n"
+                f"💡 <i>{strategy}</i>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "💡 <i>Bấm '🎯 Jarvis Radar' để quét ngay các vùng hợp lưu tiềm năng nhất hôm nay!</i>"
             )
             markup = {"inline_keyboard": [
-                [{"text": "🎯 Quét Radar Sáng Nay", "callback_data": "nav_scan"}, {"text": "📊 Xem Vị Thế", "callback_data": "nav_positions"}]
+                [{"text": "🎯 Quét Radar Sáng Nay", "callback_data": "nav_scan"}, {"text": "📊 Xem Vị Thế", "callback_data": "nav_positions"}],
+                [{"text": "📰 Điểm Tin Chi Tiết", "callback_data": "nav_news"}, {"text": "🌐 Nhịp Đập Thị Trường", "callback_data": "nav_pulse"}]
             ]}
             await self.broadcast(text, reply_markup=markup)
         except Exception as e:
