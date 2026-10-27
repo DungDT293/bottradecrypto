@@ -707,11 +707,121 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "12px", fontStyle: "italic", background: "rgba(0,0,0,0.15)", padding: "8px 12px", borderRadius: "6px" }}>
-              💡 <strong>Cơ chế hoạt động thực tế:</strong> Khi các vị thế đang chạy có tổng lãi đạt <strong>+{(settings.basket_trailing_trigger_usdt ?? 8.0)} USDT</strong>, Bot lập tức đưa radar vào chế độ bám đuôi đỉnh (Trailing). 
-              Nếu thị trường bùng nổ lên cao hơn, đỉnh bám đuôi sẽ tự động dâng lên. Nếu thị trường đảo chiều giật lùi {(settings.basket_trailing_pullback_pct ?? 25.0)}% từ đỉnh, 
-              Bot sẽ gửi lệnh thị trường đóng sạch các vị thế để khóa trọn két sắt, loại bỏ hoàn toàn kịch bản lãi cả chục đô rồi bị tụt về âm vốn!
-            </div>
+            {/* Presets and Realtime Simulation */}
+            {(() => {
+              const trigVal = Number(settings.basket_trailing_trigger_usdt) || 8.0;
+              const pbVal = Number(settings.basket_trailing_pullback_pct) || 25.0;
+              const dailyVal = Number(settings.daily_profit_target_usdt) || 8.0;
+              const minLock = (trigVal * (1 - pbVal / 100)).toFixed(2);
+              const pumpPeak = Math.max(20.0, Math.round(trigVal * 1.6 * 2) / 2);
+              const pumpLock = (pumpPeak * (1 - pbVal / 100)).toFixed(2);
+              const isTrailingOn = settings.basket_trailing_enabled ?? true;
+              const isDailyOn = settings.daily_profit_target_enabled ?? true;
+
+              return (
+                <div style={{ marginTop: "16px" }}>
+                  {/* Presets buttons */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600 }}>Chọn nhanh mẫu chuẩn:</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: "11px", padding: "4px 10px", borderColor: "rgba(16, 185, 129, 0.4)", color: "#10b981" }}
+                      onClick={() => setSettings({
+                        ...settings,
+                        daily_profit_target_enabled: true,
+                        daily_profit_target_usdt: 10.0,
+                        basket_trailing_enabled: true,
+                        basket_trailing_trigger_usdt: 10.0,
+                        basket_trailing_pullback_pct: 15.0,
+                      })}
+                    >
+                      🛡️ Mẫu An Toàn (10$ Trailing / 15% Hồi lui / 10$ Ngày)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: "11px", padding: "4px 10px", borderColor: "rgba(59, 130, 246, 0.4)", color: "#38bdf8" }}
+                      onClick={() => setSettings({
+                        ...settings,
+                        daily_profit_target_enabled: true,
+                        daily_profit_target_usdt: 15.0,
+                        basket_trailing_enabled: true,
+                        basket_trailing_trigger_usdt: 13.0,
+                        basket_trailing_pullback_pct: 15.0,
+                      })}
+                    >
+                      ⚖️ Mẫu Cân Bằng (13$ Trailing / 15% Hồi lui / 15$ Ngày)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: "11px", padding: "4px 10px", borderColor: "rgba(245, 158, 11, 0.4)", color: "#f59e0b" }}
+                      onClick={() => setSettings({
+                        ...settings,
+                        daily_profit_target_enabled: true,
+                        daily_profit_target_usdt: 25.0,
+                        basket_trailing_enabled: true,
+                        basket_trailing_trigger_usdt: 20.0,
+                        basket_trailing_pullback_pct: 20.0,
+                      })}
+                    >
+                      🚀 Mẫu Sóng Lớn (20$ Trailing / 20% Hồi lui / 25$ Ngày)
+                    </button>
+                  </div>
+
+                  {/* Visual Simulation Card */}
+                  <div style={{ background: "rgba(0,0,0,0.35)", borderRadius: "8px", padding: "14px 16px", border: "1px solid rgba(16, 185, 129, 0.2)" }}>
+                    <div style={{ fontSize: "12px", fontWeight: 700, color: "#fff", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span>📊 BẢNG DIỄN GIẢI THỰC TẾ THEO THIẾT LẬP CỦA BẠN:</span>
+                      <span style={{ fontSize: "11px", fontWeight: 600, color: "#10b981" }}>(Tự động tính theo con số bạn vừa điền)</span>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "12px" }}>
+                      {/* Left: Daily Target Explanation */}
+                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: "6px", padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ fontWeight: 600, color: isDailyOn ? "#10b981" : "#94a3b8", display: "flex", justifyContent: "space-between" }}>
+                          <span>🎯 Khóa Lãi Theo Ngày:</span>
+                          <span>{isDailyOn ? `🟢 BẬT (${dailyVal.toFixed(1)}$ / ngày)` : "⚪ ĐANG TẮT"}</span>
+                        </div>
+                        <div style={{ color: "var(--text-secondary)", marginTop: "6px", lineHeight: "1.5" }}>
+                          {isDailyOn ? (
+                            <>
+                              Khi tổng tiền lãi hôm nay <em>(Lãi đã chốt + Lãi các lệnh đang gồng)</em> đạt mốc <strong style={{ color: "#10b981" }}>+{dailyVal.toFixed(2)} USDT</strong>:
+                              <br />
+                              ➔ Bot lập tức <strong>gửi lệnh Market đóng sạch mọi vị thế</strong>, khóa chặt két sắt và hoàn thành xuất sắc chỉ tiêu ngày!
+                            </>
+                          ) : (
+                            <>Chế độ này đang tắt. Bot sẽ để các lệnh chạy theo TP/SL cá nhân mà không tự đóng toàn bộ danh mục theo ngày.</>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Trailing Stop Explanation */}
+                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: "6px", padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ fontWeight: 600, color: isTrailingOn ? "#38bdf8" : "#94a3b8", display: "flex", justifyContent: "space-between" }}>
+                          <span>🛡️ Trailing Stop Khóa Lãi Rổ:</span>
+                          <span>{isTrailingOn ? `🟢 BẬT (≥ ${trigVal.toFixed(1)}$ | Hồi ${pbVal}%)` : "⚪ ĐANG TẮT"}</span>
+                        </div>
+                        <div style={{ color: "var(--text-secondary)", marginTop: "6px", lineHeight: "1.5" }}>
+                          {isTrailingOn ? (
+                            <>
+                              • <strong>Mốc 1 (Bật Giáp):</strong> Khi rổ lệnh lãi chạm <strong style={{ color: "#38bdf8" }}>+{trigVal.toFixed(2)}$</strong> ➔ Kích hoạt radar bám đỉnh. Mức bảo vệ tối thiểu: <strong style={{ color: "#10b981" }}>+{minLock}$</strong> <em>(giữ lại {(100 - pbVal).toFixed(0)}% lãi)</em>.
+                              <br />
+                              • <strong>Mốc 2 (Lãi bay tiếp):</strong> Nếu lãi vọt lên <strong style={{ color: "#38bdf8" }}>+{pumpPeak.toFixed(2)}$</strong> ➔ Mốc tự chốt nâng theo lên <strong style={{ color: "#10b981" }}>+{pumpLock}$</strong>!
+                              <br />
+                              • <strong>Mốc 3 (Tự chốt khi đảo chiều):</strong> Khi lãi từ đỉnh tụt <strong style={{ color: "#ef4444" }}>{pbVal}%</strong> ➔ Bot <strong>đóng toàn bộ vị thế ngay lập tức</strong>, không để bị âm vốn ngược!
+                            </>
+                          ) : (
+                            <>Chế độ này đang tắt. Vị thế sẽ chỉ phụ thuộc vào TP/SL cá nhân từng lệnh.</>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

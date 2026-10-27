@@ -16,3 +16,4 @@
     nsExec::Exec 'taskkill.exe /F /T /IM "telegram-binance-signal-executor.exe"'
     Sleep 1500
 !macroend
+

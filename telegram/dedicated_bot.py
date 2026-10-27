@@ -1639,12 +1639,24 @@ Respond ONLY with valid JSON:
             else:
                 key_txt = "⚪ <b>Quant-Sentinel Rule Engine (0ms Fallback)</b>"
 
+            risk_cfg = getattr(self.config, "risk", None)
+            bt_on = getattr(risk_cfg, "basket_trailing_enabled", True)
+            bt_trig = getattr(risk_cfg, "basket_trailing_trigger_usdt", 8.0)
+            bt_pb = getattr(risk_cfg, "basket_trailing_pullback_pct", 25.0)
+            dt_on = getattr(risk_cfg, "daily_profit_target_enabled", True)
+            dt_val = getattr(risk_cfg, "daily_profit_target_usdt", 8.0)
+
+            bt_txt = f"🟢 <b>Kích hoạt ≥ +{bt_trig}$ (Hồi {bt_pb}% chốt)</b>" if bt_on else "⚪ <b>ĐANG TẮT</b>"
+            dt_txt = f"🟢 <b>Mục tiêu +{dt_val}$/ngày</b>" if dt_on else "⚪ <b>ĐANG TẮT</b>"
+
             text = (
                 "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR v2.8.0 (JARVIS QUANTUM VPS MASTER)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"• Chế độ giao dịch: <b>{mode} (TIỀN THẬT LIVE)</b>\n"
                 f"• Ferrari Mode: <b>{ferrari_txt}</b>\n"
                 "• Bảo vệ rủi ro: 🟢 <b>Zero-Liquidation Invariant (Bất biến)</b>\n"
+                f"• Giáp Khóa Lãi Rổ: {bt_txt}\n"
+                f"• Khóa Lãi Theo Ngày: {dt_txt}\n"
                 "• Kèo Bất Tử: 🟢 <b>Kích hoạt sớm (+0.8% Gain = +16% ROE)</b>\n"
                 "• Bộ lọc vĩ mô 4H: 🟢 <b>4H Macro Trend Shield (Chặn ngược trend)</b>\n"
                 f"• Trạm điều phối Gemini Pool: {key_txt}\n"
