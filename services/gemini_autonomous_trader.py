@@ -486,7 +486,8 @@ class GeminiAutonomousTrader:
         - Risk Management Guardian: Enforces minimum 2.0 R:R and capital preservation.
         - Head Trader: Synthesizes consensus. Approves ONLY when conviction is high (>= 75%).
         """
-        if not api_key or time.time() < self._api_cooldown_until:
+        effective_key = api_key or self.gemini_api_key or (self.key_rotator.get_next_key() if self.key_rotator else None)
+        if not effective_key or time.time() < self._api_cooldown_until:
             return None
 
         # Reset daily counter if new day UTC
@@ -535,16 +536,16 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
 
         # Ultra-reliable free-tier & high-throughput models (verified 100% on active pool)
         available_models = [
-            "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-flash-lite-latest",
             "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
             "gemini-3.8-flash",
         ]
-        pref = getattr(self, "preferred_model", "gemini-3.5-flash")
-        # If user picked Argon on Free Tier (limit: 0), fallback to flash/flash-lite seamlessly
+        pref = getattr(self, "preferred_model", "gemini-3.5-flash-lite")
+        # If user picked Argon on Free Tier (limit: 0), fallback to flash-lite seamlessly
         if pref == "gemini-4-argon" or pref not in available_models:
-            pref = "gemini-3.5-flash"
+            pref = "gemini-3.5-flash-lite"
 
         models_to_try = [pref] + [m for m in available_models if m != pref]
 
@@ -595,12 +596,8 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                                     key_failed = True
                                     break
                                 if resp.status == 429:
-                                    if "limit: 0" in err_txt:
-                                        logger.debug(f"[AITrader] Model {model_name} has 0 quota on this tier, trying next model...")
-                                        continue
-                                    self.key_rotator.mark_rate_limited(active_key, cooldown_seconds=60.0, error_msg=err_txt)
-                                    key_failed = True
-                                    break
+                                    logger.debug(f"[AITrader] Model {model_name} returned 429 on key {active_key[:6]}..., trying next model...")
+                                    continue
                                 if resp.status == 402 or "prepay" in err_txt.lower():
                                     self.key_rotator.mark_depleted(active_key, err_txt)
                                     key_failed = True
@@ -611,8 +608,11 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                         logger.warning(f"Error querying {model_name} with key {active_key[:6]}...: {e_mod}")
                         continue
 
-                if not key_failed:
-                    break
+                if key_failed:
+                    continue
+                # If we tried all models on this key and none succeeded, rotate key
+                self.key_rotator.mark_rate_limited(active_key, cooldown_seconds=60.0, error_msg="All models exhausted quota on this key")
+                break
         except Exception as e:
             logger.warning(f"Gemini analysis error for {snapshot['symbol']}: {e}")
 
