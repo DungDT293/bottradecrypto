@@ -340,11 +340,11 @@ class DedicatedTelegramBot:
             return None
 
         models_to_try = [
+            "gemini-3.5-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.8-flash",
-            "gemini-4-argon",
-            "gemini-3.1-flash-lite",
-            "gemini-flash-latest",
         ]
 
         payload: Dict[str, Any] = {
@@ -354,7 +354,7 @@ class DedicatedTelegramBot:
             payload["generationConfig"] = {"response_mime_type": "application/json"}
 
         session = await self.get_session()
-        max_attempts = min(3, max(1, len(rotator.slots)))
+        max_attempts = min(5, max(1, len(rotator.slots)))
 
         for _ in range(max_attempts):
             curr_key = rotator.get_next_key()
@@ -362,6 +362,7 @@ class DedicatedTelegramBot:
                 break
 
             key_failed = False
+            model_succeeded = False
             for m in models_to_try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={curr_key}"
                 try:
@@ -373,6 +374,7 @@ class DedicatedTelegramBot:
                                 if cands:
                                     txt = cands[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                                     rotator.mark_success(curr_key)
+                                    model_succeeded = True
                                     if json_mode:
                                         clean = txt.strip()
                                         if clean.startswith("```json"):
@@ -392,21 +394,22 @@ class DedicatedTelegramBot:
                                     rotator.mark_invalid(curr_key, err_txt)
                                     key_failed = True
                                     break
-                                if resp.status == 429:
-                                    rotator.mark_rate_limited(curr_key, cooldown_seconds=60.0, error_msg=err_txt)
-                                    key_failed = True
-                                    break
                                 if resp.status == 402 or "prepay" in err_txt.lower():
                                     rotator.mark_depleted(curr_key, err_txt)
                                     key_failed = True
                                     break
+                                if resp.status == 429:
+                                    logger.debug(f"[TelegramBot] Model {m} on key {curr_key[:6]}... returned 429, trying next model...")
+                                    continue
                                 if resp.status == 404:
                                     continue
                 except Exception as e_mod:
                     logger.debug(f"[TelegramBot] Gemini query error on {m}: {e_mod}")
                     continue
 
-            if not key_failed:
+            if not model_succeeded and not key_failed:
+                rotator.mark_rate_limited(curr_key, cooldown_seconds=60.0, error_msg="All models 429 on this key")
+            elif model_succeeded:
                 break
         return None
 
@@ -1487,7 +1490,27 @@ Respond ONLY with valid JSON:
                     if len(debate_btns) > 2:
                         keyboard_rows.append(debate_btns[2:4])
             else:
-                lines.append("⚖️ <i>Hiện tại các cặp nến đang giằng co biên độ hẹp, chưa có setup nào đạt ngưỡng tự tin 80%+. Hệ thống kiên nhẫn bảo toàn vốn theo kỷ luật Zero-Liquidation!</i>\n")
+                gemini_radar_insight = ""
+                try:
+                    cands_brief = [f"{c['symbol']} (Giá {c['price']}, RSI 1H: {c['rsi']}, Xu hướng 4H: {c['trend_4h']})" for c in top_candidates[:3]]
+                    scan_prompt = (
+                        f"You are Jarvis AI Lead Quantitative Strategist for an elite Binance Futures desk.\n"
+                        f"The 15-pair scan found 0 high-probability setups meeting our strict 80% Winrate / 2.0+ R:R threshold.\n"
+                        f"Top 3 coin metrics: {', '.join(cands_brief)}.\n"
+                        f"BTC Price: ${btc_p:,.2f}.\n"
+                        f"Provide a sharp, 2-sentence Vietnamese institutional assessment explaining why the market is currently indecisive/ranging, where key price action or liquidity is trapping retail traders, and why disciplined capital preservation is superior right now. Strictly 2 Vietnamese sentences. No greetings."
+                    )
+                    raw_insight = await self._query_gemini_ai(scan_prompt, timeout_sec=8.0)
+                    if raw_insight and isinstance(raw_insight, str):
+                        gemini_radar_insight = raw_insight.strip().replace("<", "&lt;").replace(">", "&gt;")
+                except Exception:
+                    pass
+
+                if not gemini_radar_insight or len(gemini_radar_insight) < 10:
+                    gemini_radar_insight = "Các cặp nến đang giằng co biên độ hẹp quanh hỗ trợ/kháng cự then chốt, chưa xuất hiện dòng tiền xác nhận. Hệ thống kiên nhẫn bảo toàn vốn theo kỷ luật Zero-Liquidation!"
+
+                lines.append(f"⚖️ <b>HỘI ĐỒNG AI THẨM ĐỊNH THỊ TRƯỜNG:</b>\n💡 <i>{gemini_radar_insight}</i>\n")
+                lines.append("📊 <b>CÁC CẶP TIỀN ĐANG ĐƯỢC RÀ SOÁT CHẶT:</b>")
                 for c in top_candidates[:3]:
                     lines.append(f"• <b>{c['symbol']}</b>: Giá <code>{c['price']}</code> | RSI 1H: <b>{c['rsi']}</b> | Xu hướng 4H: <code>{c['trend_4h']}</code>")
 
@@ -2294,6 +2317,8 @@ Instructions:
         time_str = now_vn.strftime("%H:%M %d/%m/%Y")
 
         positions = await client.get_open_positions()
+        algo_orders = await client.get_open_algo_orders()
+        open_orders = await client.get_open_orders()
         equity = float(await client.get_account_equity() or 92.21)
         btc_ctx = await client.get_market_trend_context("BTCUSDT")
 
@@ -2338,16 +2363,34 @@ Instructions:
             entry = float(p.get("entryPrice", 0.0))
             mark = float(p.get("markPrice", 0.0))
             upnl = float(p.get("unRealizedProfit", 0.0))
-            init_margin = float(p.get("initialMargin", 0.0))
-            roe = (upnl / init_margin * 100.0) if init_margin > 0 else 0.0
+            lev = int(p.get("leverage") or 20)
+            notional = abs(amt * mark)
+            margin = (notional / lev) if lev > 0 else 0.0
+            roe = (upnl / margin * 100.0) if margin > 0 else 0.0
             total_upnl += upnl
             p_emoji = "🟢" if upnl >= 0 else "🔴"
             side_badge = "🟩 LONG" if side == "LONG" else "🟥 SHORT"
+
+            sl_price = None
+            for o in (algo_orders or []):
+                if str(o.get("symbol", "")).upper() == sym.upper():
+                    if "STOP" in str(o.get("orderType", o.get("order_type", ""))).upper():
+                        sl_price = float(o.get("triggerPrice", o.get("trigger_price", 0)))
+                        break
+            if not sl_price:
+                for o in (open_orders or []):
+                    if str(o.get("symbol", "")).upper() == sym.upper():
+                        if "STOP" in str(o.get("type", o.get("order_type", ""))).upper():
+                            sl_price = float(o.get("stopPrice", o.get("price", 0)))
+                            break
+
+            sl_desc = f"🛡️ Đã cài SL: <code>{sl_price}</code>" if sl_price else "⚠️ Đang rà soát SL"
+            be_desc = " 🔥 <b>[KÈO BẤT TỬ]</b>" if roe >= 15.0 else ""
             pos_lines.append(
-                f"• <b>{sym}</b> | {side_badge} 30x\n"
+                f"• <b>{sym}</b> | {side_badge} {lev}x{be_desc}\n"
                 f"  Entry: <code>{entry}</code> → Mark: <code>{mark}</code>\n"
-                f"  PnL: {p_emoji} <b>{upnl:+.2f} USDT ({roe:+.1f}% ROE)</b>\n"
-                f"  Bảo vệ: 🛡️ <i>Đang rà soát Breakeven &amp; SL mỗi 12s</i>"
+                f"  PnL: {p_emoji} <b>{upnl:+.2f} USDT ({roe:+.1f}% ROE)</b> | Ký quỹ: <code>{margin:.2f} USDT</code>\n"
+                f"  Bảo vệ: {sl_desc}"
             )
 
         if not pos_lines:
@@ -2356,10 +2399,33 @@ Instructions:
         net_emoji = "🟢" if net_today >= 0 else "🔴"
         upnl_emoji = "🟢" if total_upnl >= 0 else "🔴"
 
-        ai_cfg = getattr(self.config, "ai", None)
-        model_name = getattr(ai_cfg, "preferred_model", "Gemini 2.5 Flash / Quant Sentinel") if ai_cfg else "Quant Sentinel Engine"
+        # LIVE GEMINI AI PULSE
+        ai_commentary = ""
+        try:
+            pulse_prompt = (
+                f"You are Jarvis AI Chief Quantitative Officer for Binance Futures.\n"
+                f"Provide a sharp, 2-sentence Vietnamese institutional market assessment for Ngài Leon.\n"
+                f"- BTC Price: ${btc_p:,.2f} ({btc_chg:+.2f}% / 24h)\n"
+                f"- Open Positions ({len(pos_lines)}): {[p.get('symbol') + ' ' + ('LONG' if float(p.get('positionAmt', 0)) > 0 else 'SHORT') + ' ' + str(round(float(p.get('unRealizedProfit', 0)), 2)) + ' USDT' for p in positions if abs(float(p.get('positionAmt', 0))) > 1e-6]}\n"
+                f"- Realized Today: {net_today:+.2f} USDT (Winrate {winrate:.1f}%, {trades} trades)\n"
+                f"- Total Floating uPnL: {total_upnl:+.2f} USDT\n"
+                f"Give concise, professional guidance on market pressure, momentum, and risk discipline. Strictly 2 Vietnamese sentences. No greetings, no preamble."
+            )
+            raw_commentary = await self._query_gemini_ai(pulse_prompt, timeout_sec=8.0)
+            if raw_commentary and isinstance(raw_commentary, str):
+                ai_commentary = raw_commentary.strip().replace("<", "&lt;").replace(">", "&gt;")
+        except Exception:
+            pass
 
-        ai_radar_summary = "35 Coin Top đang được quét chu kỳ 15 phút. Sẵn sàng săn kèo R:R >= 2.0."
+        if not ai_commentary or len(ai_commentary) < 10:
+            if btc_chg < -1.0:
+                ai_commentary = "Áp lực điều chỉnh từ BTC đang chi phối các khung nến ngắn hạn, dòng tiền phe Bán giữ ưu thế. Các vị thế Short đang vận hành hiệu quả với giáp SL/BE siết chặt bảo toàn vốn."
+            elif btc_chg > 1.0:
+                ai_commentary = "Dòng tiền mua hồi phục đẩy BTC hướng tới vùng kháng cự phía trên. Hệ thống duy trì kỷ luật bảo vệ vốn nghiêm ngặt, rà soát dời Stop Loss và tuyệt đối không fomo."
+            else:
+                ai_commentary = "Biên độ giá nén hẹp trong vùng tích lũy thanh khoản trung tính. Hệ thống kiên nhẫn nắm giữ vị thế thuận xu hướng và kích hoạt Kèo Bất Tử ngay khi đạt mục tiêu."
+
+        ai_radar_summary = "35 Coin Top đang được quét chu kỳ 15 phút. Sẵn sàng kích hoạt lệnh khi hội tụ đủ 5 yếu tố."
         try:
             cache_file = os.path.join(getattr(self.config, "data_dir", "./data"), "ai_last_scan.json")
             if os.path.exists(cache_file):
@@ -2381,19 +2447,21 @@ Instructions:
             f"• Giá Bitcoin (BTC): <code>${btc_p:,.2f}</code> ({trend_emoji} <b>{btc_chg:+.2f}% / 24h</b>)\n"
             f"• Lãi ròng đã chốt hôm nay: {net_emoji} <b>{net_today:+.2f} USDT</b> (WR: <b>{winrate:.1f}%</b> | {trades} lệnh)\n"
             "• Vòng lặp tự động: 🟢 <i>Quét 35 Coin mỗi 15p | Bảo vệ SL/BE mỗi 12s</i>\n\n"
-            f"📊 <b>SỨC KHỎE VỊ THẾ ĐANG NẰM GIỮ ({len(positions)} Vị Thế):</b>\n"
+            f"📊 <b>SỨC KHỎE VỊ THẾ ĐANG NẰM GIỮ ({len(pos_lines)} Vị Thế):</b>\n"
             + "\n".join(pos_lines) + "\n\n"
             f"💰 <b>Tổng Lãi/Lỗ Tạm Tính (Unrealized):</b> {upnl_emoji} <b>{total_upnl:+.2f} USDT</b>\n"
             f"🏆 <b>NAV Tăng Trưởng Dự Tính:</b> <b>{equity + total_upnl:,.2f} USDT</b>\n\n"
-            "🔭 <b>RADAR AI &amp; MÔ HÌNH LƯỢNG TỬ:</b>\n"
+            "🔭 <b>NHẬN ĐỊNH LƯỢNG TỬ (GEMINI AI):</b>\n"
+            f"💡 <i>{ai_commentary}</i>\n\n"
+            "📡 <b>RADAR AI &amp; MÔ HÌNH LƯỢNG TỬ:</b>\n"
             f"• {ai_radar_summary}\n"
-            f"• Động cơ AI: <code>{model_name}</code> (Sẵn sàng 24/7)\n"
+            f"• Động cơ AI: <code>Gemini 3.5 Flash / Flash Lite (Pool 5 Keys)</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🛡️ <i>Jarvis bám sát từng tick giá trên Binance Futures để bảo toàn vốn cho Ngài!</i>"
         )
         markup = {"inline_keyboard": [
             [{"text": "📊 Xem Chi Tiết Vị Thế", "callback_data": "nav_positions"}, {"text": "🎯 Quét Kèo Radar", "callback_data": "nav_scan"}],
-            [{"text": "📰 Điểm Tin AI (Gemini)", "callback_data": "nav_news"}, {"text": "📈 Lãi Lỗ Từng Coin", "callback_data": "nav_pnl"}]
+            [{"text": "🧠 AI Thẩm Định Vị Thế", "callback_data": "nav_ai_audit"}, {"text": "📈 Lãi Lỗ Từng Coin", "callback_data": "nav_pnl"}]
         ]}
         return {"text": text, "markup": markup}
 

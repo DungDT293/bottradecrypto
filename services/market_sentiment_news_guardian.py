@@ -423,10 +423,10 @@ Respond ONLY with a valid JSON object matching this schema:
 
         models_to_try = [
             "gemini-3.5-flash",
-            "gemini-3.8-flash",
-            "gemini-4-argon",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-lite-latest",
             "gemini-3.1-flash-lite",
-            "gemini-flash-latest",
+            "gemini-3.8-flash",
         ]
 
         payload = {
@@ -471,6 +471,9 @@ Respond ONLY with a valid JSON object matching this schema:
                                     key_failed = True
                                     break
                                 if resp.status == 429:
+                                    if "limit: 0" in err_txt:
+                                        logger.debug(f"[MarketNews] Model {m} has 0 limit on this tier, trying next model...")
+                                        continue
                                     rotator.mark_rate_limited(curr_key, cooldown_seconds=60.0, error_msg=err_txt)
                                     key_failed = True
                                     break

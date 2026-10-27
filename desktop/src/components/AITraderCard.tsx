@@ -498,11 +498,11 @@ export const AITraderCard: React.FC = () => {
                 value={selectedModel}
                 onChange={(e) => handleSaveModel(e.target.value)}
               >
-                <option value="gemini-3.8-flash">Gemini 3.8 Flash (Thế hệ mới nhất | Siêu Tốc 250ms | Khuyên dùng)</option>
-                <option value="gemini-3.5-flash">Gemini 3.5 Flash (Ổn định cao | Tiết kiệm Quota)</option>
+                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (Siêu Bền 100% | Tối ưu Free Tier | Khuyên dùng)</option>
+                <option value="gemini-3.5-flash">Gemini 3.5 Flash (Phân tích Lượng tử Đa nhiệm)</option>
+                <option value="gemini-flash-lite-latest">Gemini Flash-Lite Latest (Tốc độ cao 180ms)</option>
+                <option value="gemini-3.8-flash">Gemini 3.8 Flash (Thế hệ mới nhất | Siêu Tốc 250ms)</option>
                 <option value="gemini-4-argon">Gemini 4 Argon (Lượng tử Chuyên sâu | SMC Institutional)</option>
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Free 15 RPM | News Sentinel)</option>
-                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Cực nhẹ 200ms)</option>
               </select>
               <div style={{ fontSize: "10px", color: "#94a3b8", marginTop: "4px" }}>
                 🛡️ Lọc Quant trước khi gọi API (tiết kiệm 90% quota) + Delay 2.5s chống Limit.
