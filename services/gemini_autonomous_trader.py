@@ -111,7 +111,7 @@ class GeminiAutonomousTrader:
         self.enabled: bool = getattr(ai_cfg, "enabled", False) if ai_cfg else getattr(config, "ai_trading_enabled", False)
         self.gemini_api_key: Optional[str] = (getattr(ai_cfg, "api_key", None) if ai_cfg else None) or os.getenv("GEMINI_API_KEY")
         self.scan_interval_minutes: int = getattr(ai_cfg, "scan_interval_minutes", 15) if ai_cfg else 15
-        self.preferred_model: str = getattr(ai_cfg, "preferred_model", "gemini-2.0-flash") if ai_cfg else "gemini-2.0-flash"
+        self.preferred_model: str = getattr(ai_cfg, "preferred_model", "gemini-3.5-flash") if ai_cfg else "gemini-3.5-flash"
         self.min_confidence: int = getattr(ai_cfg, "min_confidence", 80) if ai_cfg else 80
         self.watchlist: List[str] = list(getattr(ai_cfg, "watchlist", DEFAULT_WATCHLIST)) if ai_cfg else list(DEFAULT_WATCHLIST)
         self._top_watchlist_cache: List[str] = []
@@ -535,15 +535,13 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
 
         # Official Google AI Studio lightweight free models (sub-second latency, generous free tier)
         available_models = [
-            "gemini-3.8-flash",
             "gemini-3.5-flash",
+            "gemini-3.8-flash",
             "gemini-4-argon",
             "gemini-3.1-flash-lite",
             "gemini-flash-latest",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
         ]
-        pref = getattr(self, "preferred_model", "gemini-3.8-flash")
+        pref = getattr(self, "preferred_model", "gemini-3.5-flash")
         if pref in available_models:
             models_to_try = [pref] + [m for m in available_models if m != pref]
         else:
@@ -595,12 +593,12 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                                     self.key_rotator.mark_invalid(active_key, err_txt)
                                     key_failed = True
                                     break
-                                if resp.status == 402 or "prepay" in err_txt.lower() or "resource_exhausted" in err_txt.lower():
-                                    self.key_rotator.mark_depleted(active_key, err_txt)
-                                    key_failed = True
-                                    break
                                 if resp.status == 429:
                                     self.key_rotator.mark_rate_limited(active_key, cooldown_seconds=60.0, error_msg=err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 402 or "prepay" in err_txt.lower():
+                                    self.key_rotator.mark_depleted(active_key, err_txt)
                                     key_failed = True
                                     break
                                 if resp.status == 404:

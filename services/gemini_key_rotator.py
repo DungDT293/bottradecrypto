@@ -78,32 +78,14 @@ class GeminiKeyRotator:
 
     def load_from_env(self, env_path: Optional[str] = None) -> int:
         """
-        Parses all possible Gemini API keys from environment and .env file.
-        Supports:
-        - GEMINI_API_KEY (single, or comma/semicolon/newline-delimited)
-        - GEMINI_API_KEYS (comma/semicolon/newline-delimited)
-        - GEMINI_API_KEY_1, GEMINI_API_KEY_2, ..., GEMINI_API_KEY_20
+        Parses all possible Gemini API keys.
+        Priority:
+        1. Read directly from .env file (user explicit config)
+        2. Fallback to os.environ if .env has no keys
         """
         collected_keys: List[str] = []
 
-        # 1. Read from os.environ
-        env_vars = ["GEMINI_API_KEYS", "GEMINI_API_KEY"]
-        for v in env_vars:
-            val = os.getenv(v)
-            if val:
-                for part in re.split(r"[,;\n\r\t]+", val):
-                    clean = part.strip()
-                    if clean and len(clean) >= 10:
-                        collected_keys.append(clean)
-
-        for i in range(1, 21):
-            val = os.getenv(f"GEMINI_API_KEY_{i}")
-            if val:
-                clean = val.strip()
-                if clean and len(clean) >= 10:
-                    collected_keys.append(clean)
-
-        # 2. Read directly from .env file if available
+        # 1. Read directly from .env file first (Primary Source of Truth)
         candidates = [env_path, ".env", "config/.env"]
         target_env = next((p for p in candidates if p and os.path.exists(p)), None)
         if target_env:
@@ -123,6 +105,24 @@ class GeminiKeyRotator:
                                     collected_keys.append(clean)
             except Exception as e:
                 logger.debug(f"[GeminiKeyRotator] Error parsing {target_env}: {e}")
+
+        # 2. If no keys in .env, fallback to os.environ
+        if not collected_keys:
+            env_vars = ["GEMINI_API_KEYS", "GEMINI_API_KEY"]
+            for v in env_vars:
+                val = os.getenv(v)
+                if val:
+                    for part in re.split(r"[,;\n\r\t]+", val):
+                        clean = part.strip()
+                        if clean and len(clean) >= 10:
+                            collected_keys.append(clean)
+
+            for i in range(1, 21):
+                val = os.getenv(f"GEMINI_API_KEY_{i}")
+                if val:
+                    clean = val.strip()
+                    if clean and len(clean) >= 10:
+                        collected_keys.append(clean)
 
         self.set_keys(collected_keys)
         return len(self.slots)
@@ -243,3 +243,4 @@ class GeminiKeyRotator:
             if s.api_key == clean:
                 return s
         return None
+

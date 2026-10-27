@@ -1741,7 +1741,7 @@ def create_api_router(
             "enabled": ai_trader.enabled,
             "has_gemini_key": bool(key) or key_pool_status.get("has_healthy", False),
             "gemini_key_masked": key_masked,
-            "preferred_model": getattr(ai_trader, "preferred_model", "gemini-2.0-flash"),
+            "preferred_model": getattr(ai_trader, "preferred_model", "gemini-3.5-flash"),
             "scan_interval_minutes": ai_trader.scan_interval_minutes,
             "min_confidence": ai_trader.min_confidence,
             "watchlist": ai_trader.watchlist,

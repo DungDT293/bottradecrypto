@@ -422,12 +422,11 @@ Respond ONLY with a valid JSON object matching this schema:
 }}"""
 
         models_to_try = [
-            "gemini-3.8-flash",
             "gemini-3.5-flash",
+            "gemini-3.8-flash",
             "gemini-4-argon",
             "gemini-3.1-flash-lite",
             "gemini-flash-latest",
-            "gemini-2.5-flash",
         ]
 
         payload = {
@@ -447,7 +446,7 @@ Respond ONLY with a valid JSON object matching this schema:
             for m in models_to_try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={curr_key}"
                 try:
-                    async with asyncio.timeout(6.0):
+                    async with asyncio.timeout(10.0):
                         async with session.post(url, json=payload) as resp:
                             if resp.status == 200:
                                 data = await resp.json()
@@ -471,12 +470,12 @@ Respond ONLY with a valid JSON object matching this schema:
                                     rotator.mark_invalid(curr_key, err_txt)
                                     key_failed = True
                                     break
-                                if resp.status == 402 or "prepay" in err_txt.lower() or "resource_exhausted" in err_txt.lower():
-                                    rotator.mark_depleted(curr_key, err_txt)
-                                    key_failed = True
-                                    break
                                 if resp.status == 429:
                                     rotator.mark_rate_limited(curr_key, cooldown_seconds=60.0, error_msg=err_txt)
+                                    key_failed = True
+                                    break
+                                if resp.status == 402 or "prepay" in err_txt.lower():
+                                    rotator.mark_depleted(curr_key, err_txt)
                                     key_failed = True
                                     break
                                 if resp.status == 404:
@@ -603,12 +602,18 @@ Respond ONLY with a valid JSON object matching this schema:
         time_str = now_vn.strftime("%H:%M %d/%m/%Y")
 
         gemini_result: Optional[Dict[str, Any]] = None
-        if gemini_api_key and len(gemini_api_key.strip()) > 10:
+        from services.gemini_key_rotator import GeminiKeyRotator
+        rotator = GeminiKeyRotator.get_instance()
+        if not rotator.slots:
+            rotator.load_from_env()
+
+        effective_key = gemini_api_key.strip() if (gemini_api_key and len(gemini_api_key.strip()) > 10) else None
+        if rotator.has_healthy_keys() or effective_key:
             gemini_result = await self._query_gemini_for_macro(
                 headlines=headlines,
                 btc_price=btc_price,
                 btc_change_24h=btc_change_24h,
-                api_key=gemini_api_key.strip(),
+                api_key=effective_key,
             )
 
         if gemini_result:
@@ -617,7 +622,7 @@ Respond ONLY with a valid JSON object matching this schema:
             drivers = gemini_result.get("market_drivers", [])
             strategy = gemini_result.get("top35_strategy", "Tuân thủ kỷ luật dừng lỗ và chốt lời từng phần.")
             risks = gemini_result.get("risk_warnings", "Bảo toàn vốn tuyệt đối, không fomo.")
-            model_used = gemini_result.get("model_used", "Gemini 2.5 Flash")
+            model_used = gemini_result.get("model_used", "Gemini 3.5 Flash")
         else:
             quant_analysis = self._synthesize_quant_macro(
                 headlines=headlines,
