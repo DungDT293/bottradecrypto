@@ -723,7 +723,7 @@ class DedicatedTelegramBot:
             "• 🏛️ <b>35 Top Coin AI:</b> Bảng chọn nhanh 35 coin để triệu tập 5 AI tranh biện\n"
             "• 🚀 <b>Dự Báo Lãi Kép:</b> Lộ trình toán học chinh phục $300 / $500 / $1000 USDT\n"
             "• 🛡️ <b>Kèo Bất Tử (BE):</b> Tự động khóa lãi và chuyển trạng thái 100% Risk-Free\n"
-            "• ⚡ <b>Trạng Thái Hệ Thống:</b> Kiểm tra phiên bản v2.7.0 &amp; đòn bẩy an toàn\n"
+            "• ⚡ <b>Trạng Thái Hệ Thống:</b> Kiểm tra phiên bản v2.8.0 &amp; đòn bẩy an toàn\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "<i>💡 Mẹo: Ngài có thể bấm trực tiếp các nút chọn bên dưới mà không cần gõ lệnh!</i>"
         )
@@ -1640,7 +1640,7 @@ Respond ONLY with valid JSON:
                 key_txt = "⚪ <b>Quant-Sentinel Rule Engine (0ms Fallback)</b>"
 
             text = (
-                "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR v2.7.0 (JARVIS QUANTUM VPS MASTER)</b>\n"
+                "⚡ <b>TRẠNG THÁI HỆ THỐNG SIGNAL EXECUTOR v2.8.0 (JARVIS QUANTUM VPS MASTER)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"• Chế độ giao dịch: <b>{mode} (TIỀN THẬT LIVE)</b>\n"
                 f"• Ferrari Mode: <b>{ferrari_txt}</b>\n"
@@ -2486,7 +2486,7 @@ Instructions:
 
             pos_cnt = len(positions)
             text = (
-                "🦾 <b>[JARVIS ONLINE - KÍCH HOẠT HỆ THỐNG PHÒNG THỦ &amp; TÁC CHIẾN VPS MASTER v2.7.0]</b>\n"
+                "🦾 <b>[JARVIS ONLINE - KÍCH HOẠT HỆ THỐNG PHÒNG THỦ &amp; TÁC CHIẾN VPS MASTER v2.8.0]</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "<i>Chào Ngài Leon! Toàn bộ 5 Đặc Vụ AI và Vệ Binh Rủi Ro đã kết nối trực chiến 24/7 trên sàn Binance Futures.</i>\n\n"
                 "💰 <b>TỔNG QUAN TÀI SẢN:</b>\n"

@@ -251,7 +251,7 @@ def create_api_router(
         # Clean health check: NEVER exposes session token
         return {
             "status": "HEALTHY",
-            "version": "2.7.0",
+            "version": "2.8.0",
             "mode": config.mode.value,
             "live_trading_enabled": config.live_trading_enabled,
             "engine_status": trading_svc.get_engine_status().value,
@@ -1912,11 +1912,15 @@ def create_api_router(
             "Đã nhận yêu cầu tắt an toàn từ tiến trình giám sát.",
             "SUPERVISOR",
         )
+        def _terminate():
+            try:
+                import sys
+                sys.exit(0)
+            finally:
+                os._exit(0)
+
         loop = asyncio.get_running_loop()
-        loop.call_later(
-            0.4,
-            lambda: os.kill(os.getpid(), signal.SIGTERM if os.name != "nt" else signal.SIGINT),
-        )
+        loop.call_later(0.4, _terminate)
         return {"success": True, "message": "Backend đang tắt an toàn..."}
 
     # -------------------------------------------------------------

@@ -1,17 +1,17 @@
-# TELEGRAM BINANCE SIGNAL EXECUTOR (v2.7.0 QUANTUM VPS MASTER)
+# TELEGRAM BINANCE SIGNAL EXECUTOR (v2.8.0 QUANTUM VPS MASTER)
 
-[![Tests Passing](https://img.shields.io/badge/Tests-269%2F269%20PASS%20(100%25)-success?style=for-the-badge&logo=pytest)](file:///e:/TOOL%20DUNG%20CODE/bottradecrypto/tests)
-[![Release Version](https://img.shields.io/badge/Release-v2.7.0%20VPS%20Master-blueviolet?style=for-the-badge&logo=rocket)](docs/RELEASE_NOTES_v2.7.0.md)
+[![Tests Passing](https://img.shields.io/badge/Tests-282%2F282%20PASS%20(100%25)-success?style=for-the-badge&logo=pytest)](file:///e:/TOOL%20DUNG%20CODE/bottradecrypto/tests)
+[![Release Version](https://img.shields.io/badge/Release-v2.8.0%20VPS%20Master-blueviolet?style=for-the-badge&logo=rocket)](docs/RELEASE_NOTES_v2.8.0.md)
 [![Execution Mode](https://img.shields.io/badge/Binance-Futures%20USD--M-F0B90B?style=for-the-badge&logo=binance)](file:///e:/TOOL%20DUNG%20CODE/bottradecrypto/exchange/binance_client.py)
-[![AI Architecture](https://img.shields.io/badge/Dual--AI-Gemini%202.0%20%2B%20Zero--Latency%20Quant-blue?style=for-the-badge&logo=google)](file:///e:/TOOL%20DUNG%20CODE/bottradecrypto/services/gemini_autonomous_trader.py)
+[![AI Architecture](https://img.shields.io/badge/Dual--AI-Gemini%205--Key%20Pool%20(75%20RPM)-blue?style=for-the-badge&logo=google)](file:///e:/TOOL%20DUNG%20CODE/bottradecrypto/services/gemini_autonomous_trader.py)
 
-Hệ thống tự động hóa giao dịch tiền mã hóa cấp định lượng tổ chức (Institutional Crypto Futures Quant System) tích hợp **Dual-AI (Google Gemini 2.0/1.5 Flash Cloud Vision + Hội Đồng Lượng Tử Zero-Latency 356ms)**, tiếp nhận tín hiệu từ các kênh Telegram tinh hoa qua MTProto Telethon cá nhân (Read-Only), và trợ lý tương tác điều phối **Dedicated Jarvis Bot Mark 85** trực chiến 24/7/365 trên Cloud VPS.
+Hệ thống tự động hóa giao dịch tiền mã hóa cấp định lượng tổ chức (Institutional Crypto Futures Quant System) tích hợp **Dual-AI (Google Gemini 3.5 Flash 5-Key Pool 75 RPM + Hội Đồng Lượng Tử Zero-Latency 356ms)**, tiếp nhận tín hiệu từ các kênh Telegram tinh hoa qua MTProto Telethon cá nhân (Read-Only), và trợ lý tương tác điều phối **Dedicated Jarvis Bot Mark 85** trực chiến 24/7/365 trên Cloud VPS.
 
-Phiên bản **v2.7.0 Quantum VPS Master** là cột mốc hoàn thiện sau 7 ngày thực chiến liên tục (19/10 – 26/10/2026), trang bị cơ chế **Zero-Liquidation (Tuyệt đối không thể cháy tài khoản)**, chốt lời 3 tầng **35/35/30**, dời Stop Loss **Kèo Bất Tử (Trailing Breakeven)**, bảng sao kê chi tiết từng cặp coin **Coin-by-Coin PnL Breakdown** chuẩn kế toán sàn Binance, và hệ thống báo cáo chủ động đa tầng qua Telegram: [Sổ tay triển khai VPS](docs/VPS_DEPLOYMENT_GUIDE.md).
+Phiên bản **v2.8.0 Quantum VPS Master** mang đến các bước tiến vượt bậc: **Pool 5 Gemini API Keys xoay vòng 75 RPM**, **AI Audit Vị Thế (`/audit`)**, **Radar Săn Kèo Xác Suất Cao (`/radar`)**, **Hội thoại Tự nhiên Jarvis NLP (`/ask`)**, cơ chế **NSIS Pre-Install Process Killer Hooks** triệt tiêu lỗi khóa ghi đè tệp khi nâng cấp ứng dụng, và bảng sao kê **Coin-by-Coin PnL Breakdown** khớp 100% chuẩn kế toán Binance Futures: [Sổ tay triển khai VPS](docs/VPS_DEPLOYMENT_GUIDE.md).
 
 ---
 
-## 🌟 ĐỘT PHÁ CỐT LÕI TRÊN PHIÊN BẢN v2.7.0
+## 🌟 ĐỘT PHÁ CỐT LÕI TRÊN PHIÊN BẢN v2.8.0
 
 ```mermaid
 flowchart TD
@@ -122,8 +122,8 @@ flowchart TD
 
 | Gói cài đặt | Đường dẫn tệp | Kích thước | Mục đích sử dụng |
 |:---|:---|:---:|:---|
-| **Bộ Cài Windows NSIS (.exe)** | `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_2.7.0_x64-setup.exe` | **97.9 MB** | Khuyên dùng cho Windows PC & Windows VPS. |
-| **Gói Doanh Nghiệp MSI (.msi)**| `desktop/src-tauri/target/release/bundle/msi/telegram-binance-signal-executor_2.7.0_x64_en-US.msi` | **98.8 MB** | Chuẩn Windows Installer tự động nâng cấp. |
+| **Bộ Cài Windows NSIS (.exe)** | `desktop/src-tauri/target/release/bundle/nsis/telegram-binance-signal-executor_2.8.0_x64-setup.exe` | **~98 MB** | Khuyên dùng cho Windows PC & Windows VPS. |
+| **Gói Doanh Nghiệp MSI (.msi)**| `desktop/src-tauri/target/release/bundle/msi/telegram-binance-signal-executor_2.8.0_x64_en-US.msi` | **~99 MB** | Chuẩn Windows Installer tự động nâng cấp. |
 | **Backend Binary Độc Lập** | `dist/backend-x86_64-pc-windows-msvc.exe` | **96.5 MB** | Chạy CLI hoặc làm Windows Background Service. |
 
 ### 2. Triển Khai Nhanh Trên Linux VPS (Ubuntu 22.04 / 24.04):

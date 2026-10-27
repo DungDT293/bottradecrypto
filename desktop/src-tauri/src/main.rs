@@ -8,7 +8,10 @@ use std::io::Write;
 fn kill_stale_backends() {
     use std::process::Command;
     let _ = Command::new("taskkill")
-        .args(&["/F", "/IM", "backend-x86_64-pc-windows-msvc.exe"])
+        .args(&["/F", "/T", "/IM", "backend-x86_64-pc-windows-msvc.exe"])
+        .output();
+    let _ = Command::new("taskkill")
+        .args(&["/F", "/T", "/IM", "backend.exe"])
         .output();
 }
 
@@ -72,6 +75,3 @@ fn main() {
 
     app_lib::run();
 }
-
-
-

@@ -246,6 +246,7 @@ fn spawn_python_backend(root: &Path, data_dir: &Path) -> Result<(Child, BackendI
 fn graceful_shutdown_backend(child_lock: &Arc<Mutex<Option<Child>>>, port_token: Option<(u16, String)>) {
     let mut guard = child_lock.lock().unwrap();
     if let Some(mut child) = guard.take() {
+        let child_pid = child.id();
         // Attempt graceful HTTP shutdown first if port and token are known
         if let Some((port, token)) = port_token {
             let url = format!("http://127.0.0.1:{port}/api/shutdown");
@@ -262,17 +263,29 @@ fn graceful_shutdown_backend(child_lock: &Arc<Mutex<Option<Child>>>, port_token:
                     .output();
             });
 
-            // Wait up to 3 seconds for graceful process exit
+            // Wait up to 2 seconds for graceful process exit
             let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(3) {
+            while start.elapsed() < Duration::from_secs(2) {
                 if let Ok(Some(_)) = child.try_wait() {
                     return;
                 }
-                thread::sleep(Duration::from_millis(150));
+                thread::sleep(Duration::from_millis(100));
             }
         }
 
-        // Force kill if still running after timeout
+        // Force kill tree if still running after timeout
+        #[cfg(target_os = "windows")]
+        {
+            let _ = Command::new("taskkill")
+                .args(&["/F", "/T", "/PID", &child_pid.to_string()])
+                .output();
+            let _ = Command::new("taskkill")
+                .args(&["/F", "/T", "/IM", "backend-x86_64-pc-windows-msvc.exe"])
+                .output();
+            let _ = Command::new("taskkill")
+                .args(&["/F", "/T", "/IM", "backend.exe"])
+                .output();
+        }
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -317,6 +330,16 @@ fn exit_application(state: State<AppState>, _app: tauri::AppHandle) -> Result<()
     };
 
     graceful_shutdown_backend(&state.child_process, current_info);
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill")
+            .args(&["/F", "/T", "/IM", "backend-x86_64-pc-windows-msvc.exe"])
+            .output();
+        let _ = Command::new("taskkill")
+            .args(&["/F", "/T", "/IM", "backend.exe"])
+            .output();
+    }
 
     std::process::exit(0);
 }
@@ -555,6 +578,16 @@ pub fn run() {
                     guard.as_ref().map(|i| (i.port, i.session_token.clone()))
                 };
                 graceful_shutdown_backend(&child_for_shutdown, current_info);
+
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = Command::new("taskkill")
+                        .args(&["/F", "/T", "/IM", "backend-x86_64-pc-windows-msvc.exe"])
+                        .output();
+                    let _ = Command::new("taskkill")
+                        .args(&["/F", "/T", "/IM", "backend.exe"])
+                        .output();
+                }
             }
             _ => {}
         });
