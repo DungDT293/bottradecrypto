@@ -1356,6 +1356,16 @@ class ReconciliationEngine:
             self._daily_target_locked_date = today_str
             self._daily_target_locked_today = False
 
+        # Đồng bộ nhanh thu nhập thực tế từ Binance mỗi 60 giây để đảm bảo chỉ tiêu ngày chuẩn xác
+        now_ts = time.time()
+        if now_ts - getattr(self, "_last_stats_sync_ts", 0.0) > 60.0 and self.client:
+            self._last_stats_sync_ts = now_ts
+            try:
+                from services.stats_service import StatsService
+                await StatsService(self.db).sync_binance_income(self.client, days_back=1)
+            except Exception as e_sync:
+                logger.debug(f"Basket guard periodic stats sync: {e_sync}")
+
         today_realized_pnl = Decimal("0.0")
         try:
             with self.db.get_connection() as conn:

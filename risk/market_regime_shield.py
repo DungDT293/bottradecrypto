@@ -107,14 +107,17 @@ class MarketRegimeShield:
         is_below_emas = (btc_price < ema20_4h) and (btc_price < ema50_4h)
         is_rsi_dump = rsi_1h < 40.0
 
-        if is_below_emas or is_rsi_dump:
+        if is_rsi_dump or (is_below_emas and rsi_1h < 42.0):
             status = "BEARISH_PANIC"
             reasons = []
             if is_below_emas:
                 reasons.append(f"BTC 4H ({btc_price:.1f}) < EMA20 ({ema20_4h:.1f}) & EMA50 ({ema50_4h:.1f})")
-            if is_rsi_dump:
-                reasons.append(f"RSI 1H ({rsi_1h:.1f}) < 40 (Panic)")
+            if is_rsi_dump or rsi_1h < 42.0:
+                reasons.append(f"RSI 1H ({rsi_1h:.1f}) < 42 (Lực bán áp đảo)")
             reason = " | ".join(reasons)
+        elif is_below_emas:
+            status = "BEARISH_CORRECTION"
+            reason = f"BTC 4H dưới EMA20/50 nhưng RSI 1H ({rsi_1h:.1f}) đang hồi phục tích lũy (Cho phép Long thận trọng)"
         elif (btc_price > ema20_4h) and (ema20_4h > ema50_4h) and (rsi_1h >= 50.0):
             status = "BULLISH_TREND"
             reason = f"BTC 4H ({btc_price:.1f}) > EMA20 ({ema20_4h:.1f}) > EMA50 ({ema50_4h:.1f}) và RSI 1H ({rsi_1h:.1f}) >= 50"
@@ -208,7 +211,7 @@ class MarketRegimeShield:
             return None
 
         status = self._cached_regime.get("status", "NEUTRAL")
-        if status == "BEARISH_PANIC" and side_str in ("LONG", "BUY"):
+        if status in ("BEARISH_PANIC", "BEARISH_CORRECTION") and side_str in ("LONG", "BUY"):
             return 18
 
         return None

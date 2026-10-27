@@ -177,7 +177,7 @@ class GeminiAutonomousTrader:
                 if row and row[0]:
                     dt = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
                     reason = str(row[1] or "").upper()
-                    was_loss = "STOP_LOSS" in reason or "SL" in reason or "LOSS" in reason
+                    was_loss = any(k in reason for k in ("STOP_LOSS", "SL", "LOSS", "EARLY", "CUT", "INVALIDATION"))
                     return dt.timestamp(), was_loss
         except Exception as e:
             logger.debug(f"Error querying last closed from DB for {symbol}: {e}")
@@ -1033,10 +1033,10 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
                 mode_label = "Ferrari Mode" if is_ferrari else "Chế độ An Toàn"
                 return {"status": "SKIPPED", "reason": f"Đã đạt hạn mức tối đa {limit} vị thế đồng thời ({active_count}/{limit}) của {mode_label} để bảo toàn ký quỹ"}
 
-            # Directional Exposure Cap (An Toàn: Max 3 cùng chiều; Ferrari: trần mở rộng)
+            # Directional Exposure Cap (Tuyệt đối tối đa 3 cùng chiều để triệt tiêu rủi ro quét râu hàng loạt)
             open_longs = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) > 0])
             open_shorts = len([p for p in (positions or []) if float(p.get("positionAmt", 0)) < 0])
-            max_directional = max(10, limit // 2) if is_ferrari else 3
+            max_directional = 3 if is_ferrari else 2
             if direction == "SHORT" and open_shorts >= max_directional:
                 return {
                     "status": "SKIPPED",
