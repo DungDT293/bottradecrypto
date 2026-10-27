@@ -9,6 +9,8 @@ taskkill /F /IM app.exe >nul 2>&1
 taskkill /F /IM backend.exe >nul 2>&1
 taskkill /F /IM backend-x86_64-pc-windows-msvc.exe >nul 2>&1
 del /F /Q "%LOCALAPPDATA%\com.bottradecrypto.executor\EBWebView\lockfile" >nul 2>&1
+rd /S /Q "%LOCALAPPDATA%\com.bottradecrypto.executor\EBWebView\Default\Cache" >nul 2>&1
+rd /S /Q "%LOCALAPPDATA%\com.bottradecrypto.executor\EBWebView\Default\Code Cache" >nul 2>&1
 ping 127.0.0.1 -n 2 >nul
 
 echo [2/3] Dong bo co so du lieu lich su Telegram va Binance...
