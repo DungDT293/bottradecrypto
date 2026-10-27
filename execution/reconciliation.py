@@ -624,10 +624,10 @@ class ReconciliationEngine:
                                         except Exception:
                                             pass
 
-                            # Check if current SL is already at or better than Breakeven
+                            # Check if current SL is already at or better than Breakeven (0.15% fee buffer)
                             is_at_least_be = False
                             if current_sl_px is not None and entry_p > Decimal("0"):
-                                is_at_least_be = (current_sl_px >= entry_p * Decimal("1.0005")) if is_long else (current_sl_px <= entry_p * Decimal("0.9995"))
+                                is_at_least_be = (current_sl_px >= entry_p * Decimal("1.0015")) if is_long else (current_sl_px <= entry_p * Decimal("0.9985"))
                             if any(o.client_order_id.startswith("be_") and o.status in ("NEW", "PARTIALLY_FILLED") for o in db_orders):
                                 is_at_least_be = True
 
@@ -658,12 +658,12 @@ class ReconciliationEngine:
                                         except Exception:
                                             pass
 
-                                valid_tp1_direction = (tp1_price > entry_p * Decimal("1.002")) if is_long else (tp1_price < entry_p * Decimal("0.998"))
+                                valid_tp1_direction = (tp1_price > entry_p * Decimal("1.003")) if is_long else (tp1_price < entry_p * Decimal("0.997"))
                                 price_reached_tp1 = valid_tp1_direction and ((mark_p >= tp1_price if is_long else mark_p <= tp1_price) if mark_p > Decimal("0") else False)
 
-                            # 4. Breakeven Trigger Condition (TP1 filled OR price reached TP1 OR dynamic gain >= 0.8%)
-                            price_favorable_for_be = (mark_p >= entry_p * Decimal("1.002")) if is_long else (mark_p <= entry_p * Decimal("0.998"))
-                            dynamic_be_gain = price_gain_pct >= Decimal("0.8") and price_favorable_for_be
+                            # 4. Breakeven Trigger Condition (TP1 filled OR price reached TP1 OR dynamic gain >= 1.6% to avoid 15M noise)
+                            price_favorable_for_be = (mark_p >= entry_p * Decimal("1.003")) if is_long else (mark_p <= entry_p * Decimal("0.997"))
+                            dynamic_be_gain = price_gain_pct >= Decimal("1.6") and price_favorable_for_be
                             should_activate_be = (tp1_filled or (price_reached_tp1 and price_favorable_for_be) or dynamic_be_gain)
 
                             if not is_at_least_be and should_activate_be:
@@ -725,23 +725,23 @@ class ReconciliationEngine:
                                 trail_label = "trail_p6"
                                 trail_desc = f"Lợi nhuận tăng trưởng +{price_gain_pct:.2f}%: Đã khóa chặt +3.2% lợi nhuận"
                             elif price_gain_pct >= Decimal("3.0"):
-                                # ROE +30% to +100%: Lock in at least +1.5% profit above entry
-                                target_gain = Decimal("1.5")
+                                # ROE +60% to +100%: Khóa chắc chắn +2.2% lợi nhuận (tiền tươi lớn)
+                                target_gain = Decimal("2.2")
                                 target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
                                 trail_label = "trail_p3"
-                                trail_desc = f"Lợi nhuận tích cực +{price_gain_pct:.2f}%: Đã khóa an toàn +1.5% lợi nhuận"
+                                trail_desc = f"Lợi nhuận tích cực +{price_gain_pct:.2f}%: Đã khóa an toàn +2.2% lợi nhuận"
                             elif price_gain_pct >= Decimal("2.0"):
-                                # ROE +40% to +80%: Lock in at least +1.0% profit above entry
-                                target_gain = Decimal("1.0")
+                                # ROE +40% to +60%: Khóa chắc chắn +1.4% lợi nhuận
+                                target_gain = Decimal("1.4")
                                 target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
                                 trail_label = "trail_p2"
-                                trail_desc = f"Lợi nhuận vững chắc +{price_gain_pct:.2f}%: Đã khóa an toàn +1.0% lợi nhuận"
+                                trail_desc = f"Lợi nhuận vững chắc +{price_gain_pct:.2f}%: Đã khóa an toàn +1.4% lợi nhuận"
                             elif price_gain_pct >= Decimal("1.2"):
-                                # ROE +24% to +48%: Lock in at least +0.5% profit above entry
-                                target_gain = Decimal("0.5")
+                                # ROE +24% to +36%: Khóa chắc chắn +0.8% lợi nhuận (vượt trội hơn phí sàn)
+                                target_gain = Decimal("0.8")
                                 target_trail_px = entry_p * (Decimal("1.0") + target_gain / Decimal("100")) if is_long else entry_p * (Decimal("1.0") - target_gain / Decimal("100"))
                                 trail_label = "trail_p1_2"
-                                trail_desc = f"Lợi nhuận chớm đỉnh +{price_gain_pct:.2f}%: Đã khóa an toàn +0.5% lợi nhuận"
+                                trail_desc = f"Lợi nhuận chớm đỉnh +{price_gain_pct:.2f}%: Đã khóa an toàn +0.8% lợi nhuận"
 
                             # Tier B: TP2 Hit Trailing Lock (Locks TP1 price on remaining volume)
                             if len(tps_raw) >= 2:

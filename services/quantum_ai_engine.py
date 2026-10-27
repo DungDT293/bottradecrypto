@@ -465,9 +465,9 @@ class QuantumAIEngine:
                 sl_dist = max(atr * 1.5, p * 0.02)
                 sl = round_to_tick(p - sl_dist, tick)
                 
-            tp1 = round_to_tick(p + (sl_dist * 0.95), tick)
-            tp2 = round_to_tick(p + (sl_dist * 2.0), tick)
-            tp3 = round_to_tick(p + (sl_dist * 3.5), tick)
+            tp1 = round_to_tick(p + (sl_dist * 1.60), tick)
+            tp2 = round_to_tick(p + (sl_dist * 2.80), tick)
+            tp3 = round_to_tick(p + (sl_dist * 4.50), tick)
 
             safe_lev = min(20, max(10, int(0.75 / (sl_dist / p))))
             
@@ -560,9 +560,9 @@ class QuantumAIEngine:
                 sl_dist = max(atr * 1.5, p * 0.02)
                 sl = round_to_tick(p + sl_dist, tick)
                 
-            tp1 = round_to_tick(p - (sl_dist * 0.95), tick)
-            tp2 = round_to_tick(p - (sl_dist * 2.0), tick)
-            tp3 = round_to_tick(p - (sl_dist * 3.5), tick)
+            tp1 = round_to_tick(p - (sl_dist * 1.60), tick)
+            tp2 = round_to_tick(p - (sl_dist * 2.80), tick)
+            tp3 = round_to_tick(p - (sl_dist * 4.50), tick)
 
             safe_lev = min(20, max(10, int(0.75 / (sl_dist / p))))
             
@@ -628,9 +628,9 @@ class QuantumAIEngine:
                 return None
             sl_dist = max(atr * 1.3, p * 0.018)
             sl = round_to_tick(p - sl_dist, tick)
-            tp1 = round_to_tick(p + (sl_dist * 0.95), tick)
-            tp2 = round_to_tick(p + (sl_dist * 2.0), tick)
-            tp3 = round_to_tick(p + (sl_dist * 3.5), tick)
+            tp1 = round_to_tick(p + (sl_dist * 1.60), tick)
+            tp2 = round_to_tick(p + (sl_dist * 2.80), tick)
+            tp3 = round_to_tick(p + (sl_dist * 4.50), tick)
             conf = 90 if trend_4h == "BULLISH" else 88
             return {
                 "has_setup": True,
@@ -656,9 +656,9 @@ class QuantumAIEngine:
                 return None
             sl_dist = max(atr * 1.3, p * 0.018)
             sl = round_to_tick(p + sl_dist, tick)
-            tp1 = round_to_tick(p - (sl_dist * 0.95), tick)
-            tp2 = round_to_tick(p - (sl_dist * 2.0), tick)
-            tp3 = round_to_tick(p - (sl_dist * 3.5), tick)
+            tp1 = round_to_tick(p - (sl_dist * 1.60), tick)
+            tp2 = round_to_tick(p - (sl_dist * 2.80), tick)
+            tp3 = round_to_tick(p - (sl_dist * 4.50), tick)
             conf = 90 if trend_4h == "BEARISH" else 88
             return {
                 "has_setup": True,
@@ -684,9 +684,9 @@ class QuantumAIEngine:
             if p >= m.get("recent_high", p) * 0.995 and rsi >= 56.0 and ema20 >= ema50 and trend_4h != "BEARISH":
                 sl_dist = max(atr * 1.2, p * 0.018)
                 sl = round_to_tick(p - sl_dist, tick)
-                tp1 = round_to_tick(p + (sl_dist * 0.95), tick)
-                tp2 = round_to_tick(p + (sl_dist * 2.0), tick)
-                tp3 = round_to_tick(p + (sl_dist * 3.5), tick)
+                tp1 = round_to_tick(p + (sl_dist * 1.60), tick)
+                tp2 = round_to_tick(p + (sl_dist * 2.80), tick)
+                tp3 = round_to_tick(p + (sl_dist * 4.50), tick)
                 return {
                     "has_setup": True,
                     "symbol": sym,
@@ -708,9 +708,9 @@ class QuantumAIEngine:
             if p <= m.get("recent_low", p) * 1.005 and rsi <= 44.0 and ema20 <= ema50 and trend_4h != "BULLISH":
                 sl_dist = max(atr * 1.2, p * 0.018)
                 sl = round_to_tick(p + sl_dist, tick)
-                tp1 = round_to_tick(p - (sl_dist * 0.95), tick)
-                tp2 = round_to_tick(p - (sl_dist * 2.0), tick)
-                tp3 = round_to_tick(p - (sl_dist * 3.5), tick)
+                tp1 = round_to_tick(p - (sl_dist * 1.60), tick)
+                tp2 = round_to_tick(p - (sl_dist * 2.80), tick)
+                tp3 = round_to_tick(p - (sl_dist * 4.50), tick)
                 return {
                     "has_setup": True,
                     "symbol": sym,

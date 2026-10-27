@@ -395,8 +395,8 @@ class OrderManager:
         2. Submits new BE Algo SL
         3. Once confirmed, cancels old SL
         """
-        # Calculate BE price including fee buffer
-        fee_mult = self.config.risk.fee_buffer_pct / Decimal("100")
+        # Calculate BE price including fee buffer (minimum 0.15% to guarantee net positive after 0.10% Taker fee)
+        fee_mult = max(Decimal("0.0015"), getattr(self.config.risk, "fee_buffer_pct", Decimal("0.15")) / Decimal("100"))
         if signal.side == PositionSide.LONG:
             be_price = avg_entry_price * (Decimal("1.0") + fee_mult)
         else:

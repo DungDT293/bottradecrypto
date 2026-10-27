@@ -1119,12 +1119,23 @@ If no trade meets >= 80% confidence and R:R >= 2.0, set "has_setup": false and e
             return {"status": "ERROR", "reason": f"Không thể xác minh equity: {exc}"}
         if not equity.is_finite() or equity <= 0:
             return {"status": "ERROR", "reason": "Equity không hợp lệ hoặc bằng 0"}
+        # V2.9 Calibrated Risk Budget: Khống chế rủi ro mỗi lệnh tối đa 1.8% NAV (Ferrari) hoặc 1.2% NAV (An Toàn)
+        # Triệt tiêu hoàn toàn nghịch lý "Lỗ 3$ nhưng Thắng chỉ 0.3$"
         safe_risk = Decimal(str(getattr(getattr(self.config, "risk", None), "risk_per_signal_pct", "1.5"))) / Decimal("100")
-        risk_pct = Decimal("0.05") if is_ferrari else min(Decimal("0.02"), max(Decimal("0.005"), safe_risk))
+        risk_pct = Decimal("0.018") if is_ferrari else min(Decimal("0.012"), max(Decimal("0.006"), safe_risk))
         risk_budget = equity * risk_pct
         dollar_sl_dist = abs(entry_p - sl_p)
         raw_qty = (risk_budget / dollar_sl_dist).quantize(step_size)
         total_qty = max(filter_info.min_qty, raw_qty)
+
+        # Institutional Notional Cap: Small accounts cannot exceed 1.5x NAV (~110$ on 75$ NAV) per position
+        # Triệt hạ vĩnh viễn bẫy SL hẹp nhồi khối lượng khổng lồ như DOGE (270 USDT Notional)
+        max_notional_cap = equity * Decimal("1.50")
+        if total_qty * entry_p > max_notional_cap:
+            clamped_qty = (max_notional_cap / entry_p).quantize(step_size)
+            if clamped_qty >= filter_info.min_qty:
+                total_qty = clamped_qty
+                logger.info(f"🛡️ [INSTITUTIONAL SIZING] Khóa trần vị thế {sym} xuống {total_qty * entry_p:.2f}$ (Trần 1.5x NAV)")
 
         # Ensure notional meets minimum 5 USDT
         if total_qty * entry_p < filter_info.min_notional:

@@ -53,10 +53,10 @@ def calculate_tp_weights(tp_count: int, tp1_pct: Any = Decimal("35.0")) -> List[
 
 
 class RiskPolicy(BaseModel):
-    risk_per_signal_pct: Decimal = Decimal("2.5")
-    max_total_open_risk_pct: Decimal = Decimal("10.0")
-    max_daily_loss_pct: Decimal = Decimal("10.0")
-    max_active_signals: int = 5
+    risk_per_signal_pct: Decimal = Decimal("1.5")
+    max_total_open_risk_pct: Decimal = Decimal("6.0")
+    max_daily_loss_pct: Decimal = Decimal("5.0")
+    max_active_signals: int = 3
     default_leverage: int = 20
     max_leverage: int = 25
     margin_mode: MarginMode = MarginMode.CROSSED
@@ -65,7 +65,7 @@ class RiskPolicy(BaseModel):
     signal_max_age_seconds: int = 300
     entry_order_ttl_seconds: int = 900
     breakeven_after_tp1_default: bool = True
-    fee_buffer_pct: Decimal = Decimal("0.1")
+    fee_buffer_pct: Decimal = Decimal("0.15")
     slippage_buffer_pct: Decimal = Decimal("0.1")
     sl_buffer_pct: Decimal = Decimal("0.3")
     daily_profit_target_enabled: bool = True
